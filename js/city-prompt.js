@@ -193,12 +193,12 @@
           </svg>
         </div>
         <h3 id="lbw-cp-title">Conecta con tu comunidad local</h3>
-        <p class="lbw-cp-sub">Añade tu ciudad al perfil y forma parte de la red de libertad más cercana a ti.</p>
+        <p class="lbw-cp-sub">Añade tu ciudad al perfil y forma parte de la red Bitcoin colombiana más cercana a ti.</p>
         <ul class="lbw-cp-benefits">
-          <li>Encuentra ofertas P2P y productos del mercado cerca de ti.</li>
-          <li>Descubre a otros soberanos de tu zona y coordina encuentros.</li>
-          <li>Accede a misiones, eventos y nodos locales de LiberBit City.</li>
-          <li>Construye comunidad real, no solo digital.</li>
+          <li>Encuentra bitcoiners P2P y eventos cerca de ti.</li>
+          <li>Descubre a otros miembros de ColombiaP2P en tu zona y coordina encuentros.</li>
+          <li>Accede a misiones, eventos y nodos locales de la comunidad.</li>
+          <li>Construye comunidad Bitcoin real, no solo digital.</li>
         </ul>
         <div class="lbw-cp-actions">
           <button class="lbw-cp-btn-primary" data-action="goto">Añadir mi ciudad</button>
