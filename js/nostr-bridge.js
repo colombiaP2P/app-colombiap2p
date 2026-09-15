@@ -587,7 +587,7 @@ const LBW_NostrBridge = (() => {
                     console.log('[Bridge] 🔍 Usuario no encontrado automáticamente, pidiendo nombre...');
                     const userName = prompt(
                         '⚠️ No se encontró tu cuenta automáticamente.\n\n' +
-                        'Si ya tenías cuenta en LiberBit World, escribe tu nombre de usuario exacto para vincular tu identidad.\n\n' +
+                        'Si ya tenías cuenta en ColombiaP2P, escribe tu nombre de usuario exacto para vincular tu identidad.\n\n' +
                         'Si eres nuevo, pulsa Cancelar y usa "Crear Identidad" en su lugar.'
                     );
                     
@@ -880,7 +880,7 @@ const LBW_NostrBridge = (() => {
                 if (LBW_Passlock.hasEncrypted()) {
                     try {
                         const res = await LBW_Passlock.unlockWithPasswordPrompt({
-                            title: '🔓 Desbloquea LiberBit World',
+                            title: '🔓 Desbloquea ColombiaP2P',
                             desc: 'Introduce tu contraseña para descifrar tu identidad Nostr en este navegador.'
                         });
                         if (res && res.logout) { handleLogout(); return false; }
@@ -1591,7 +1591,7 @@ const LBW_NostrBridge = (() => {
                 if (onlyLiberbit) {
                     const ok = confirm(
                         '⚠️ AVISO DE ENTREGA\n\n' +
-                        'Este destinatario solo escucha en relays privados de LiberBit. ' +
+                        'Este destinatario solo escucha en relays privados de ColombiaP2P. ' +
                         'Si NO es miembro autorizado del relay privado, el mensaje no le ' +
                         'llegará — aunque tú lo verás en tu panel.\n\n' +
                         'Pídele que añada un relay público a su NIP-65 (relay.damus.io, ' +
