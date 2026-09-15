@@ -1,1 +1,30 @@
+# Vercel
 .vercel
+
+# Variables de entorno — NUNCA subir al repo
+.env
+.env.local
+.env.*.local
+.env.production
+
+# Dependencias Node (si se instalan localmente para scripts)
+node_modules/
+
+# Logs
+*.log
+npm-debug.log*
+
+# Archivos del sistema operativo
+.DS_Store
+Thumbs.db
+
+# Editores
+.vscode/settings.json
+.idea/
+*.swp
+*.swo
+
+# PocketBase binario y datos locales (si se corre en local)
+pocketbase/pocketbase
+pocketbase/pb_data/
+pocketbase/pb_migrations/
