@@ -1,0 +1,1717 @@
+// ============================================================
+// LiberBit World — Nostr Integration Layer v2.1 (nostr.js)
+// 
+// CHANGES v2.1:
+//   ✅ Private relay relay.liberbitworld.org activated
+//   ✅ Event routing by kind (private vs public relays)
+//   ✅ Private relay health monitoring + auto-reconnect
+//   ✅ NIP-65 auto-publish for new identities
+//
+// CHANGES v2.0:
+//   ✅ SimplePool (nostr-tools) replaces manual WebSocket pool
+//   ✅ Relay separation by event kind (privacy by design)
+//   ✅ validateEvent() + verifyEvent() double validation
+//   ✅ Rate limiting per relay + per pubkey
+//   ✅ Max content size enforcement
+//
+// Provides: Relay Pool, Event Publishing, NIP-04 DMs,
+//           NIP-07 Extension Login, Marketplace (NIP-99),
+//           Identity Metadata (NIP-01 kind 0)
+// Dependencies: nostr-tools v2.7+ (CDN bundle)
+// ============================================================
+
+const LBW_Nostr = (() => {
+    'use strict';
+
+    // ── Relay Configuration ──────────────────────────────────
+    // System relays: defaults when user has no NIP-65 relay list.
+    // PRIVATE: ColombiaP2P infrastructure (governance, DMs, merits)
+    // [C2P FASE 10] relay.colombiap2p.com preparado — activar cuando esté listo
+    const SYSTEM_PRIVATE_RELAYS = [
+        // 'wss://relay.colombiap2p.com',   // ← descomentar cuando el relay esté activo
+        'wss://relay.damus.io',              // fallback público mientras tanto
+        'wss://nos.lol'
+    ];
+
+    // PUBLIC: Community content + profile discovery fallback
+    // TEMPORAL: Usando públicos hasta que los privados estén listos
+    const SYSTEM_PUBLIC_RELAYS = [
+        'wss://relay.damus.io',
+        'wss://nos.lol',
+        'wss://relay.nostr.band',
+        'wss://purplepag.es'
+    ];
+
+    const SYSTEM_ALL_RELAYS = [...SYSTEM_PRIVATE_RELAYS, ...SYSTEM_PUBLIC_RELAYS];
+
+    // ── NIP-65 User Relay State ──────────────────────────────
+    // When user publishes kind 10002, these override system defaults.
+    let _userReadRelays = [];   // URLs the user reads from
+    let _userWriteRelays = [];  // URLs the user writes to
+    let _userRelayListLoaded = false;
+    let _privacyStrict = false; // No public relays ever
+
+    // ── Relay URL Validation ─────────────────────────────────
+    // [M-7] Solo wss:// excepto para localhost/loopback/.local (desarrollo).
+    // Antes se permitía ws:// arbitrario, lo que filtraba metadatos al ISP/MITM
+    // si un usuario añadía un relay ws://attacker.com vía NIP-65.
+    function _validateRelayUrl(url) {
+        if (!url || typeof url !== 'string') return false;
+        if (url.length > 256) return false;
+        // Block dangerous schemes embedded in URL (paranoia anti-XSS).
+        if (/javascript:|data:|blob:/i.test(url)) return false;
+        let parsed;
+        try { parsed = new URL(url); }
+        catch (e) { return false; }
+        const proto = parsed.protocol;
+        if (proto === 'wss:') return true;
+        if (proto === 'ws:') {
+            // Solo permitir ws:// en hosts de desarrollo.
+            const h = parsed.hostname;
+            if (h === 'localhost' || h === '127.0.0.1' || h === '::1' || h.endsWith('.local')) {
+                return true;
+            }
+            console.warn('[Nostr] [M-7] Relay ws:// rechazado en host no-localhost:', url);
+            return false;
+        }
+        return false;
+    }
+
+    // For external backward compatibility
+    const PRIVATE_RELAYS = SYSTEM_PRIVATE_RELAYS;
+    const PUBLIC_RELAYS = SYSTEM_PUBLIC_RELAYS;
+    const ALL_RELAYS = SYSTEM_ALL_RELAYS;
+
+    // ── Event Kinds ──────────────────────────────────────────
+    const EVENT_KINDS = {
+        METADATA:       0,       // NIP-01: User profile metadata
+        TEXT_NOTE:      1,       // NIP-01: Community posts
+        RECOMMEND_RELAY: 2,     // NIP-01: Relay recommendation
+        ENCRYPTED_DM:   4,      // NIP-04/44: Encrypted direct messages
+        DELETE:         5,       // NIP-09: Event deletion
+        REACTION:       7,      // NIP-25: Reactions (likes/zaps)
+        RELAY_LIST:     10002,   // NIP-65: Relay list metadata
+        // NIP-99: Classified listings (marketplace)
+        MARKETPLACE:    30402,
+        // NIP-15: Permanent stalls + products
+        STALL:          30017,
+        PRODUCT:        30018,
+        // LiberBit Governance Kinds
+        LBW_PROPOSAL:   31000,
+        LBW_VOTE:       31001,
+        LBW_MERIT:      31002,
+        LBW_CONTRIB:    31003,
+        LBW_DELEGATE:   31004,
+        LBW_SNAPSHOT:   31005,
+        LBW_CONFIG:     31006,
+        LBW_RESULT:     31010,   // Proposal result tally
+        LBW_EXECUTION:  31011,   // Author execution report
+        LBW_EXEC_VERIFY: 31012,  // Génesis execution verification
+        APP_STATE:      30078,
+        REVIEW:         1985,    // NIP-85: Reviews
+        COMMUNITY:      34550    // NIP-72: Moderated communities (debate per PRP)
+    };
+
+    // ── NIP-65 Relay Routing (dynamic) ───────────────────────
+    // Uses user relay list when available, falls back to system.
+    // Privacy Strict mode disables all public relays.
+
+    function _getUserWriteRelays() {
+        if (_userWriteRelays.length > 0) return [..._userWriteRelays];
+        return [...SYSTEM_PRIVATE_RELAYS];
+    }
+
+    function _getUserReadRelays() {
+        if (_userReadRelays.length > 0) return [..._userReadRelays];
+        if (_privacyStrict) return [...SYSTEM_PRIVATE_RELAYS];
+        return [...SYSTEM_ALL_RELAYS];
+    }
+
+    // ── Private Event Kinds ────────────────────────────────────
+    // These kinds are internal to LiberBit and should ONLY go to private relays.
+    const PRIVATE_KINDS = new Set([
+        EVENT_KINDS.ENCRYPTED_DM,       // 4 — DMs cifrados
+        EVENT_KINDS.LBW_PROPOSAL,       // 31000 — Propuestas de gobernanza
+        EVENT_KINDS.LBW_VOTE,           // 31001 — Votos
+        EVENT_KINDS.LBW_MERIT,          // 31002 — Méritos
+        EVENT_KINDS.LBW_CONTRIB,        // 31003 — Contribuciones
+        EVENT_KINDS.LBW_DELEGATE,       // 31004 — Delegaciones
+        EVENT_KINDS.LBW_SNAPSHOT,       // 31005 — Snapshots
+        EVENT_KINDS.LBW_CONFIG,         // 31006 — Configuración
+        EVENT_KINDS.LBW_RESULT,         // 31010 — Resultados de votación
+        EVENT_KINDS.LBW_EXECUTION,      // 31011 — Ejecución de propuestas
+        EVENT_KINDS.LBW_EXEC_VERIFY,    // 31012 — Verificación de ejecución (Génesis)
+        EVENT_KINDS.APP_STATE           // 30078 — Estado de la app
+    ]);
+
+    // These kinds should go to BOTH private + public relays for discoverability.
+    const PUBLIC_KINDS = new Set([
+        EVENT_KINDS.METADATA,           // 0 — Perfiles (descubribles)
+        EVENT_KINDS.TEXT_NOTE,          // 1 — Posts de comunidad
+        EVENT_KINDS.RELAY_LIST,         // 10002 — NIP-65 relay list
+        EVENT_KINDS.MARKETPLACE,        // 30402 — Marketplace (visibilidad)
+        EVENT_KINDS.STALL,              // 30017 — NIP-15 Tiendas
+        EVENT_KINDS.PRODUCT,            // 30018 — NIP-15 Productos
+        EVENT_KINDS.REVIEW,             // 1985  — NIP-85 Reviews (públicas)
+        // NIP-72 communities: público explícito. Una propuesta admitida
+        // se "expone" como community en relays públicos para que clientes
+        // externos (Coracle, Habla, satellite) puedan descubrir el debate.
+        // Si el autor activa Privacy Strict, el kind:34550 se queda en
+        // privados — decisión consciente del usuario, no del sistema.
+        EVENT_KINDS.COMMUNITY          // 34550 — NIP-72 community per PRP
+    ]);
+
+    function _getRelaysForKind(kind) {
+        const connectedAll = Object.keys(_relayStatusMap).filter(u => _relayStatusMap[u] === 'connected');
+        const connectedPrivate = connectedAll.filter(u => SYSTEM_PRIVATE_RELAYS.includes(u));
+        const connectedPublic = connectedAll.filter(u => !SYSTEM_PRIVATE_RELAYS.includes(u));
+
+        // Privacy Strict: everything to private relays only
+        if (_privacyStrict) {
+            return connectedPrivate.length > 0 ? connectedPrivate : [...SYSTEM_PRIVATE_RELAYS];
+        }
+
+        // Private kinds → ONLY private relay(s).
+        // [SEC-A7] Antes hacía fallback a relays públicos cuando el relay
+        // privado estaba caído, contradiciendo docs/security.md (que jura
+        // que estos kinds nunca tocan público). El comentario decía "data
+        // is encrypted/signed anyway", pero eso solo aplica a DMs (kind 4
+        // cifrado por NIP-04/44); governance (31000-31001), merits
+        // (31002-31003) y resto viajan en claro. Filtraban metadatos.
+        // Ahora devolvemos el catálogo de privados aunque no esté
+        // conectado, dejando que pool.publish intente al vuelo. Si todos
+        // fallan, publishEvent reporta error sin caer a públicos.
+        if (PRIVATE_KINDS.has(kind)) {
+            if (connectedPrivate.length > 0) return connectedPrivate;
+            console.warn(`[Nostr] [SEC-A7] Sin relay privado conectado para kind=${kind}; reintentando en privados, sin fallback público.`);
+            return [...SYSTEM_PRIVATE_RELAYS];
+        }
+
+        // Public kinds → private + public relays (maximum reach)
+        if (PUBLIC_KINDS.has(kind)) {
+            if (connectedAll.length > 0) return connectedAll;
+            return [...SYSTEM_ALL_RELAYS];
+        }
+
+        // Unknown kinds → all connected relays
+        return connectedAll.length > 0 ? connectedAll : [...SYSTEM_ALL_RELAYS];
+    }
+
+    function getRelaysForKind(kind) {
+        return _getRelaysForKind(kind);
+    }
+
+    // ── NIP-65: Relay List Management ────────────────────────
+
+    // Parse kind 10002 event into relay list
+    function _parseRelayListEvent(event) {
+        if (event.kind !== EVENT_KINDS.RELAY_LIST) return [];
+        const relays = [];
+        (event.tags || []).forEach(t => {
+            if (t[0] === 'r' && t[1] && _validateRelayUrl(t[1])) {
+                const mode = t[2] || 'both'; // 'read', 'write', or both
+                relays.push({ url: t[1], mode });
+            }
+        });
+        return relays;
+    }
+
+    // Apply relay list to internal state
+    function _applyRelayList(relays) {
+        _userReadRelays = relays
+            .filter(r => r.mode === 'read' || r.mode === 'both')
+            .map(r => r.url);
+        _userWriteRelays = relays
+            .filter(r => r.mode === 'write' || r.mode === 'both')
+            .map(r => r.url);
+        _userRelayListLoaded = true;
+        console.log(`[Nostr] 📡 NIP-65: ${_userReadRelays.length} read, ${_userWriteRelays.length} write relays`);
+    }
+
+    // Fetch user's relay list from network (used during login)
+    async function fetchRelayList(pubkey) {
+        return new Promise(resolve => {
+            const timeout = setTimeout(() => resolve(null), 5000);
+            let found = false;
+            // Subscribe across ALL relays (need to discover user's list)
+            const sub = subscribe(
+                { kinds: [EVENT_KINDS.RELAY_LIST], authors: [pubkey], limit: 1 },
+                event => {
+                    if (found) return;
+                    found = true;
+                    clearTimeout(timeout);
+                    const relays = _parseRelayListEvent(event);
+                    if (relays.length > 0) {
+                        _applyRelayList(relays);
+                        // Cache in IndexedDB
+                        if (window.LBW_Store) {
+                            LBW_Store.putRelayList(pubkey, relays).catch(() => {});
+                        }
+                    }
+                    resolve(relays);
+                    setTimeout(() => unsubscribe(sub), 200);
+                },
+                () => { clearTimeout(timeout); if (!found) resolve(null); },
+                SYSTEM_ALL_RELAYS  // Must use system relays to discover user's list
+            );
+        });
+    }
+
+    // Load cached relay list from IndexedDB (instant, before network)
+    async function loadCachedRelayList(pubkey) {
+        if (!window.LBW_Store) return null;
+        try {
+            const cached = await LBW_Store.getRelayList(pubkey);
+            if (cached && cached.relays && cached.relays.length > 0) {
+                _applyRelayList(cached.relays);
+                console.log(`[Nostr] 💾 NIP-65 cache: ${cached.relays.length} relays`);
+                return cached.relays;
+            }
+        } catch (e) {}
+        return null;
+    }
+
+    // Publish user's relay list (kind 10002)
+    async function publishRelayList(relays) {
+        // Validate all URLs
+        const valid = relays.filter(r => _validateRelayUrl(r.url));
+        if (valid.length === 0) throw new Error('No hay relays válidos.');
+
+        const tags = valid.map(r => {
+            if (r.mode === 'read') return ['r', r.url, 'read'];
+            if (r.mode === 'write') return ['r', r.url, 'write'];
+            return ['r', r.url]; // both
+        });
+
+        const result = await publishEvent({
+            kind: EVENT_KINDS.RELAY_LIST,
+            content: '',
+            tags
+        });
+
+        // Apply locally
+        _applyRelayList(valid);
+
+        // Cache
+        if (window.LBW_Store && _pubkey) {
+            await LBW_Store.putRelayList(_pubkey, valid).catch(() => {});
+        }
+
+        return result;
+    }
+
+    // Get relay list for another pubkey (for shared relay computation)
+    async function fetchOtherRelayList(pubkey) {
+        // Cache first
+        if (window.LBW_Store) {
+            try {
+                const cached = await LBW_Store.getRelayList(pubkey);
+                if (cached && cached._updated_at > Date.now() - 3600000) {
+                    return cached.relays;
+                }
+            } catch (e) {}
+        }
+
+        // Network
+        return new Promise(resolve => {
+            const timeout = setTimeout(() => resolve(null), 3000);
+            let found = false;
+            const sub = subscribe(
+                { kinds: [EVENT_KINDS.RELAY_LIST], authors: [pubkey], limit: 1 },
+                event => {
+                    if (found) return;
+                    found = true;
+                    clearTimeout(timeout);
+                    const relays = _parseRelayListEvent(event);
+                    if (relays.length > 0 && window.LBW_Store) {
+                        LBW_Store.putRelayList(pubkey, relays).catch(() => {});
+                    }
+                    resolve(relays.length > 0 ? relays : null);
+                    setTimeout(() => unsubscribe(sub), 200);
+                },
+                () => { clearTimeout(timeout); if (!found) resolve(null); },
+                SYSTEM_ALL_RELAYS
+            );
+        });
+    }
+
+    // Compute shared relays between us and a recipient (for DMs)
+    async function _getDMRelaysForRecipient(recipientPubkey) {
+        const myWrite = _getUserWriteRelays();
+
+        // Try to get recipient's relay list (3s timeout)
+        let theirRelays = null;
+        try {
+            theirRelays = await fetchOtherRelayList(recipientPubkey);
+        } catch (e) {}
+
+        if (theirRelays && theirRelays.length > 0) {
+            const theirRead = theirRelays
+                .filter(r => r.mode === 'read' || r.mode === 'both')
+                .map(r => r.url);
+            // Intersection: our write ∩ their read
+            const shared = myWrite.filter(r => theirRead.includes(r));
+            if (shared.length > 0) {
+                console.log(`[Nostr] 🤝 DM shared relays: ${shared.length} (${shared.join(', ')})`);
+                return shared;
+            }
+        }
+
+        // Fallback: our write relays + public relays (DMs are encrypted)
+        if (myWrite.length > 0) return [...new Set([...myWrite, ...SYSTEM_PUBLIC_RELAYS])];
+        return [...SYSTEM_ALL_RELAYS];
+    }
+
+    // ── Privacy Strict Mode ──────────────────────────────────
+    function setPrivacyStrict(enabled) {
+        _privacyStrict = !!enabled;
+        console.log(`[Nostr] ${enabled ? '🔒' : '🌐'} Privacy Strict: ${enabled ? 'ON' : 'OFF'}`);
+        // Emit event for UI to update
+        window.dispatchEvent(new CustomEvent('nostr-privacy-mode', { detail: { strict: _privacyStrict } }));
+    }
+
+    function isPrivacyStrict() { return _privacyStrict; }
+
+    // ── Rate Limiter ─────────────────────────────────────────
+    // Protects against relay spam and malicious event floods.
+    const _rateLimiter = {
+        _relayCounts: {},   // relay -> { count, resetAt }
+        _pubkeyCounts: {},  // pubkey -> { count, resetAt }
+
+        MAX_EVENTS_PER_RELAY_PER_SEC: 500,
+        MAX_EVENTS_PER_PUBKEY_PER_SEC: 500,
+        MAX_CONTENT_BYTES: 64 * 1024,  // 64 KB
+
+        checkRelay(relayUrl) {
+            const now = Date.now();
+            let e = this._relayCounts[relayUrl];
+            if (!e || now > e.resetAt) {
+                e = { count: 0, resetAt: now + 1000 };
+                this._relayCounts[relayUrl] = e;
+            }
+            return ++e.count <= this.MAX_EVENTS_PER_RELAY_PER_SEC;
+        },
+
+        checkPubkey(pubkey) {
+            const now = Date.now();
+            let e = this._pubkeyCounts[pubkey];
+            if (!e || now > e.resetAt) {
+                e = { count: 0, resetAt: now + 1000 };
+                this._pubkeyCounts[pubkey] = e;
+            }
+            return ++e.count <= this.MAX_EVENTS_PER_PUBKEY_PER_SEC;
+        },
+
+        checkContentSize(content) {
+            if (!content) return true;
+            return new TextEncoder().encode(content).length <= this.MAX_CONTENT_BYTES;
+        },
+
+        _cleanupInterval: null,
+        startCleanup() {
+            if (this._cleanupInterval) return;
+            this._cleanupInterval = setInterval(() => {
+                const now = Date.now();
+                for (const k of Object.keys(this._relayCounts)) {
+                    if (now > this._relayCounts[k].resetAt + 5000) delete this._relayCounts[k];
+                }
+                for (const k of Object.keys(this._pubkeyCounts)) {
+                    if (now > this._pubkeyCounts[k].resetAt + 5000) delete this._pubkeyCounts[k];
+                }
+            }, 30000);
+        },
+        stopCleanup() {
+            if (this._cleanupInterval) {
+                clearInterval(this._cleanupInterval);
+                this._cleanupInterval = null;
+            }
+        }
+    };
+
+    // ── Event Validator ──────────────────────────────────────
+    // Double validation: structure (validateEvent) + signature
+    // (verifyEvent) + timestamp clamping + rate limits.
+
+    // Timestamp policy: reject events too far in the past or future.
+    // Prevents cursor-bricking attacks (event with created_at=2040
+    // advances cursor past all real events).
+    const TIMESTAMP_POLICY = {
+        MAX_FUTURE_SKEW_SECS: 600,      // 10 min into the future
+        MAX_PAST_WINDOW_SECS: 365 * 86400  // 1 year into the past
+    };
+
+    function _validateIncomingEvent(event, relayUrl) {
+        const nt = _getNostrTools();
+
+        // 1. Structural validation
+        if (!nt.validateEvent(event)) {
+            console.warn(`[Nostr] ❌ Evento estructuralmente inválido de ${relayUrl}:`, event.id?.substring(0, 8));
+            return false;
+        }
+
+        // 2. Signature verification
+        if (!nt.verifyEvent(event)) {
+            console.warn(`[Nostr] ❌ Firma inválida de ${relayUrl}:`, event.id?.substring(0, 8));
+            return false;
+        }
+
+        // 3. Timestamp clamping: reject out-of-range created_at
+        const nowSecs = Math.floor(Date.now() / 1000);
+        const minTs = nowSecs - TIMESTAMP_POLICY.MAX_PAST_WINDOW_SECS;
+        const maxTs = nowSecs + TIMESTAMP_POLICY.MAX_FUTURE_SKEW_SECS;
+        if (event.created_at < minTs || event.created_at > maxTs) {
+            console.warn(`[Nostr] ⏰ Timestamp fuera de rango (${event.created_at}) de ${relayUrl}: ${event.id?.substring(0, 8)}`);
+            return false;
+        }
+
+        // 4. Rate limit: per relay (exento si es un relay propio del sistema —
+        //    nuestros propios relays no nos van a hacer DoS)
+        const isSystemRelay = SYSTEM_PRIVATE_RELAYS.includes(relayUrl) || relayUrl === 'pool';
+        if (!isSystemRelay && !_rateLimiter.checkRelay(relayUrl)) {
+            console.warn(`[Nostr] ⚠️ Rate limit relay ${relayUrl}`);
+            return false;
+        }
+
+        // 5. Rate limit: per pubkey (exempt own pubkey — own events arrive from multiple feeds)
+        if (event.pubkey !== _pubkey && !_rateLimiter.checkPubkey(event.pubkey)) {
+            console.warn(`[Nostr] ⚠️ Rate limit pubkey ${event.pubkey.substring(0, 8)}`);
+            return false;
+        }
+
+        // 6. Content size
+        if (!_rateLimiter.checkContentSize(event.content)) {
+            console.warn(`[Nostr] ⚠️ Content demasiado grande: ${event.id?.substring(0, 8)}`);
+            return false;
+        }
+
+        return true;
+    }
+
+    // ── State ────────────────────────────────────────────────
+    let _pool = null;              // nostr-tools SimplePool
+    let _privkey = null;           // hex private key (null if NIP-07/NIP-46)
+    let _pubkey = null;            // hex public key
+    let _npub = null;              // bech32 npub
+    let _nsec = null;              // bech32 nsec
+    let _useExtension = false;     // NIP-07 mode
+    let _useRemoteSigner = false;  // NIP-46 mode (bunker remoto)
+    let _profile = {};             // kind 0 metadata
+    let _seenEvents = new Set();   // dedup
+    let _activeSubs = [];          // track for cleanup
+    let _onRelayStatus = null;
+    let _relayStatusMap = {};      // url -> status
+    let _eventCallbacks = {};      // kind -> [callback]
+
+    // ── nostr-tools access ───────────────────────────────────
+    function _getNostrTools() {
+        if (window.NostrTools) return window.NostrTools;
+        if (window.nostrTools) return window.nostrTools;
+        throw new Error('nostr-tools no cargado. Incluye el CDN.');
+    }
+
+    // ── SimplePool Management ────────────────────────────────
+    function _getPool() {
+        if (!_pool) {
+            const nt = _getNostrTools();
+            _pool = new nt.SimplePool();
+        }
+        return _pool;
+    }
+
+    // [NIP-42] Auto-autenticación con relays que envíen AUTH challenge.
+    //
+    // Algunos relays (p.ej. relay.liberbitworld.org con nip42_dms=true) solo
+    // sirven kind 4 a clientes autenticados. nostr-tools maneja el handshake
+    // si configuramos relay._onauth tras pool.ensureRelay(url): cuando llega
+    // ["AUTH", challenge] el relay lo guarda en this.challenge y dispara
+    // este callback. Respondemos con relay.auth(signEvent) que firma kind
+    // 22242 y lo manda al relay.
+    //
+    // Si el usuario no está logueado o el firmado falla (ej. NIP-07 sin
+    // permiso), simplemente loguamos. El relay seguirá filtrando DMs hasta
+    // que el cliente autentique correctamente — ese es el contrato de
+    // NIP-42, no es un bug.
+    async function _setupAuthForRelay(url) {
+        if (!_pool) return;
+        let relay;
+        try { relay = await _pool.ensureRelay(url); }
+        catch (e) { return; }   // relay caído, no es crítico
+        if (!relay || relay._lbwAuthHooked) return;
+        relay._lbwAuthHooked = true;
+        relay._onauth = async (challenge) => {
+            try {
+                if (!isLoggedIn()) {
+                    console.log('[Nostr] [NIP-42] AUTH challenge desde ' + url + ' — no hay sesión, ignorado');
+                    return;
+                }
+                console.log('[Nostr] [NIP-42] 🔐 AUTH challenge desde ' + url);
+                await relay.auth(async (template) => {
+                    return await _signEvent(template);
+                });
+                console.log('[Nostr] [NIP-42] ✅ Autenticado con ' + url);
+                // Tras autenticar, re-emitir las subs de PRIVATE_KINDS porque
+                // las que ya estaban abiertas murieron con CLOSED "auth-required"
+                // antes de que llegara el OK del AUTH. Lo dispatcheamos como
+                // CustomEvent y los módulos (bridge, governance, merits)
+                // re-enrollan sus feeds.
+                window.dispatchEvent(new CustomEvent('nostr-auth-success', {
+                    detail: { relay: url }
+                }));
+            } catch (e) {
+                console.warn('[Nostr] [NIP-42] ❌ AUTH falló con ' + url + ':', e.message);
+            }
+        };
+    }
+
+    function connectToRelays(relayUrls = null) {
+        const pool = _getPool();
+
+        // Determine targets: explicit > user NIP-65 > system defaults
+        let targets;
+        if (relayUrls) {
+            targets = relayUrls;
+        } else if (_userRelayListLoaded && (_userReadRelays.length > 0 || _userWriteRelays.length > 0)) {
+            // Use user's NIP-65 relay list (deduplicated union of read + write)
+            const userAll = [...new Set([..._userReadRelays, ..._userWriteRelays])];
+            if (_privacyStrict) {
+                targets = userAll; // Only user's relays
+            } else {
+                // User relays + system for discovery
+                targets = [...new Set([...userAll, ...SYSTEM_ALL_RELAYS])];
+            }
+        } else {
+            targets = _privacyStrict ? [...SYSTEM_PRIVATE_RELAYS] : [...SYSTEM_ALL_RELAYS];
+        }
+
+        // Validate all URLs
+        targets = targets.filter(url => _validateRelayUrl(url));
+
+        _rateLimiter.startCleanup();
+
+        targets.forEach(url => { _relayStatusMap[url] = 'connecting'; });
+        _emitRelayStatus();
+
+        // Probe each relay to force SimplePool connection
+        const dummyAuthor = _pubkey || '0'.repeat(64);
+        const probeFilter = { kinds: [0], limit: 1, authors: [dummyAuthor] };
+
+        targets.forEach(url => {
+            // [NIP-42] Configurar handler de AUTH antes de cualquier query.
+            // ensureRelay devuelve cached si ya existe, por lo que el handler
+            // sobrevive a reconnects. La promesa NO se await porque no
+            // queremos bloquear el resto de los probes.
+            _setupAuthForRelay(url);
+            try {
+                const sub = pool.subscribeMany(
+                    [url],
+                    [probeFilter],
+                    {
+                        onevent: () => {},
+                        oneose: () => {
+                            _relayStatusMap[url] = 'connected';
+                            _emitRelayStatus();
+                            sub.close();
+                        },
+                        onclose: () => {
+                            if (_relayStatusMap[url] !== 'connected') {
+                                _relayStatusMap[url] = 'disconnected';
+                                _emitRelayStatus();
+                            }
+                        }
+                    }
+                );
+                setTimeout(() => {
+                    if (_relayStatusMap[url] === 'connecting') {
+                        _relayStatusMap[url] = 'timeout';
+                        _emitRelayStatus();
+                        try { sub.close(); } catch (e) {}
+                    }
+                }, 8000);
+            } catch (e) {
+                _relayStatusMap[url] = 'error';
+                _emitRelayStatus();
+            }
+        });
+
+        console.log(`[Nostr] 🔗 SimplePool → ${targets.length} relays`);
+    }
+
+    // ── Private Relay Health Monitor ─────────────────────────
+    // Periodically checks if private relay is connected and reconnects if needed.
+    let _healthCheckInterval = null;
+
+    function _startRelayHealthCheck() {
+        if (_healthCheckInterval) return; // already running
+        _healthCheckInterval = setInterval(() => {
+            const privateConnected = SYSTEM_PRIVATE_RELAYS.some(
+                url => _relayStatusMap[url] === 'connected'
+            );
+            if (!privateConnected && _pubkey) {
+                console.log('[Nostr] 🔄 Relay privado desconectado — reconectando...');
+                // Reconnect only the private relay(s)
+                const pool = _getPool();
+                const dummyAuthor = _pubkey || '0'.repeat(64);
+                const probeFilter = { kinds: [0], limit: 1, authors: [dummyAuthor] };
+                SYSTEM_PRIVATE_RELAYS.forEach(url => {
+                    if (_relayStatusMap[url] === 'connected') return;
+                    _relayStatusMap[url] = 'connecting';
+                    try {
+                        const sub = pool.subscribeMany(
+                            [url], [probeFilter],
+                            {
+                                onevent: () => {},
+                                oneose: () => {
+                                    _relayStatusMap[url] = 'connected';
+                                    _emitRelayStatus();
+                                    console.log(`[Nostr] ✅ Relay privado reconectado: ${url}`);
+                                    sub.close();
+                                },
+                                onclose: () => {
+                                    if (_relayStatusMap[url] !== 'connected') {
+                                        _relayStatusMap[url] = 'disconnected';
+                                        _emitRelayStatus();
+                                    }
+                                }
+                            }
+                        );
+                        setTimeout(() => {
+                            if (_relayStatusMap[url] === 'connecting') {
+                                _relayStatusMap[url] = 'timeout';
+                                _emitRelayStatus();
+                                try { sub.close(); } catch (e) {}
+                            }
+                        }, 8000);
+                    } catch (e) {
+                        _relayStatusMap[url] = 'error';
+                        _emitRelayStatus();
+                    }
+                });
+            }
+        }, 30000); // Check every 30 seconds
+    }
+
+    function _stopRelayHealthCheck() {
+        if (_healthCheckInterval) {
+            clearInterval(_healthCheckInterval);
+            _healthCheckInterval = null;
+        }
+    }
+
+    function disconnectAll() {
+        _activeSubs.forEach(sub => { try { sub.close(); } catch (e) {} });
+        _activeSubs = [];
+        if (_pool) {
+            try { _pool.close(ALL_RELAYS); } catch (e) {}
+            _pool = null;
+        }
+        _relayStatusMap = {};
+        _rateLimiter.stopCleanup();
+        _stopRelayHealthCheck();
+        _emitRelayStatus();
+    }
+
+    function getConnectedRelays() {
+        return Object.keys(_relayStatusMap).filter(u => _relayStatusMap[u] === 'connected');
+    }
+
+    function getRelayStatus() { return { ..._relayStatusMap }; }
+
+    /**
+     * Espera a que al menos un relay privado del sistema esté en estado 'connected'.
+     * Se usa en el bootstrap para evitar la race condition donde las suscripciones
+     * a kinds privados (gobernanza, méritos, DMs) se abren antes de que los
+     * relays privados terminen el handshake WebSocket y caen al fallback público.
+     *
+     * @param {number} timeoutMs - Tiempo máximo de espera. Si vence, resuelve igual
+     *                             para no bloquear el arranque (las subs caerán al
+     *                             fallback público y se imprimirá el warning, que es
+     *                             el comportamiento legacy aceptable).
+     * @returns {Promise<boolean>} true si algún privado conectó dentro del timeout
+     */
+    function waitForPrivateRelay(timeoutMs = 5000) {
+        return new Promise((resolve) => {
+            const isPrivateConnected = () =>
+                SYSTEM_PRIVATE_RELAYS.some(url => _relayStatusMap[url] === 'connected');
+
+            if (isPrivateConnected()) {
+                resolve(true);
+                return;
+            }
+
+            let resolved = false;
+            const finish = (ok) => {
+                if (resolved) return;
+                resolved = true;
+                window.removeEventListener('nostr-relay-status', onChange);
+                clearTimeout(timer);
+                resolve(ok);
+            };
+
+            const onChange = () => {
+                if (isPrivateConnected()) finish(true);
+            };
+            window.addEventListener('nostr-relay-status', onChange);
+
+            const timer = setTimeout(() => {
+                console.warn(`[Nostr] ⏱ waitForPrivateRelay: timeout ${timeoutMs}ms — ningún relay privado conectó a tiempo`);
+                finish(false);
+            }, timeoutMs);
+        });
+    }
+
+    function onRelayStatusChange(cb) { _onRelayStatus = cb; }
+
+    function _emitRelayStatus() {
+        if (_onRelayStatus) _onRelayStatus(getRelayStatus());
+        window.dispatchEvent(new CustomEvent('nostr-relay-status', { detail: getRelayStatus() }));
+    }
+
+    // ── Key Utils ────────────────────────────────────────────
+    function _hexToBytes(hex) {
+        const nt = _getNostrTools();
+        return nt.hexToBytes ? nt.hexToBytes(hex)
+            : new Uint8Array(hex.match(/.{1,2}/g).map(b => parseInt(b, 16)));
+    }
+
+    function _bytesToHex(bytes) {
+        const nt = _getNostrTools();
+        return nt.bytesToHex ? nt.bytesToHex(bytes)
+            : Array.from(bytes).map(b => b.toString(16).padStart(2, '0')).join('');
+    }
+
+    function generateKeypair() {
+        const nt = _getNostrTools();
+        const sk = nt.generateSecretKey();
+        const pk = nt.getPublicKey(sk);
+        return {
+            privkeyHex: _bytesToHex(sk),
+            pubkeyHex: pk,
+            privkeyBytes: sk,
+            nsec: nt.nip19.nsecEncode(sk),
+            npub: nt.nip19.npubEncode(pk)
+        };
+    }
+
+    function importPrivateKey(input) {
+        const nt = _getNostrTools();
+        let skHex, skBytes;
+        input = input.trim();
+
+        if (input.startsWith('nsec1')) {
+            let d;
+            try { d = nt.nip19.decode(input); }
+            catch (e) { throw new Error('nsec inválida: ' + (e.message || 'no decodificable')); }
+            if (!d || d.type !== 'nsec') throw new Error('Se esperaba una nsec1..., recibido tipo ' + (d && d.type));
+            skBytes = d.data;
+            skHex = _bytesToHex(skBytes);
+        } else if (/^[0-9a-fA-F]{64}$/.test(input)) {
+            skHex = input.toLowerCase();
+            skBytes = _hexToBytes(skHex);
+        } else {
+            throw new Error('Formato inválido. Usa nsec1... o hex 64 chars.');
+        }
+
+        // [M-8] Validar que la clave deriva una pubkey Schnorr válida. Sin esto,
+        // un hex aleatorio (p.ej. una pubkey pegada por error pensando que era
+        // nsec, o ruido de un fichero de log) se aceptaba y daba una sesión
+        // "fantasma" con una pubkey distinta de la que el usuario creía.
+        let pk;
+        try {
+            pk = nt.getPublicKey(skBytes);
+        } catch (e) {
+            throw new Error('Clave privada inválida: no genera una pubkey secp256k1 válida (' + (e.message || 'error desconocido') + ')');
+        }
+        if (typeof pk !== 'string' || !/^[0-9a-f]{64}$/.test(pk)) {
+            throw new Error('Clave privada inválida: pubkey derivada con formato inesperado');
+        }
+        return {
+            privkeyHex: skHex, privkeyBytes: skBytes,
+            pubkeyHex: pk,
+            nsec: nt.nip19.nsecEncode(skBytes),
+            npub: nt.nip19.npubEncode(pk)
+        };
+    }
+
+    function pubkeyToNpub(hex) { return _getNostrTools().nip19.npubEncode(hex); }
+    function npubToHex(npub) { return _getNostrTools().nip19.decode(npub).data; }
+
+    // ── Subscriptions (via SimplePool) ───────────────────────
+    function subscribe(filters, onEvent, onEose = null, relayUrls = null) {
+        const pool = _getPool();
+        const filterArr = Array.isArray(filters) ? filters : [filters];
+
+        // Determine target relays
+        let targetRelays;
+        if (relayUrls) {
+            targetRelays = relayUrls;
+        } else {
+            const kinds = filterArr[0]?.kinds;
+            if (kinds && kinds.length > 0) {
+                // Intersection of relay sets for all requested kinds
+                const sets = kinds.map(k => _getRelaysForKind(k));
+                targetRelays = sets.reduce((acc, s) => acc.filter(r => s.includes(r)), sets[0] || ALL_RELAYS);
+                if (targetRelays.length === 0) targetRelays = [...ALL_RELAYS];
+            } else {
+                targetRelays = [...ALL_RELAYS];
+            }
+        }
+
+        const sub = pool.subscribeMany(
+            targetRelays,
+            filterArr,
+            {
+                onevent: (event) => {
+                    // Dedup
+                    if (_seenEvents.has(event.id)) return;
+                    _seenEvents.add(event.id);
+                    if (_seenEvents.size > 10000) {
+                        const arr = [..._seenEvents];
+                        _seenEvents = new Set(arr.slice(-5000));
+                    }
+
+                    // VALIDATE + VERIFY
+                    if (!_validateIncomingEvent(event, 'pool')) return;
+
+                    // Deliver
+                    if (onEvent) onEvent(event, 'pool');
+
+                    // Kind callbacks
+                    (_eventCallbacks[event.kind] || []).forEach(cb => cb(event, 'pool'));
+
+                    // Global dispatch
+                    window.dispatchEvent(new CustomEvent('nostr-event', {
+                        detail: { event, relay: 'pool' }
+                    }));
+                },
+                oneose: () => { if (onEose) onEose(); }
+            }
+        );
+
+        _activeSubs.push(sub);
+        return sub;
+    }
+
+    function unsubscribe(sub) {
+        if (!sub) return;
+        try { sub.close(); } catch (e) {}
+        _activeSubs = _activeSubs.filter(s => s !== sub);
+    }
+
+    function onEventKind(kind, cb) {
+        if (!_eventCallbacks[kind]) _eventCallbacks[kind] = [];
+        _eventCallbacks[kind].push(cb);
+    }
+
+    // ── Event Publishing ─────────────────────────────────────
+    async function publishEvent(eventTemplate, relayUrlsOverride = null) {
+        const pool = _getPool();
+
+        const event = {
+            kind: eventTemplate.kind,
+            created_at: eventTemplate.created_at || Math.floor(Date.now() / 1000),
+            tags: eventTemplate.tags || [],
+            content: eventTemplate.content || '',
+            pubkey: _pubkey
+        };
+
+        if (!_rateLimiter.checkContentSize(event.content)) {
+            throw new Error(`Contenido demasiado grande (máx ${_rateLimiter.MAX_CONTENT_BYTES / 1024} KB).`);
+        }
+
+        const signed = await _signEvent(event);
+        if (!signed) throw new Error('No se pudo firmar el evento.');
+
+        // Route: explicit override > kind-based routing
+        const targetRelays = relayUrlsOverride || _getRelaysForKind(event.kind);
+
+        const results = [];
+        try {
+            const promises = pool.publish(targetRelays, signed);
+            const settled = await Promise.allSettled(promises);
+            settled.forEach((r, i) => {
+                const url = targetRelays[i];
+                if (r.status === 'fulfilled') {
+                    // SimplePool resolves fulfilled when the relay sends `["OK", id, true, ...]`.
+                    // r.value is typically the relay URL; we record success.
+                    results.push({ relay: url, success: true, value: r.value });
+                } else {
+                    // r.reason puede ser string (mensaje OK false del relay), Error, o un
+                    // objeto opaque. Lo capturamos crudo para diagnóstico.
+                    const reasonStr = (r.reason && (r.reason.message || r.reason.toString())) || 'unknown';
+                    results.push({ relay: url, success: false, error: reasonStr });
+                    console.warn(`[Nostr] ❌ Publish rechazado por ${url}: ${reasonStr}`);
+                    if (_relayStatusMap[url] === 'connected') {
+                        // No marcamos disconnected si el rechazo es por contenido (mensaje OK false)
+                        // — el relay sigue accesible, solo rechazó este evento.
+                        const isContentReject = /blocked|invalid|forbidden|not allowed|rate.?limit|policy|pubkey|whitelist/i.test(reasonStr);
+                        if (!isContentReject) {
+                            console.warn(`[Nostr] ⚠️ Relay marcado offline tras fallo de publish: ${url}`);
+                            _relayStatusMap[url] = 'disconnected';
+                        }
+                    }
+                }
+            });
+        } catch (e) {
+            console.warn('[Nostr] Error publicando:', e);
+            targetRelays.forEach(url => {
+                results.push({ relay: url, success: false, error: e.message });
+                if (_relayStatusMap[url] === 'connected') _relayStatusMap[url] = 'disconnected';
+            });
+        }
+
+        let successCount = results.filter(r => r.success).length;
+
+        // [SEC-A7] Fallback público SOLO para kinds NO sensibles. PRIVATE_KINDS
+        // (DMs, governance, merits, etc) y privacy strict NUNCA caen a públicos
+        // — la auditoría detectó que el fallback anterior contradecía la
+        // promesa de privacy en docs/security.md filtrando metadatos a relays
+        // públicos cuando el privado parpadeaba.
+        const isPrivateKind = PRIVATE_KINDS.has(event.kind);
+        const allowPublicFallback = !isPrivateKind && !_privacyStrict;
+
+        if (successCount === 0 && !relayUrlsOverride && allowPublicFallback) {
+            const alreadyTried = new Set(targetRelays);
+            const fallbackRelays = SYSTEM_PUBLIC_RELAYS.filter(url => !alreadyTried.has(url));
+
+            if (fallbackRelays.length > 0) {
+                console.warn(`[Nostr] ⚠️ 0/${targetRelays.length} relays OK. Reintentando en ${fallbackRelays.length} relay(s) públicos...`);
+                try {
+                    const fbPromises = pool.publish(fallbackRelays, signed);
+                    const fbSettled = await Promise.allSettled(fbPromises);
+                    fbSettled.forEach((r, i) => {
+                        results.push({ relay: fallbackRelays[i], success: r.status === 'fulfilled' });
+                    });
+                    successCount = results.filter(r => r.success).length;
+                } catch (e) {
+                    console.warn('[Nostr] Error en fallback público:', e);
+                    fallbackRelays.forEach(url => results.push({ relay: url, success: false, error: e.message }));
+                }
+            }
+        } else if (successCount === 0 && isPrivateKind && !relayUrlsOverride) {
+            // Privacy preserved: no public fallback. Loud error so el caller
+            // pueda informar al usuario y guardar el evento para reintentar
+            // cuando vuelva el relay privado.
+            // Nota: cuando hay relayUrlsOverride (ej. DMs con mezcla pública+privada
+            // calculada por _getDMRelaysForRecipient), el caller ya eligió la lista
+            // a la que quiere publicar, así que no aplicamos la política aquí.
+            console.error(`[Nostr] [SEC-A7] kind=${event.kind} (PRIVATE) no se publicó: 0/${targetRelays.length} relays aceptaron. Sin fallback a relays públicos por política de privacidad.`);
+        }
+
+        console.log(`[Nostr] 📤 kind=${event.kind} → ${successCount}/${results.length} relays OK`);
+        return { event: signed, results };
+    }
+
+    async function _signEvent(eventTemplate) {
+        const nt = _getNostrTools();
+        // NIP-46: cada firma va al bunker remoto. Sin pubkey local, no
+        // podemos fallback a nada — si el bunker está caído, error explícito.
+        if (_useRemoteSigner && window.LBW_NIP46 && window.LBW_NIP46.isConnected()) {
+            return await window.LBW_NIP46.signEvent(eventTemplate);
+        }
+        if (_useExtension && window.nostr) {
+            return await window.nostr.signEvent(eventTemplate);
+        } else if (_privkey) {
+            return nt.finalizeEvent(eventTemplate, _hexToBytes(_privkey));
+        }
+        throw new Error('No hay método de firma.');
+    }
+
+    // ── Auth / Identity ──────────────────────────────────────
+    // Login flow: set keys → load cached relay list → connect →
+    // fetch profile → fetch network relay list → reconnect if changed
+
+    async function loginWithExtension() {
+        if (!window.nostr) throw new Error('No se detectó extensión Nostr (NIP-07).');
+        const pubkey = await window.nostr.getPublicKey();
+        _pubkey = pubkey;
+        _npub = pubkeyToNpub(pubkey);
+        _useExtension = true;
+        _useRemoteSigner = false;
+        _privkey = null;
+        _nsec = null;
+
+        // 1. Load cached relay list (instant)
+        await loadCachedRelayList(pubkey);
+        // 2. Connect to relays (using cached or system defaults)
+        connectToRelays();
+        _startRelayHealthCheck();
+        // 3. Fetch profile
+        await _fetchProfile(pubkey);
+        // 4. Fetch network relay list (may trigger reconnect)
+        fetchRelayList(pubkey).then(relays => {
+            if (relays && relays.length > 0) {
+                // Reconnect with updated relay list
+                connectToRelays();
+            }
+        }).catch(() => {});
+
+        return { pubkeyHex: pubkey, npub: _npub, profile: _profile, method: 'extension' };
+    }
+
+    // ── NIP-46 (Remote signer / bunker) ──────────────────────
+    // Conecta con un bunker remoto pegando su bunker://<pubkey>?relay=...&secret=...
+    // La nsec del usuario nunca llega al navegador: cada firma viaja al bunker.
+    // Session-only: nada se persiste; al recargar, el usuario reconecta.
+    async function loginWithBunker(bunkerUri, opts) {
+        if (!window.LBW_NIP46) throw new Error('Módulo NIP-46 no cargado');
+        await window.LBW_NIP46.connect(bunkerUri, opts || {});
+        return await loginWithConnectedSigner();
+    }
+
+    // Variante para cuando LBW_NIP46 ya está conectado (p.ej. tras flujo
+    // QR nostrconnect:// o connectInteractive). Sincroniza el estado de
+    // nostr.js (pubkey, perfil, relays) leyendo de LBW_NIP46.getUserPubkey().
+    async function loginWithConnectedSigner() {
+        if (!window.LBW_NIP46 || !window.LBW_NIP46.isConnected()) {
+            throw new Error('NIP-46: no hay signer remoto conectado');
+        }
+        const userPubkeyHex = window.LBW_NIP46.getUserPubkey();
+        if (!userPubkeyHex || !/^[0-9a-f]{64}$/.test(userPubkeyHex)) {
+            throw new Error('NIP-46: pubkey del usuario inválida');
+        }
+        _pubkey = userPubkeyHex;
+        _npub = pubkeyToNpub(userPubkeyHex);
+        _useRemoteSigner = true;
+        _useExtension = false;
+        _privkey = null;
+        _nsec = null;
+
+        // 1. Load cached relay list (instant)
+        await loadCachedRelayList(userPubkeyHex);
+        // 2. Connect to relays (using cached or system defaults)
+        connectToRelays();
+        _startRelayHealthCheck();
+        // 3. Fetch profile
+        await _fetchProfile(userPubkeyHex);
+        // 4. Fetch network relay list (may trigger reconnect)
+        fetchRelayList(userPubkeyHex).then(rl => {
+            if (rl && rl.length > 0) connectToRelays();
+        }).catch(() => {});
+
+        return {
+            pubkeyHex: userPubkeyHex,
+            npub: _npub,
+            profile: _profile,
+            method: 'bunker',
+            bunkerPubkey: window.LBW_NIP46.getBunkerPubkey(),
+            bunkerRelays: window.LBW_NIP46.getBunkerRelays(),
+            mode: window.LBW_NIP46.getMode ? window.LBW_NIP46.getMode() : 'bunker'
+        };
+    }
+
+    function loginWithPrivateKey(input) {
+        const keys = importPrivateKey(input);
+        _privkey = keys.privkeyHex;
+        _pubkey = keys.pubkeyHex;
+        _npub = keys.npub;
+        _nsec = keys.nsec;
+        _useExtension = false;
+        _useRemoteSigner = false;
+
+        // Load cached relay list synchronously-ish
+        loadCachedRelayList(keys.pubkeyHex).then(() => {
+            connectToRelays();
+            _startRelayHealthCheck();
+            _fetchProfile(keys.pubkeyHex);
+            fetchRelayList(keys.pubkeyHex).then(relays => {
+                if (relays && relays.length > 0) connectToRelays();
+            }).catch(() => {});
+        }).catch(() => {
+            connectToRelays();
+            _startRelayHealthCheck();
+            _fetchProfile(keys.pubkeyHex);
+        });
+
+        return { pubkeyHex: keys.pubkeyHex, npub: keys.npub, nsec: keys.nsec, method: 'privatekey' };
+    }
+
+    async function createIdentity(displayName) {
+        const keys = generateKeypair();
+        _privkey = keys.privkeyHex;
+        _pubkey = keys.pubkeyHex;
+        _npub = keys.npub;
+        _nsec = keys.nsec;
+        _useExtension = false;
+        _useRemoteSigner = false;
+
+        connectToRelays();
+        _startRelayHealthCheck();
+
+        const metadata = {
+            name: displayName || 'Anon',
+            display_name: displayName || 'Anon',
+            about: 'Ciudadano de LiberBit World 🌐',
+            picture: '', lud16: '', nip05: '', banner: '', website: '',
+            lbw_citizenship: 'E-Residency',
+            lbw_city: '',
+            lbw_joined: new Date().toISOString()
+        };
+
+        await new Promise(r => setTimeout(r, 2000));
+        try {
+            await publishEvent({ kind: EVENT_KINDS.METADATA, content: JSON.stringify(metadata), tags: [] });
+        } catch (e) {
+            console.warn('[Nostr] Perfil no publicado (se reintentará):', e.message);
+        }
+        _profile = metadata;
+
+        // Publish default NIP-65 relay list for new identity
+        // Private relay: read+write. Public relays: read only (discovery).
+        try {
+            const defaultRelayList = [
+                ...SYSTEM_PRIVATE_RELAYS.map(url => ({ url, mode: 'both' })),
+                ...SYSTEM_PUBLIC_RELAYS.slice(0, 2).map(url => ({ url, mode: 'read' }))
+            ];
+            await publishRelayList(defaultRelayList);
+            console.log('[Nostr] 📡 NIP-65 relay list publicada para nueva identidad');
+        } catch (e) {
+            console.warn('[Nostr] NIP-65 relay list no publicada:', e.message);
+        }
+
+        return {
+            privkeyHex: keys.privkeyHex, pubkeyHex: keys.pubkeyHex,
+            npub: keys.npub, nsec: keys.nsec, profile: metadata, method: 'created'
+        };
+    }
+
+    function logout() {
+        // NIP-46: cerrar conexión con el bunker antes de tirar relays.
+        if (_useRemoteSigner && window.LBW_NIP46) {
+            try { window.LBW_NIP46.disconnect(); } catch (_) {}
+        }
+        disconnectAll();
+        _privkey = null; _pubkey = null; _npub = null; _nsec = null;
+        _useExtension = false; _useRemoteSigner = false; _profile = {};
+        _seenEvents.clear(); _eventCallbacks = {};
+        // NIP-65 state
+        _userReadRelays = []; _userWriteRelays = [];
+        _userRelayListLoaded = false;
+    }
+
+    // ── Profile (Kind 0) ────────────────────────────────────
+    async function _fetchProfile(pubkey) {
+        return new Promise(resolve => {
+            const timeout = setTimeout(() => resolve(null), 6000);
+            const sub = subscribe(
+                { kinds: [0], authors: [pubkey], limit: 1 },
+                event => {
+                    clearTimeout(timeout);
+                    try { _profile = JSON.parse(event.content); } catch (e) { _profile = {}; }
+                    resolve(_profile);
+                    setTimeout(() => unsubscribe(sub), 200);
+                },
+                () => { clearTimeout(timeout); resolve(_profile); }
+            );
+        });
+    }
+
+    async function updateProfile(metadata) {
+        const current = { ..._profile, ...metadata };
+        const result = await publishEvent({ kind: EVENT_KINDS.METADATA, content: JSON.stringify(current), tags: [] });
+        _profile = current;
+        return result;
+    }
+
+    async function fetchUserProfile(pubkey) {
+        return new Promise(resolve => {
+            const timeout = setTimeout(() => resolve(null), 6000);
+            let found = false;
+            const sub = subscribe(
+                { kinds: [0], authors: [pubkey], limit: 1 },
+                event => {
+                    if (found) return;
+                    found = true;
+                    clearTimeout(timeout);
+                    try { resolve(JSON.parse(event.content)); } catch (e) { resolve(null); }
+                    setTimeout(() => unsubscribe(sub), 200);
+                },
+                () => { clearTimeout(timeout); if (!found) resolve(null); }
+            );
+        });
+    }
+
+    // ── Community Chat (Kind 1) ──────────────────────────────
+    function subscribeCommunityChat(onMessage, since = null) {
+        const filter = { kinds: [EVENT_KINDS.TEXT_NOTE], '#t': ['liberbit', 'lbw'], limit: 50 };
+        if (since) filter.since = since;
+
+        return subscribe(filter, event => {
+            onMessage({
+                id: event.id,
+                pubkey: event.pubkey,
+                npub: pubkeyToNpub(event.pubkey),
+                content: event.content,
+                created_at: event.created_at,
+                tags: event.tags,
+                isReply: event.tags.some(t => t[0] === 'e'),
+                replyTo: (event.tags.find(t => t[0] === 'e') || [])[1] || null
+            });
+        });
+    }
+
+    async function publishCommunityMessage(content, replyToEventId = null, replyToAuthorPubkey = null) {
+        const tags = [['t', 'liberbit'], ['t', 'lbw'], ['client', 'LiberBit World']];
+        if (replyToEventId) tags.push(['e', replyToEventId, '', 'reply']);
+        if (replyToAuthorPubkey) tags.push(['p', replyToAuthorPubkey]);
+        return publishEvent({ kind: EVENT_KINDS.TEXT_NOTE, content, tags });
+    }
+
+    // ── Encrypted DMs (NIP-44 preferred, NIP-04 fallback) ───
+    // Encryption: try NIP-44 first → fallback NIP-04
+    // Relay routing: shared relays (NIP-65) → user write → system private
+    // Tags: includes ["v","2"] when using NIP-44 for forward compat
+
+    function _supportsNIP44() {
+        // NIP-46: depende de lo que el bunker anuncie
+        if (_useRemoteSigner && window.LBW_NIP46 && window.LBW_NIP46.isConnected()) {
+            return window.LBW_NIP46.hasNip44();
+        }
+        // Check if extension supports NIP-44
+        if (_useExtension && window.nostr?.nip44) return true;
+        // Check if nostr-tools has nip44 module
+        try {
+            const nt = _getNostrTools();
+            if (nt.nip44) return true;
+        } catch (e) {}
+        return false;
+    }
+
+    function subscribeDirectMessages(onMessage) {
+        // DMs are encrypted (NIP-44/NIP-04), so subscribing on public
+        // relays doesn't leak content. We need to listen broadly because
+        // the sender publishes to shared relays (our write ∩ their read).
+        const dmRelays = _getUserWriteRelays().length > 0
+            ? [...new Set([..._getUserWriteRelays(), ...SYSTEM_PUBLIC_RELAYS])]
+            : [...SYSTEM_ALL_RELAYS];
+
+        console.log('[Nostr] 📬 DM subscription → ' + dmRelays.length + ' relays');
+
+        const subIn = subscribe(
+            { kinds: [EVENT_KINDS.ENCRYPTED_DM], '#p': [_pubkey], limit: 100 },
+            async event => {
+                const decrypted = await _decryptDM(event);
+                if (decrypted) onMessage({
+                    id: event.id, from: event.pubkey, fromNpub: pubkeyToNpub(event.pubkey),
+                    to: _pubkey, content: decrypted, created_at: event.created_at,
+                    direction: 'incoming', nip44: _isNIP44Event(event)
+                });
+            },
+            null,
+            dmRelays
+        );
+
+        const subOut = subscribe(
+            { kinds: [EVENT_KINDS.ENCRYPTED_DM], authors: [_pubkey], limit: 100 },
+            async event => {
+                const rTag = event.tags.find(t => t[0] === 'p');
+                if (!rTag) return;
+                const decrypted = await _decryptDM(event);
+                if (decrypted) onMessage({
+                    id: event.id, from: _pubkey, fromNpub: _npub,
+                    to: rTag[1], content: decrypted, created_at: event.created_at,
+                    direction: 'outgoing', nip44: _isNIP44Event(event)
+                });
+            },
+            null,
+            dmRelays
+        );
+
+        return { subIn, subOut };
+    }
+
+    async function sendDirectMessage(recipientHex, plaintext) {
+        // Smart relay routing: shared relays → user write → system private
+        const dmRelays = await _getDMRelaysForRecipient(recipientHex);
+
+        const encrypted = await _encryptDM(recipientHex, plaintext);
+        const tags = [['p', recipientHex]];
+
+        // Tag NIP-44 messages for forward compatibility
+        if (encrypted._nip44) {
+            tags.push(['v', '2']);
+        }
+
+        // Pass dmRelays as explicit override to publishEvent
+        return publishEvent({
+            kind: EVENT_KINDS.ENCRYPTED_DM,
+            content: encrypted.ciphertext,
+            tags
+        }, dmRelays);
+    }
+
+    function _isNIP44Event(event) {
+        return event.tags.some(t => t[0] === 'v' && t[1] === '2');
+    }
+
+    // Encrypt: NIP-44 preferred → NIP-04 fallback
+    async function _encryptDM(recipientPubkey, plaintext) {
+        const nt = _getNostrTools();
+
+        // NIP-46: delegar al bunker (preferir NIP-44 si lo soporta)
+        if (_useRemoteSigner && window.LBW_NIP46 && window.LBW_NIP46.isConnected()) {
+            if (window.LBW_NIP46.hasNip44()) {
+                try {
+                    const ct = await window.LBW_NIP46.nip44Encrypt(recipientPubkey, plaintext);
+                    return { ciphertext: ct, _nip44: true };
+                } catch (e) {
+                    console.warn('[Nostr] NIP-44 remoto falló, fallback a NIP-04:', e.message);
+                }
+            }
+            const ct = await window.LBW_NIP46.nip04Encrypt(recipientPubkey, plaintext);
+            return { ciphertext: ct, _nip44: false };
+        }
+
+        // Try NIP-44 first
+        if (_useExtension && window.nostr?.nip44) {
+            try {
+                const ct = await window.nostr.nip44.encrypt(recipientPubkey, plaintext);
+                return { ciphertext: ct, _nip44: true };
+            } catch (e) {
+                console.warn('[Nostr] NIP-44 extension falló, fallback a NIP-04:', e.message);
+            }
+        }
+
+        if (!_useExtension && _privkey && nt.nip44) {
+            try {
+                const skBytes = _hexToBytes(_privkey);
+                const conversationKey = nt.nip44.v2.utils.getConversationKey(skBytes, recipientPubkey);
+                const ct = nt.nip44.v2.encrypt(plaintext, conversationKey);
+                return { ciphertext: ct, _nip44: true };
+            } catch (e) {
+                console.warn('[Nostr] NIP-44 local falló, fallback a NIP-04:', e.message);
+            }
+        }
+
+        // Fallback: NIP-04
+        if (_useExtension && window.nostr?.nip04) {
+            const ct = await window.nostr.nip04.encrypt(recipientPubkey, plaintext);
+            return { ciphertext: ct, _nip44: false };
+        }
+        if (_privkey) {
+            const ct = await nt.nip04.encrypt(_hexToBytes(_privkey), recipientPubkey, plaintext);
+            return { ciphertext: ct, _nip44: false };
+        }
+
+        throw new Error('No se puede cifrar: no hay clave disponible.');
+    }
+
+    // Decrypt: try NIP-44 first if supported, fallback NIP-04.
+    // Tag ["v","2"] is used as optimization hint, NOT as hard gate.
+    // This handles: NIP-44 messages without tag, broken tags,
+    // intermediate clients, etc.
+    async function _decryptDM(event) {
+        const nt = _getNostrTools();
+        const rTag = event.tags.find(t => t[0] === 'p');
+        const other = event.pubkey === _pubkey ? (rTag ? rTag[1] : null) : event.pubkey;
+        if (!other) return null;
+
+        // NIP-46: delegar al bunker. Cada mensaje pide aprobación al
+        // signer remoto — el usuario debe marcar "siempre permitir" para
+        // descifrado, o el chat de DMs será inutilizable.
+        if (_useRemoteSigner && window.LBW_NIP46 && window.LBW_NIP46.isConnected()) {
+            const hasV2 = _isNIP44Event(event);
+            if (hasV2 && window.LBW_NIP46.hasNip44()) {
+                try {
+                    return await window.LBW_NIP46.nip44Decrypt(other, event.content);
+                } catch (e44) {
+                    console.warn('[Nostr] NIP-44 remoto decrypt falló, intento NIP-04:', e44.message);
+                }
+            }
+            try {
+                return await window.LBW_NIP46.nip04Decrypt(other, event.content);
+            } catch (e04) {
+                if (window.LBW_NIP46.hasNip44() && !hasV2) {
+                    // Sin tag v=2 podría ser nip44 sin etiquetar — un último intento
+                    try { return await window.LBW_NIP46.nip44Decrypt(other, event.content); }
+                    catch (_) {}
+                }
+                console.warn('[Nostr] NIP-46 decrypt falló:', e04.message);
+                return '[Mensaje cifrado — el bunker rechazó descifrarlo]';
+            }
+        }
+
+        const hasV2Tag = _isNIP44Event(event);
+        const hasNip44Support = (_useExtension && window.nostr?.nip44) || (!_useExtension && _privkey && nt.nip44);
+
+        // Strategy: if we have NIP-44 support, always try it first
+        // (whether or not the tag says v=2). Then fallback to NIP-04.
+        // If we DON'T have NIP-44 support, go straight to NIP-04.
+
+        if (hasNip44Support) {
+            // Try NIP-44 first
+            try {
+                if (_useExtension && window.nostr?.nip44) {
+                    return await window.nostr.nip44.decrypt(other, event.content);
+                }
+                if (_privkey && nt.nip44) {
+                    const skBytes = _hexToBytes(_privkey);
+                    const conversationKey = nt.nip44.v2.utils.getConversationKey(skBytes, other);
+                    return nt.nip44.v2.decrypt(event.content, conversationKey);
+                }
+            } catch (e44) {
+                // NIP-44 failed — try NIP-04 as fallback
+                if (!hasV2Tag) {
+                    // No v=2 tag: likely a NIP-04 message, normal fallthrough
+                } else {
+                    console.warn('[Nostr] NIP-44 decrypt falló con tag v=2, intentando NIP-04:', e44.message);
+                }
+            }
+        }
+
+        // NIP-04 fallback (or primary if no NIP-44 support)
+        try {
+            if (_useExtension && window.nostr?.nip04) {
+                return await window.nostr.nip04.decrypt(other, event.content);
+            }
+            if (_privkey) {
+                return await nt.nip04.decrypt(_hexToBytes(_privkey), other, event.content);
+            }
+        } catch (e04) {
+            console.warn('[Nostr] Error descifrando DM (NIP-04):', e04.message);
+            return '[Mensaje cifrado — no se puede descifrar]';
+        }
+
+        return null;
+    }
+
+    // ── Marketplace (NIP-99, Kind 30402) ─────────────────────
+    function subscribeMarketplace(onListing, since = null) {
+        const filter = { kinds: [EVENT_KINDS.MARKETPLACE], '#t': ['liberbit-market'], limit: 50 };
+        if (since) filter.since = since;
+        return subscribe(filter, event => {
+            const l = _parseMarketplaceListing(event);
+            if (l) onListing(l);
+        });
+    }
+
+    function _parseMarketplaceListing(event) {
+        try {
+            const g = name => (event.tags.find(t => t[0] === name) || [])[1] || '';
+            const dTag = g('d');
+            if (!dTag) console.warn(`[Nostr] ⚠️ Listing sin d-tag: ${event.id?.substring(0, 8)}`);
+
+            // Extract multi-URL media (from LBW_Media.buildImageTags format)
+            const imageUrls = [];
+            let sha256 = null, mime = null, size = null;
+            (event.tags || []).forEach(t => {
+                if ((t[0] === 'image' || t[0] === 'thumb') && t[1]) {
+                    if (!imageUrls.includes(t[1])) imageUrls.push(t[1]);
+                }
+                if ((t[0] === 'x' || t[0] === 'sha256') && t[1]) sha256 = t[1];
+                if (t[0] === 'm' && t[1]) mime = t[1];
+                if (t[0] === 'size' && t[1]) size = parseInt(t[1], 10) || null;
+            });
+
+            return {
+                id: event.id, pubkey: event.pubkey, npub: pubkeyToNpub(event.pubkey),
+                title: g('title') || g('subject') || 'Sin título',
+                description: event.content,
+                category: g('category') || 'servicios',
+                price: g('price') || 'A negociar',
+                currency: g('currency') || 'sats',
+                emoji: g('emoji') || '🏪',
+                // Media: primary URL + full fallback array
+                image: imageUrls[0] || '',
+                imageUrls,
+                sha256, mime, size,
+                location: g('location') || '',
+                status: g('status') || 'active',
+                created_at: event.created_at,
+                tags: event.tags,
+                dTag
+            };
+        } catch (e) {
+            console.warn('[Nostr] Error parseando listing:', e);
+            return null;
+        }
+    }
+
+    async function publishMarketplaceListing(listing) {
+        const dTag = listing.dTag || `lbw-${_pubkey.substring(0, 8)}-${Date.now()}`;
+
+        const tags = [
+            ['d', dTag],
+            ['title', listing.title || ''],
+            ['subject', listing.title || ''],
+            ['category', listing.category || 'servicios'],
+            ['price', String(listing.price || 'A negociar')],
+            ['currency', listing.currency || 'sats'],
+            ['emoji', listing.emoji || '🏪'],
+            ['status', listing.status || 'active'],
+            ['t', 'liberbit-market'], ['t', 'lbw'], ['t', listing.category || 'servicios'],
+            ['client', 'LiberBit World']
+        ];
+
+        // Fase 1: precio estructurado — frecuencia
+        if (listing.priceFreq) tags.push(['price-freq', listing.priceFreq]);
+
+        // Fase 1: subcategoría
+        if (listing.subcategory && listing.subcategory !== 'general') {
+            tags.push(['t', listing.subcategory]);
+        }
+
+        // Fase 1: expiración automática
+        if (listing.expiration && listing.expiration > 0) {
+            tags.push(['expiration', String(listing.expiration)]);
+        }
+
+        // Media tags: multi-URL + SHA-256 integrity
+        if (listing.mediaTags && listing.mediaTags.length > 0) {
+            // Built by LBW_Media.buildImageTags()
+            listing.mediaTags.forEach(t => tags.push(t));
+        } else {
+            // Legacy single-URL fallback
+            if (listing.image) tags.push(['image', listing.image]);
+            if (listing.thumb) tags.push(['thumb', listing.thumb]);
+        }
+
+        if (listing.location) tags.push(['location', listing.location]);
+
+        // Fase 1: tags extra genéricos (ej. hashtags libres)
+        if (listing.extraTags && Array.isArray(listing.extraTags)) {
+            listing.extraTags.forEach(t => tags.push(t));
+        }
+
+        return publishEvent({ kind: EVENT_KINDS.MARKETPLACE, content: listing.description || '', tags });
+    }
+
+    async function deleteMarketplaceListing(eventId) {
+        return publishEvent({ kind: EVENT_KINDS.DELETE, content: 'Oferta eliminada', tags: [['e', eventId]] });
+    }
+
+    // ── Reactions ────────────────────────────────────────────
+    async function reactToEvent(eventId, pubkey, reaction = '+') {
+        return publishEvent({ kind: EVENT_KINDS.REACTION, content: reaction, tags: [['e', eventId], ['p', pubkey]] });
+    }
+
+    function subscribeToReactions(onReaction) {
+        if (!_pubkey) return null;
+        return subscribe(
+            { kinds: [EVENT_KINDS.REACTION], '#p': [_pubkey], limit: 100 },
+            event => {
+                onReaction({
+                    id: event.id,
+                    pubkey: event.pubkey,
+                    content: event.content,
+                    created_at: event.created_at,
+                    eventId: (event.tags.find(t => t[0] === 'e') || [])[1] || null,
+                });
+            }
+        );
+    }
+
+    // ── Governance ───────────────────────────────────────────
+    async function publishProposal(proposal) {
+        const dTag = `proposal-${Date.now()}`;
+        return publishEvent({
+            kind: EVENT_KINDS.LBW_PROPOSAL,
+            content: JSON.stringify({
+                description: proposal.description,
+                options: proposal.options || ['A favor', 'En contra', 'Abstención']
+            }),
+            tags: [
+                ['d', dTag], ['title', proposal.title],
+                ['category', proposal.category || 'general'], ['status', 'active'],
+                ['expires', String(proposal.expiresAt || Math.floor(Date.now() / 1000) + 7 * 86400)],
+                ['t', 'lbw-governance'], ['t', 'lbw-proposal'], ['client', 'LiberBit World']
+            ]
+        });
+    }
+
+    async function publishVote(proposalEventId, option) {
+        return publishEvent({
+            kind: EVENT_KINDS.LBW_VOTE, content: option,
+            tags: [['e', proposalEventId], ['t', 'lbw-governance'], ['t', 'lbw-vote'], ['client', 'LiberBit World']]
+        });
+    }
+
+    // ── NIP-07 Detection ─────────────────────────────────────
+    function hasNostrExtension() { return !!window.nostr; }
+
+    async function waitForExtension(ms = 3000) {
+        if (window.nostr) return true;
+        return new Promise(resolve => {
+            const c = setInterval(() => { if (window.nostr) { clearInterval(c); resolve(true); } }, 100);
+            setTimeout(() => { clearInterval(c); resolve(!!window.nostr); }, ms);
+        });
+    }
+
+    // ── Image Upload (pure proxy to LBW_Media) ─────────────
+    // All upload logic lives in nostr-media.js. No fallback here.
+    // This prevents dual-path bugs and ensures SHA-256 + multi-URL
+    // are always used.
+    async function uploadImage(file, options = {}) {
+        if (!window.LBW_Media) {
+            throw new Error('LBW_Media no cargado. Asegúrate de incluir nostr-media.js antes de nostr.js.');
+        }
+        return window.LBW_Media.uploadImage(file, options);
+    }
+
+    // ── Getters ──────────────────────────────────────────────
+    function getPubkey()        { return _pubkey; }
+    function getNpub()          { return _npub; }
+    function getNsec()          { return _nsec; }
+    function getPrivkey()           { return _privkey; }
+    function getProfile()           { return { ..._profile }; }
+    function isUsingExtension()     { return _useExtension; }
+    function isUsingRemoteSigner()  { return _useRemoteSigner; }
+    function isLoggedIn()           { return !!_pubkey; }
+    function getEventKinds()        { return { ...EVENT_KINDS }; }
+
+    // ── Public API ───────────────────────────────────────────
+    return {
+        // Relay config (backward compat aliases + new)
+        PRIVATE_RELAYS, PUBLIC_RELAYS, ALL_RELAYS,
+        SYSTEM_PRIVATE_RELAYS, SYSTEM_PUBLIC_RELAYS, SYSTEM_ALL_RELAYS,
+        EVENT_KINDS,
+        getRelaysForKind,
+
+        // NIP-65: Relay sovereignty
+        fetchRelayList, loadCachedRelayList, publishRelayList,
+        fetchOtherRelayList, setPrivacyStrict, isPrivacyStrict,
+
+        // Key management
+        generateKeypair, importPrivateKey, pubkeyToNpub, npubToHex,
+
+        // Relay management
+        connectToRelays, disconnectAll, getConnectedRelays, getRelayStatus, onRelayStatusChange, waitForPrivateRelay,
+
+        // Auth
+        loginWithExtension, loginWithPrivateKey, loginWithBunker, loginWithConnectedSigner, createIdentity, logout,
+        hasNostrExtension, waitForExtension,
+
+        // Profile
+        updateProfile, fetchUserProfile,
+
+        // Subscriptions
+        subscribe, unsubscribe, onEventKind,
+        publishEvent,
+        signEvent: _signEvent,
+
+        // Chat
+        subscribeCommunityChat, publishCommunityMessage,
+
+        // DMs (NIP-44 + NIP-04)
+        subscribeDirectMessages, sendDirectMessage,
+
+        // Marketplace
+        subscribeMarketplace, publishMarketplaceListing, deleteMarketplaceListing, uploadImage,
+
+        // Reactions + Governance
+        reactToEvent, subscribeToReactions, publishProposal, publishVote,
+
+        // Getters
+        getPubkey, getNpub, getNsec, getPrivkey, getProfile,
+        isUsingExtension, isUsingRemoteSigner, isLoggedIn, getEventKinds,
+        // Pool / relay access for NIP-15 stalls module
+        getPool: () => _getPool(),
+        getReadRelays: () => [..._getUserReadRelays()],
+
+        // SEC-19: Event validation exposed for modules that receive events
+        // outside the main pool (stalls, p2p, bridge, etc.). Callers MUST
+        // invoke this on every incoming event before trusting its contents.
+        validateIncomingEvent: _validateIncomingEvent
+    };
+})();
+
+window.LBW_Nostr = LBW_Nostr;

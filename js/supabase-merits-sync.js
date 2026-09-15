@@ -1,0 +1,399 @@
+// ================================================================
+// LiberBit World — supabase-merits-sync.js  v1.5
+// Sincroniza eventos de mérito Nostr (kind 31002) + actividad
+// (kind 1, 30402, 31000, 31001) → Supabase.
+// v1.5 (apr13): NIP-33 deduplication via nostr_d_tag column.
+// ================================================================
+
+const LBW_MeritsSync = (() => {
+    'use strict';
+
+    const ACTIVITY_MERIT_CAP = 300;
+    const ACTIVITY_POINTS_PER_ACTION = 10;
+
+    // [bug 1] CITIZENSHIP_LEVELS source of truth lives in nostr-merits.js (LBW_Merits.CITIZENSHIP_LEVELS).
+    // We resolve lazily on each call to avoid load-order coupling. Local fallback used only
+    // if LBW_Merits has not loaded yet (should never happen given index.html script order).
+    const _CITIZENSHIP_FALLBACK = [
+        { name: 'Amigo',            minMerits: 0,    emoji: '👋' },
+        { name: 'E-Residency',      minMerits: 100,  emoji: '🪪' },
+        { name: 'Colaborador',      minMerits: 500,  emoji: '🤝' },
+        { name: 'Ciudadano Senior', minMerits: 1000, emoji: '🛂' },
+        { name: 'Custodio',         minMerits: 2000, emoji: '🌍' },
+        { name: 'Génesis',          minMerits: 3000, emoji: '👑' }
+    ];
+
+    function _getCitizenshipLevels() {
+        if (typeof LBW_Merits !== 'undefined' && Array.isArray(LBW_Merits.CITIZENSHIP_LEVELS)) {
+            return LBW_Merits.CITIZENSHIP_LEVELS;
+        }
+        console.warn('[MeritsSync] LBW_Merits.CITIZENSHIP_LEVELS no disponible, usando fallback local');
+        return _CITIZENSHIP_FALLBACK;
+    }
+
+    function _getCitizenshipLevel(total) {
+        const levels = _getCitizenshipLevels();
+        let lvl = levels[0];
+        for (const l of levels) {
+            if (total >= l.minMerits) lvl = l;
+        }
+        return lvl;
+    }
+
+    function _logSupabaseErr(label, err) {
+        console.warn('[MeritsSync] ❌ ' + label + ':',
+            'message:', err?.message,
+            '| code:', err?.code,
+            '| details:', err?.details,
+            '| hint:', err?.hint,
+            '| status:', err?.status,
+            '| raw:', err
+        );
+    }
+
+    // [M-14] Delega en LBW_Merits.normalizeCategory (canónica). La copia
+    // local divergía de la del módulo Nostr — específicamente 'financial'
+    // mapeaba a 'economica' aquí pero a 'financiada' en nostr-merits.js,
+    // generando incoherencias entre lo que el cliente mostraba y lo que
+    // el backend guardaba. Source of truth: nostr-merits.js.
+    function _normalizeCategory(cat) {
+        if (window.LBW_Merits && typeof window.LBW_Merits.normalizeCategory === 'function') {
+            return window.LBW_Merits.normalizeCategory(cat);
+        }
+        // Fallback solo si LBW_Merits no se hubiera cargado (no debería pasar:
+        // supabase-merits-sync.js se carga DESPUÉS de nostr-merits.js en index.html).
+        return cat || 'productiva';
+    }
+
+    // ── Sync individual merit event → Supabase ───────────────
+    async function syncMeritEvent(merit) {
+        if (!merit || !merit.id || !merit.pubkey) return;
+        if (typeof supabaseClient === 'undefined') return;
+
+        // FIX (apr13): use nostr_d_tag for NIP-33 dedup so replaceable events
+        // don't accumulate as separate rows (was causing 4× founder bootstrap
+        // entries summed to 12000 in user_merits.total).
+        const dTag = merit.dTag || null;
+
+        const row = {
+            id:               merit.id,
+            pubkey:           merit.pubkey,
+            npub:             typeof LBW_Nostr !== 'undefined'
+                                ? LBW_Nostr.pubkeyToNpub(merit.pubkey) : '',
+            amount:           merit.amount || 0,
+            category:         _normalizeCategory(merit.category),
+            reason:           merit.reason || '',
+            awarded_by:       merit.awardedBy || '',
+            nostr_kind:       31002,
+            nostr_d_tag:      dTag,
+            source:           merit.source || 'award',
+            nostr_created_at: merit.created_at || Math.floor(Date.now() / 1000)
+        };
+
+        // If we have a dTag, dedup by (pubkey, nostr_d_tag) — replaces older
+        // versions of the same logical event. Otherwise fall back to id-only dedup.
+        if (dTag) {
+            // Two-step: delete any older version with same (pubkey, dTag) but different id,
+            // then upsert. Single-step ON CONFLICT (pubkey, nostr_d_tag) is unsupported when id
+            // is the PK and there's a separate unique on (pubkey, nostr_d_tag).
+            const { error: delErr } = await supabaseClient
+                .from('lbwm_merit_events')
+                .delete()
+                .eq('pubkey', merit.pubkey)
+                .eq('nostr_d_tag', dTag)
+                .neq('id', merit.id);
+            if (delErr) { _logSupabaseErr('merit_events dedup-delete', delErr); }
+        }
+
+        const { error: evtErr } = await supabaseClient
+            .from('lbwm_merit_events')
+            .upsert(row, { onConflict: 'id' });
+
+        if (evtErr) { _logSupabaseErr('merit_events upsert', evtErr); return; }
+
+        // Don't call _upsertUserSummary here — bootstrapSync does it at the end
+        // with activity data included.
+    }
+
+    // ── Upsert user summary (merits + activity) → Supabase ──
+    async function _upsertUserSummary(pubkey, activityData) {
+        if (typeof supabaseClient === 'undefined') return;
+
+        const { data: events, error: fetchErr } = await supabaseClient
+            .from('lbwm_merit_events')
+            .select('amount, category, nostr_created_at')
+            .eq('pubkey', pubkey);
+
+        if (fetchErr) { _logSupabaseErr('merit_events fetch', fetchErr); return; }
+
+        const cats = { economica: 0, productiva: 0, responsabilidad: 0, financiada: 0, fundacional: 0 };
+        let nostrTotal = 0, firstMeritAt = null;
+
+        if (events && events.length > 0) {
+            for (const ev of events) {
+                const cat = _normalizeCategory(ev.category);
+                if (cats[cat] !== undefined) cats[cat] += (ev.amount || 0);
+                nostrTotal += (ev.amount || 0);
+                if (!firstMeritAt || ev.nostr_created_at < firstMeritAt) firstMeritAt = ev.nostr_created_at;
+            }
+        }
+
+        // Activity merits
+        const act = activityData || { posts: 0, offers: 0, votes: 0, proposals: 0 };
+        const activityCount = act.posts + act.offers + act.votes + act.proposals;
+        const activityMerits = Math.min(activityCount * ACTIVITY_POINTS_PER_ACTION, ACTIVITY_MERIT_CAP);
+
+        const total = nostrTotal + activityMerits;
+        const lvl  = _getCitizenshipLevel(total);
+        const npub = typeof LBW_Nostr !== 'undefined' ? LBW_Nostr.pubkeyToNpub(pubkey) : '';
+
+        const { error: upsertErr } = await supabaseClient
+            .from('lbwm_user_merits')
+            .upsert({
+                pubkey, npub, total,
+                economica:          cats.economica,
+                productiva:         cats.productiva,
+                responsabilidad:    cats.responsabilidad,
+                financiada:         cats.financiada,
+                fundacional:        cats.fundacional,
+                activity_merits:    activityMerits,
+                activity_posts:     act.posts,
+                activity_offers:    act.offers,
+                activity_votes:     act.votes,
+                activity_proposals: act.proposals,
+                nivel:              lvl.name,
+                nivel_emoji:        lvl.emoji,
+                first_merit_at:     firstMeritAt ? new Date(firstMeritAt * 1000).toISOString() : null,
+                last_updated:       new Date().toISOString()
+            }, { onConflict: 'pubkey' });
+
+        if (upsertErr) {
+            _logSupabaseErr('user_merits upsert', upsertErr);
+        } else {
+            console.log('[MeritsSync] ✅ Sincronizado: ' + pubkey.substring(0, 12) +
+                ' nostr=' + nostrTotal + ' actividad=' + activityMerits + ' total=' + total);
+        }
+    }
+
+    // ── Query Nostr for activity events → returns Map<pubkey, counts> ──
+    function _queryActivityFromNostr() {
+        return new Promise(resolve => {
+            if (typeof LBW_Nostr === 'undefined' || !LBW_Nostr.subscribe) {
+                console.warn('[MeritsSync] LBW_Nostr no disponible para actividad');
+                resolve(new Map());
+                return;
+            }
+
+            const activity = new Map(); // pubkey → { posts, offers, votes, proposals }
+            const seen = new Set();     // dedup by event id
+            let subsCompleted = 0;
+            const TOTAL_SUBS = 4;
+
+            function _ensure(pubkey) {
+                if (!activity.has(pubkey)) {
+                    activity.set(pubkey, { posts: 0, offers: 0, votes: 0, proposals: 0 });
+                }
+                return activity.get(pubkey);
+            }
+
+            function _onComplete() {
+                subsCompleted++;
+                if (subsCompleted >= TOTAL_SUBS) {
+                    console.log('[MeritsSync] 📊 Actividad Nostr: ' + activity.size + ' usuarios encontrados');
+                    resolve(activity);
+                }
+            }
+
+            // Timeout global: 15s max
+            const timeout = setTimeout(() => {
+                console.warn('[MeritsSync] ⏱️ Timeout consultando actividad Nostr');
+                resolve(activity);
+            }, 15000);
+
+            // 1. Community chat (kind 1, tags: liberbit/lbw)
+            const sub1 = LBW_Nostr.subscribe(
+                { kinds: [1], '#t': ['liberbit'], limit: 500 },
+                (event) => {
+                    if (seen.has(event.id)) return;
+                    seen.add(event.id);
+                    const hasTag = event.tags && event.tags.some(
+                        t => t[0] === 't' && (t[1] === 'liberbit' || t[1] === 'lbw')
+                    );
+                    if (!hasTag) return;
+                    _ensure(event.pubkey).posts++;
+                },
+                () => { try { LBW_Nostr.unsubscribe(sub1); } catch(e) {} _onComplete(); }
+            );
+
+            // 2. Marketplace (kind 30402, tag: liberbit-market)
+            const sub2 = LBW_Nostr.subscribe(
+                { kinds: [30402], '#t': ['liberbit-market'], limit: 500 },
+                (event) => {
+                    if (seen.has(event.id)) return;
+                    seen.add(event.id);
+                    _ensure(event.pubkey).offers++;
+                },
+                () => { try { LBW_Nostr.unsubscribe(sub2); } catch(e) {} _onComplete(); }
+            );
+
+            // 3. Proposals (kind 31000, tag: lbw-proposal)
+            const sub3 = LBW_Nostr.subscribe(
+                { kinds: [31000], '#t': ['lbw-proposal'], limit: 500 },
+                (event) => {
+                    if (seen.has(event.id)) return;
+                    seen.add(event.id);
+                    _ensure(event.pubkey).proposals++;
+                },
+                () => { try { LBW_Nostr.unsubscribe(sub3); } catch(e) {} _onComplete(); }
+            );
+
+            // 4. Votes (kind 31001, tag: lbw-governance)
+            const sub4 = LBW_Nostr.subscribe(
+                { kinds: [31001], '#t': ['lbw-governance'], limit: 500 },
+                (event) => {
+                    if (seen.has(event.id)) return;
+                    seen.add(event.id);
+                    _ensure(event.pubkey).votes++;
+                },
+                () => {
+                    try { LBW_Nostr.unsubscribe(sub4); } catch(e) {}
+                    clearTimeout(timeout);
+                    _onComplete();
+                }
+            );
+        });
+    }
+
+    // ── Bootstrap: sync all merits + activity → Supabase ─────
+    async function bootstrapSync() {
+        if (typeof LBW_Merits === 'undefined' || typeof supabaseClient === 'undefined') return;
+
+        console.log('[MeritsSync] 🔄 Bootstrap iniciado...');
+
+        // Step 1: Sync formal merit events (kind 31002)
+        const lb = LBW_Merits.getLeaderboard(999);
+        console.log('[MeritsSync] Entradas leaderboard: ' + lb.length);
+
+        let synced = 0;
+        const allPubkeys = new Set();
+
+        for (const entry of lb) {
+            allPubkeys.add(entry.pubkey);
+            const userData = LBW_Merits.getUserMerits(entry.pubkey);
+            const records = userData?.records || entry.records || [];
+            if (records.length === 0) continue;
+            for (const record of records) {
+                await syncMeritEvent({
+                    id:         record.id,
+                    dTag:       record.dTag || null,   // FIX (apr13): forward dTag for NIP-33 dedup
+                    pubkey:     entry.pubkey,
+                    amount:     record.amount,
+                    category:   record.category,
+                    reason:     record.reason || '',
+                    awardedBy:  record.awardedBy || '',
+                    source:     record.source || 'award',
+                    created_at: record.created_at
+                });
+                synced++;
+            }
+        }
+        console.log('[MeritsSync] Eventos de mérito sincronizados: ' + synced);
+
+        // Step 2: Query activity from Nostr relays
+        console.log('[MeritsSync] 🔍 Consultando actividad desde Nostr...');
+        const activityMap = await _queryActivityFromNostr();
+
+        // Merge pubkeys from activity (users with activity but no formal merits)
+        activityMap.forEach((_, pk) => allPubkeys.add(pk));
+
+        // Step 3: Upsert user summaries with activity included
+        let summaries = 0;
+        for (const pubkey of allPubkeys) {
+            const act = activityMap.get(pubkey) || { posts: 0, offers: 0, votes: 0, proposals: 0 };
+            await _upsertUserSummary(pubkey, act);
+            summaries++;
+        }
+
+        console.log('[MeritsSync] ✅ Bootstrap completado: ' + synced + ' eventos, ' + summaries + ' usuarios sincronizados');
+        return synced;
+    }
+
+    // ── Load ledger from Supabase ────────────────────────────
+    async function loadSupabaseLedger({ limit = 200, orderBy = 'total', category = null } = {}) {
+        if (typeof supabaseClient === 'undefined') return null;
+
+        let query = supabaseClient
+            .from('lbwm_user_merits')
+            .select('*')
+            .order(orderBy, { ascending: false })
+            .limit(limit);
+
+        if (category) query = query.gt(category, 0);
+
+        const { data: users, error: usersErr } = await query;
+
+        if (usersErr) {
+            _logSupabaseErr('loadSupabaseLedger SELECT', usersErr);
+            return null;
+        }
+
+        const list = users || [];
+        const totalMerits = list.reduce((s, u) => s + (u.total || 0), 0);
+        const stats = {
+            totalUsers:  list.length,
+            totalMerits,
+            byCategory: {
+                economica:       list.reduce((s, u) => s + (u.economica || 0), 0),
+                productiva:      list.reduce((s, u) => s + (u.productiva || 0), 0),
+                responsabilidad: list.reduce((s, u) => s + (u.responsabilidad || 0), 0),
+                financiada:      list.reduce((s, u) => s + (u.financiada || 0), 0),
+                fundacional:     list.reduce((s, u) => s + (u.fundacional || 0), 0)
+            }
+        };
+
+        console.log('[MeritsSync] Ledger cargado: ' + list.length + ' usuarios');
+        return { users: list, stats };
+    }
+
+    // ── Diagnóstico — ejecutar desde consola: LBW_MeritsSync.diagnose()
+    async function diagnose() {
+        console.log('=== MeritsSync Diagnose ===');
+        console.log('supabaseClient:', typeof supabaseClient !== 'undefined' ? '✅' : '❌ no disponible');
+        console.log('LBW_Merits:', typeof LBW_Merits !== 'undefined' ? '✅' : '❌ no disponible');
+        if (typeof supabaseClient === 'undefined') return;
+
+        const { data: d1, error: e1 } = await supabaseClient.from('lbwm_merit_events').select('id').limit(1);
+        console.log('SELECT lbwm_merit_events:', e1 ? '❌ ' + e1.message + ' | code:' + e1.code : '✅ OK, rows: ' + (d1||[]).length);
+
+        const { data: d2, error: e2 } = await supabaseClient.from('lbwm_user_merits').select('pubkey').limit(1);
+        console.log('SELECT lbwm_user_merits:', e2 ? '❌ ' + e2.message + ' | code:' + e2.code : '✅ OK, rows: ' + (d2||[]).length);
+
+        const testId = 'test-diag-' + Date.now();
+        const { error: e3 } = await supabaseClient.from('lbwm_merit_events').upsert({
+            id: testId, pubkey: 'test-pubkey', npub: 'test-npub',
+            amount: 1, category: 'productiva', nostr_kind: 31002, source: 'test',
+            nostr_created_at: Math.floor(Date.now() / 1000)
+        }, { onConflict: 'id' });
+        console.log('INSERT lbwm_merit_events:', e3 ? '❌ ' + e3.message + ' | code:' + e3.code : '✅ OK');
+
+        if (!e3) {
+            await supabaseClient.from('lbwm_merit_events').delete().eq('id', testId);
+            console.log('Test row eliminada');
+        }
+        console.log('=== Fin ===');
+    }
+
+    function init() {
+        if (typeof LBW_Merits === 'undefined') {
+            setTimeout(init, 2000);
+            return;
+        }
+        LBW_Merits.subscribeMerits((merit) => { syncMeritEvent(merit); });
+        setTimeout(bootstrapSync, 5000);
+        console.log('[MeritsSync] ✅ Inicializado v1.4');
+    }
+
+    return { init, syncMeritEvent, bootstrapSync, loadSupabaseLedger, diagnose };
+})();
+
+window.LBW_MeritsSync = LBW_MeritsSync;

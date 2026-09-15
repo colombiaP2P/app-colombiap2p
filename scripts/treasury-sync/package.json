@@ -1,0 +1,7 @@
+{
+  "name": "lbw-treasury-sync",
+  "private": true,
+  "type": "module",
+  "description": "Worker que llama a coinos /api/payments con un JWT read-only (Bearer auth) y guarda el snapshot en Supabase. Cero dependencias — usa solo fetch built-in.",
+  "dependencies": {}
+}

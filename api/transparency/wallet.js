@@ -1,0 +1,119 @@
+// [C2P FASE 11] Tesorería ColombiaP2P — proxy transparencia
+//
+// Fuentes de datos (en orden de prioridad):
+//   1. LNbits API (balance + pagos) — requiere LNBITS_READ_KEY en Vercel env
+//   2. LNURL público de colsats.com — siempre disponible
+//
+// Variables de entorno Vercel:
+//   LNBITS_URL       = https://colsats.com  (o la URL de tu instancia LNbits)
+//   LNBITS_READ_KEY  = <invoice/read key de LNbits>
+//   LNBITS_WALLET_ID = <wallet_id> (opcional, para filtrar pagos)
+
+const C2P_LN_ADDRESS   = 'colombiap2p@colsats.com';
+const C2P_LNURL_PUBLIC = 'https://colsats.com/.well-known/lnurlp/colombiap2p';
+const C2P_PUBLIC_URL   = 'https://colsats.com';
+
+const TTL_MS = 60_000; // 1 min cache
+let _cache = null;
+let _cacheAt = 0;
+
+async function _fetchLNbitsData(lnbitsUrl, readKey) {
+    const headers = { 'X-Api-Key': readKey, 'Accept': 'application/json' };
+    const opts    = { headers, signal: AbortSignal.timeout(8000) };
+
+    const [walletRes, paymentsRes] = await Promise.allSettled([
+        fetch(`${lnbitsUrl}/api/v1/wallet`, opts),
+        fetch(`${lnbitsUrl}/api/v1/payments?limit=50`, opts),
+    ]);
+
+    let balance = null, movements = [];
+
+    if (walletRes.status === 'fulfilled' && walletRes.value.ok) {
+        const w = await walletRes.value.json();
+        balance = Math.floor((w.balance || 0) / 1000); // msats → sats
+    }
+
+    if (paymentsRes.status === 'fulfilled' && paymentsRes.value.ok) {
+        const raw = await paymentsRes.value.json();
+        const list = Array.isArray(raw) ? raw : (raw.data || []);
+        movements = list
+            .filter(p => p.pending === false)
+            .map(p => ({
+                type:    p.amount > 0 ? 'in' : 'out',
+                amount:  Math.abs(Math.floor(p.amount / 1000)),
+                memo:    p.memo || '',
+                time:    p.time ? p.time * 1000 : Date.now(),
+                payment_hash: p.payment_hash || '',
+                bolt11:  p.bolt11 || '',
+                extra:   p.extra || {},
+            }));
+    }
+
+    return { balance, movements, authNotSupported: balance === null };
+}
+
+export default async function handler(req, res) {
+    res.setHeader('Content-Type', 'application/json');
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Cache-Control', 's-maxage=60, stale-while-revalidate=300');
+
+    if (_cache && Date.now() - _cacheAt < TTL_MS) {
+        return res.status(200).json({ ..._cache, cached: true });
+    }
+
+    const lnbitsUrl = process.env.LNBITS_URL   || '';
+    const readKey   = process.env.LNBITS_READ_KEY || '';
+
+    try {
+        // Siempre obtener datos LNURL públicos
+        const lnurlRes  = await fetch(C2P_LNURL_PUBLIC, {
+            headers: { Accept: 'application/json' },
+            signal: AbortSignal.timeout(6000),
+        });
+        const lnurlData = lnurlRes.ok ? await lnurlRes.json() : null;
+
+        const result = {
+            username:   'colombiap2p',
+            display:    'ColombiaP2P',
+            about:      'Comunidad Bitcoin colombiana · Lightning · Nostr · P2P · Privacidad',
+            lightning:  C2P_LN_ADDRESS,
+            publicUrl:  C2P_PUBLIC_URL,
+            lnurlp: lnurlData ? {
+                minSendable:    lnurlData.minSendable,
+                maxSendable:    lnurlData.maxSendable,
+                commentAllowed: lnurlData.commentAllowed,
+                allowsNostr:    lnurlData.allowsNostr,
+                nostrPubkey:    lnurlData.nostrPubkey || '',
+            } : null,
+            balance:         null,
+            movements:       [],
+            authNotSupported: true,
+            fetchedAt:        Date.now(),
+            configured:       true,
+        };
+
+        // Intentar LNbits API si hay credenciales
+        if (lnbitsUrl && readKey) {
+            try {
+                const lnbits = await _fetchLNbitsData(lnbitsUrl, readKey);
+                result.balance         = lnbits.balance;
+                result.movements       = lnbits.movements;
+                result.authNotSupported = lnbits.authNotSupported;
+                // Leer nostrPubkey del wallet si LNURL no lo devolvió
+                if (!result.lnurlp?.nostrPubkey && lnbitsUrl) {
+                    result.pubkey = lnurlData?.nostrPubkey || '';
+                }
+            } catch (e) {
+                console.warn('[C2P Treasury] LNbits API falló:', e.message);
+            }
+        }
+
+        _cache   = result;
+        _cacheAt = Date.now();
+        return res.status(200).json(result);
+
+    } catch (e) {
+        if (_cache) return res.status(200).json({ ..._cache, cached: true, stale: true });
+        return res.status(502).json({ error: 'fallo al consultar la tesorería', detail: e.message, configured: true });
+    }
+}

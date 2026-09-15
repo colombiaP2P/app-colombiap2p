@@ -1,0 +1,829 @@
+[
+  {
+    "name": "stamps",
+    "type": "base",
+    "listRule": "",
+    "viewRule": "",
+    "createRule": null,
+    "updateRule": null,
+    "deleteRule": null,
+    "schema": [
+      {
+        "name": "name",
+        "type": "text",
+        "required": true,
+        "options": {
+          "max": 100
+        }
+      },
+      {
+        "name": "description",
+        "type": "text",
+        "required": false,
+        "options": {
+          "max": 500
+        }
+      },
+      {
+        "name": "icon",
+        "type": "text",
+        "required": false,
+        "options": {
+          "max": 10
+        }
+      },
+      {
+        "name": "image_url",
+        "type": "url",
+        "required": false,
+        "options": {}
+      },
+      {
+        "name": "event_name",
+        "type": "text",
+        "required": false,
+        "options": {
+          "max": 200
+        }
+      },
+      {
+        "name": "event_date",
+        "type": "date",
+        "required": false,
+        "options": {}
+      },
+      {
+        "name": "rarity",
+        "type": "select",
+        "required": true,
+        "options": {
+          "maxSelect": 1,
+          "values": [
+            "common",
+            "rare",
+            "epic",
+            "legendary"
+          ]
+        }
+      },
+      {
+        "name": "category",
+        "type": "select",
+        "required": true,
+        "options": {
+          "maxSelect": 1,
+          "values": [
+            "evento",
+            "logro",
+            "participacion",
+            "fundador"
+          ]
+        }
+      },
+      {
+        "name": "active",
+        "type": "bool",
+        "required": false,
+        "options": {}
+      }
+    ]
+  },
+  {
+    "name": "user_stamps",
+    "type": "base",
+    "listRule": "@request.auth.id != ''",
+    "viewRule": "@request.auth.id != ''",
+    "createRule": null,
+    "updateRule": null,
+    "deleteRule": null,
+    "schema": [
+      {
+        "name": "user_pubkey",
+        "type": "text",
+        "required": true,
+        "options": {
+          "max": 64
+        }
+      },
+      {
+        "name": "stamp_id",
+        "type": "relation",
+        "required": true,
+        "options": {
+          "collectionId": "stamps",
+          "cascadeDelete": false,
+          "maxSelect": 1
+        }
+      },
+      {
+        "name": "obtained_at",
+        "type": "date",
+        "required": true,
+        "options": {}
+      },
+      {
+        "name": "event_id",
+        "type": "text",
+        "required": false,
+        "options": {
+          "max": 64
+        }
+      }
+    ]
+  },
+  {
+    "name": "badges",
+    "type": "base",
+    "listRule": "",
+    "viewRule": "",
+    "createRule": null,
+    "updateRule": null,
+    "deleteRule": null,
+    "schema": [
+      {
+        "name": "name",
+        "type": "text",
+        "required": true,
+        "options": {
+          "max": 100
+        }
+      },
+      {
+        "name": "description",
+        "type": "text",
+        "required": false,
+        "options": {
+          "max": 500
+        }
+      },
+      {
+        "name": "icon",
+        "type": "text",
+        "required": false,
+        "options": {
+          "max": 10
+        }
+      },
+      {
+        "name": "skill_area",
+        "type": "select",
+        "required": true,
+        "options": {
+          "maxSelect": 1,
+          "values": [
+            "lightning",
+            "nostr",
+            "bitcoin",
+            "privacidad",
+            "nodos",
+            "p2p",
+            "educacion",
+            "comunidad"
+          ]
+        }
+      },
+      {
+        "name": "level",
+        "type": "select",
+        "required": true,
+        "options": {
+          "maxSelect": 1,
+          "values": [
+            "basico",
+            "intermedio",
+            "avanzado"
+          ]
+        }
+      },
+      {
+        "name": "active",
+        "type": "bool",
+        "required": false,
+        "options": {}
+      }
+    ]
+  },
+  {
+    "name": "user_badges",
+    "type": "base",
+    "listRule": "@request.auth.id != ''",
+    "viewRule": "@request.auth.id != ''",
+    "createRule": null,
+    "updateRule": null,
+    "deleteRule": null,
+    "schema": [
+      {
+        "name": "user_pubkey",
+        "type": "text",
+        "required": true,
+        "options": {
+          "max": 64
+        }
+      },
+      {
+        "name": "badge_id",
+        "type": "relation",
+        "required": true,
+        "options": {
+          "collectionId": "badges",
+          "cascadeDelete": false,
+          "maxSelect": 1
+        }
+      },
+      {
+        "name": "obtained_at",
+        "type": "date",
+        "required": true,
+        "options": {}
+      }
+    ]
+  },
+  {
+    "name": "missions",
+    "type": "base",
+    "listRule": "",
+    "viewRule": "",
+    "createRule": "@request.auth.id != ''",
+    "updateRule": null,
+    "deleteRule": null,
+    "schema": [
+      {
+        "name": "title",
+        "type": "text",
+        "required": true,
+        "options": {
+          "max": 80
+        }
+      },
+      {
+        "name": "description",
+        "type": "text",
+        "required": true,
+        "options": {
+          "max": 600
+        }
+      },
+      {
+        "name": "merit_category",
+        "type": "select",
+        "required": true,
+        "options": {
+          "maxSelect": 1,
+          "values": [
+            "productiva",
+            "economica",
+            "responsabilidad",
+            "financiada"
+          ]
+        }
+      },
+      {
+        "name": "merit_amount",
+        "type": "number",
+        "required": true,
+        "options": {
+          "min": 10,
+          "max": 5000
+        }
+      },
+      {
+        "name": "min_citizenship",
+        "type": "text",
+        "required": false,
+        "options": {
+          "max": 50
+        }
+      },
+      {
+        "name": "deadline",
+        "type": "date",
+        "required": false,
+        "options": {}
+      },
+      {
+        "name": "delivery_instructions",
+        "type": "text",
+        "required": false,
+        "options": {
+          "max": 300
+        }
+      },
+      {
+        "name": "status",
+        "type": "select",
+        "required": true,
+        "options": {
+          "maxSelect": 1,
+          "values": [
+            "pending_approval",
+            "open",
+            "claimed",
+            "pending_review",
+            "completed",
+            "cancelled"
+          ]
+        }
+      },
+      {
+        "name": "creator_pubkey",
+        "type": "text",
+        "required": true,
+        "options": {
+          "max": 64
+        }
+      },
+      {
+        "name": "creator_name",
+        "type": "text",
+        "required": false,
+        "options": {
+          "max": 100
+        }
+      },
+      {
+        "name": "claimed_by_pubkey",
+        "type": "text",
+        "required": false,
+        "options": {
+          "max": 64
+        }
+      },
+      {
+        "name": "claimed_by_name",
+        "type": "text",
+        "required": false,
+        "options": {
+          "max": 100
+        }
+      },
+      {
+        "name": "claimed_at",
+        "type": "date",
+        "required": false,
+        "options": {}
+      },
+      {
+        "name": "delivery_url",
+        "type": "url",
+        "required": false,
+        "options": {}
+      },
+      {
+        "name": "approved_by_pubkey",
+        "type": "text",
+        "required": false,
+        "options": {
+          "max": 64
+        }
+      },
+      {
+        "name": "completed_at",
+        "type": "date",
+        "required": false,
+        "options": {}
+      },
+      {
+        "name": "updated_at",
+        "type": "date",
+        "required": false,
+        "options": {}
+      }
+    ]
+  },
+  {
+    "name": "merit_contributions",
+    "type": "base",
+    "listRule": null,
+    "viewRule": null,
+    "createRule": null,
+    "updateRule": null,
+    "deleteRule": null,
+    "schema": [
+      {
+        "name": "pubkey",
+        "type": "text",
+        "required": true,
+        "options": {
+          "max": 64
+        }
+      },
+      {
+        "name": "value",
+        "type": "number",
+        "required": true,
+        "options": {
+          "min": 1
+        }
+      },
+      {
+        "name": "category",
+        "type": "select",
+        "required": true,
+        "options": {
+          "maxSelect": 1,
+          "values": [
+            "productiva",
+            "economica",
+            "responsabilidad",
+            "financiada"
+          ]
+        }
+      },
+      {
+        "name": "description",
+        "type": "text",
+        "required": false,
+        "options": {
+          "max": 500
+        }
+      },
+      {
+        "name": "payment_method",
+        "type": "text",
+        "required": false,
+        "options": {
+          "max": 50
+        }
+      },
+      {
+        "name": "status",
+        "type": "select",
+        "required": true,
+        "options": {
+          "maxSelect": 1,
+          "values": [
+            "pending",
+            "approved",
+            "rejected"
+          ]
+        }
+      },
+      {
+        "name": "approved_by",
+        "type": "text",
+        "required": false,
+        "options": {
+          "max": 64
+        }
+      },
+      {
+        "name": "approved_at",
+        "type": "date",
+        "required": false,
+        "options": {}
+      },
+      {
+        "name": "evidence_url",
+        "type": "url",
+        "required": false,
+        "options": {}
+      }
+    ]
+  },
+  {
+    "name": "events",
+    "type": "base",
+    "listRule": "",
+    "viewRule": "",
+    "createRule": null,
+    "updateRule": null,
+    "deleteRule": null,
+    "schema": [
+      {
+        "name": "title",
+        "type": "text",
+        "required": true,
+        "options": {
+          "max": 120
+        }
+      },
+      {
+        "name": "description",
+        "type": "text",
+        "required": false,
+        "options": {
+          "max": 1000
+        }
+      },
+      {
+        "name": "location",
+        "type": "text",
+        "required": false,
+        "options": {
+          "max": 200
+        }
+      },
+      {
+        "name": "image_url",
+        "type": "url",
+        "required": false,
+        "options": {}
+      },
+      {
+        "name": "event_date",
+        "type": "date",
+        "required": true,
+        "options": {}
+      },
+      {
+        "name": "event_end",
+        "type": "date",
+        "required": false,
+        "options": {}
+      },
+      {
+        "name": "organizer_pubkey",
+        "type": "text",
+        "required": false,
+        "options": {
+          "max": 64
+        }
+      },
+      {
+        "name": "organizer_name",
+        "type": "text",
+        "required": false,
+        "options": {
+          "max": 100
+        }
+      },
+      {
+        "name": "max_attendees",
+        "type": "number",
+        "required": false,
+        "options": {
+          "min": 1
+        }
+      },
+      {
+        "name": "checkin_token",
+        "type": "text",
+        "required": true,
+        "options": {
+          "max": 64
+        }
+      },
+      {
+        "name": "checkin_open_from",
+        "type": "date",
+        "required": false,
+        "options": {}
+      },
+      {
+        "name": "checkin_open_until",
+        "type": "date",
+        "required": false,
+        "options": {}
+      },
+      {
+        "name": "status",
+        "type": "select",
+        "required": true,
+        "options": {
+          "maxSelect": 1,
+          "values": [
+            "draft",
+            "open",
+            "closed",
+            "cancelled"
+          ]
+        }
+      },
+      {
+        "name": "xp_reward",
+        "type": "number",
+        "required": false,
+        "options": {
+          "min": 0,
+          "max": 500
+        }
+      },
+      {
+        "name": "stamp_id",
+        "type": "text",
+        "required": false,
+        "options": {
+          "max": 50
+        }
+      }
+    ]
+  },
+  {
+    "name": "event_checkins",
+    "type": "base",
+    "listRule": null,
+    "viewRule": null,
+    "createRule": "",
+    "updateRule": null,
+    "deleteRule": null,
+    "schema": [
+      {
+        "name": "event_id",
+        "type": "text",
+        "required": true,
+        "options": {
+          "max": 50
+        }
+      },
+      {
+        "name": "user_pubkey",
+        "type": "text",
+        "required": true,
+        "options": {
+          "max": 64
+        }
+      },
+      {
+        "name": "user_name",
+        "type": "text",
+        "required": false,
+        "options": {
+          "max": 100
+        }
+      },
+      {
+        "name": "checkin_token",
+        "type": "text",
+        "required": false,
+        "options": {
+          "max": 64
+        }
+      },
+      {
+        "name": "check_method",
+        "type": "select",
+        "required": false,
+        "options": {
+          "maxSelect": 1,
+          "values": [
+            "qr",
+            "manual"
+          ]
+        }
+      },
+      {
+        "name": "checked_in_at",
+        "type": "date",
+        "required": true,
+        "options": {}
+      }
+    ]
+  },
+  {
+    "name": "xp_transactions",
+    "type": "base",
+    "listRule": null,
+    "viewRule": null,
+    "createRule": null,
+    "updateRule": null,
+    "deleteRule": null,
+    "schema": [
+      {
+        "name": "user_pubkey",
+        "type": "text",
+        "required": true,
+        "options": {
+          "max": 64
+        }
+      },
+      {
+        "name": "amount",
+        "type": "number",
+        "required": true,
+        "options": {
+          "min": 1
+        }
+      },
+      {
+        "name": "reason",
+        "type": "text",
+        "required": true,
+        "options": {
+          "max": 200
+        }
+      },
+      {
+        "name": "source",
+        "type": "select",
+        "required": true,
+        "options": {
+          "maxSelect": 1,
+          "values": [
+            "evento",
+            "mision",
+            "racha",
+            "referido",
+            "manual"
+          ]
+        }
+      },
+      {
+        "name": "ref_id",
+        "type": "text",
+        "required": false,
+        "options": {
+          "max": 50
+        }
+      }
+    ]
+  },
+  {
+    "name": "nip05_identities",
+    "type": "base",
+    "listRule": "",
+    "viewRule": "",
+    "createRule": null,
+    "updateRule": null,
+    "deleteRule": null,
+    "schema": [
+      {
+        "name": "username",
+        "type": "text",
+        "required": true,
+        "options": { "max": 64 }
+      },
+      {
+        "name": "pubkey",
+        "type": "text",
+        "required": true,
+        "options": { "max": 64 }
+      },
+      {
+        "name": "nostr_name",
+        "type": "text",
+        "required": false,
+        "options": { "max": 100 }
+      },
+      {
+        "name": "active",
+        "type": "bool",
+        "required": false,
+        "options": {}
+      }
+    ]
+  },
+  {
+    "name": "user_streaks",
+    "type": "base",
+    "listRule": "@request.auth.id != ''",
+    "viewRule": "@request.auth.id != ''",
+    "createRule": "",
+    "updateRule": "",
+    "deleteRule": null,
+    "schema": [
+      {
+        "name": "user_pubkey",
+        "type": "text",
+        "required": true,
+        "options": { "max": 64 }
+      },
+      {
+        "name": "current_streak",
+        "type": "number",
+        "required": true,
+        "options": { "min": 0 }
+      },
+      {
+        "name": "max_streak",
+        "type": "number",
+        "required": true,
+        "options": { "min": 0 }
+      },
+      {
+        "name": "last_activity_date",
+        "type": "date",
+        "required": false,
+        "options": {}
+      }
+    ]
+  },
+  {
+    "name": "referrals",
+    "type": "base",
+    "listRule": null,
+    "viewRule": null,
+    "createRule": "",
+    "updateRule": null,
+    "deleteRule": null,
+    "schema": [
+      {
+        "name": "referrer_pubkey_short",
+        "type": "text",
+        "required": true,
+        "options": { "max": 16 }
+      },
+      {
+        "name": "referred_pubkey",
+        "type": "text",
+        "required": true,
+        "options": { "max": 64 }
+      },
+      {
+        "name": "xp_granted",
+        "type": "bool",
+        "required": false,
+        "options": {}
+      }
+    ]
+  }
+]

@@ -1,0 +1,859 @@
+/**
+ * LBW_Map — Mapa de ciudadanos y nodos de la red LiberBit
+ * ─────────────────────────────────────────────────────────────
+ *
+ * Capas:
+ *   🏛️  Nodos físicos (LiberAtlas) — puntos soberanos
+ *   👥  Ciudadanos agregados por ciudad — conteo, nunca individuos
+ *
+ * Principios:
+ *   - Privacidad por defecto: NO se exponen npubs, nombres ni coords individuales.
+ *     La agregación se hace a nivel ciudad con zoom máximo limitado (z=13).
+ *   - Separación absoluta: CityBunker NO aparece en este mapa público.
+ *   - Stack libre: Leaflet + tiles CartoDB dark (sin API key, sin tracking).
+ *   - Geocoding híbrido: tabla local de ciudades frecuentes → cache localStorage
+ *     → Nominatim (rate-limited) como último recurso.
+ *
+ * Auto-init: observa #mapaSection y arranca cuando recibe la clase .active.
+ * API pública: LBW_Map.init(), LBW_Map.refresh().
+ */
+(function (window) {
+    'use strict';
+
+    // ═══════════════════════════════════════════════════════════════
+    // CONFIG
+    // ═══════════════════════════════════════════════════════════════
+    const CONFIG = {
+        // Vista inicial: Península Ibérica
+        initialCenter: [40.0, -3.5],
+        initialZoom: 5,
+        minZoom: 3,
+        maxZoom: 13, // Limitado para reforzar privacidad
+
+        // Tiles oscuros CartoDB (uso libre, alineado con el theme de LBW)
+        tileUrl: 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',
+        tileAttribution:
+            '&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OSM</a> · ' +
+            '<a href="https://carto.com/attributions" target="_blank" rel="noopener">CARTO</a>',
+
+        // Nodos físicos de la red
+        // ⚠️  TODO: ajustar coords definitivas de LiberAtlas cuando estén confirmadas.
+        //         CityBunker NO aparece aquí (separación absoluta).
+        physicalNodes: [
+            {
+                id: 'LBTC-1',
+                name: 'LiberAtlas',
+                subtitle: 'Nodo capital · Cáceres',
+                coords: [39.4753, -6.3724], // Cáceres
+                description: '~400 ha · hasta 10.000 residentes en 5 fases',
+                url: 'https://liberatlas.org',
+                color: '#E5B95C'
+            }
+        ],
+
+        // Relays privados de la red (infraestructura Nostr soberana)
+        relays: [
+            {
+                id: 'relay-1',
+                name: 'relay.colombiap2p.com',
+                subtitle: 'Relay principal · Colombia',
+                coords: [4.7110, -74.0721], // Bogotá
+                description: 'Relay Nostr de ColombiaP2P · En construcción',
+                operator: 'ColombiaP2P',
+                url: 'wss://relay.colombiap2p.com'
+            }
+        ],
+
+        // Cache de geocoding en localStorage
+        geocodeCacheKey: 'lbw_geocode_cache_v1',
+
+        // Tabla local de ciudades frecuentes (evita llamadas a Nominatim)
+        knownCities: {
+            // España
+            'madrid': [40.4168, -3.7038],
+            'barcelona': [41.3851, 2.1734],
+            'valencia': [39.4699, -0.3763],
+            'sevilla': [37.3891, -5.9845],
+            'zaragoza': [41.6488, -0.8891],
+            'málaga': [36.7213, -4.4213],
+            'malaga': [36.7213, -4.4213],
+            'bilbao': [43.2630, -2.9350],
+            'murcia': [37.9922, -1.1307],
+            'palma': [39.5696, 2.6502],
+            'palma de mallorca': [39.5696, 2.6502],
+            'las palmas': [28.1235, -15.4363],
+            'las palmas de gran canaria': [28.1235, -15.4363],
+            'vitoria': [42.8467, -2.6727],
+            'granada': [37.1773, -3.5986],
+            'a coruña': [43.3623, -8.4115],
+            'coruña': [43.3623, -8.4115],
+            'la coruña': [43.3623, -8.4115],
+            'vigo': [42.2406, -8.7207],
+            'gijón': [43.5322, -5.6611],
+            'gijon': [43.5322, -5.6611],
+            'alicante': [38.3452, -0.4810],
+            'córdoba': [37.8882, -4.7794],
+            'cordoba': [37.8882, -4.7794],
+            'valladolid': [41.6523, -4.7245],
+            'pamplona': [42.8125, -1.6458],
+            'santander': [43.4623, -3.8099],
+            'toledo': [39.8628, -4.0273],
+            'salamanca': [40.9701, -5.6635],
+            'burgos': [42.3439, -3.6969],
+            'león': [42.5987, -5.5671],
+            'leon': [42.5987, -5.5671],
+            'oviedo': [43.3614, -5.8593],
+            'san sebastián': [43.3183, -1.9812],
+            'san sebastian': [43.3183, -1.9812],
+            'donostia': [43.3183, -1.9812],
+            'tenerife': [28.4636, -16.2518],
+            'santa cruz de tenerife': [28.4636, -16.2518],
+            'logroño': [42.4627, -2.4449],
+            'logrono': [42.4627, -2.4449],
+            'cádiz': [36.5297, -6.2921],
+            'cadiz': [36.5297, -6.2921],
+            'almería': [36.8340, -2.4637],
+            'almeria': [36.8340, -2.4637],
+            'huelva': [37.2614, -6.9447],
+            'jerez': [36.6868, -6.1377],
+            'marbella': [36.5101, -4.8826],
+
+            // Portugal
+            'lisboa': [38.7223, -9.1393],
+            'lisbon': [38.7223, -9.1393],
+            'porto': [41.1579, -8.6291],
+            'oporto': [41.1579, -8.6291],
+
+            // Latam
+            'buenos aires': [-34.6037, -58.3816],
+            'ciudad de méxico': [19.4326, -99.1332],
+            'ciudad de mexico': [19.4326, -99.1332],
+            'méxico df': [19.4326, -99.1332],
+            'cdmx': [19.4326, -99.1332],
+            'bogotá': [4.7110, -74.0721],
+            'bogota': [4.7110, -74.0721],
+            'medellín': [6.2442, -75.5812],
+            'medellin': [6.2442, -75.5812],
+            'santiago': [-33.4489, -70.6693],
+            'santiago de chile': [-33.4489, -70.6693],
+            'lima': [-12.0464, -77.0428],
+            'montevideo': [-34.9011, -56.1645],
+            'caracas': [10.4806, -66.9036],
+            'quito': [-0.1807, -78.4678],
+            'la paz': [-16.4897, -68.1193],
+            'asunción': [-25.2637, -57.5759],
+            'asuncion': [-25.2637, -57.5759],
+            'san josé': [9.9281, -84.0907],
+            'san jose': [9.9281, -84.0907],
+            'panamá': [8.9824, -79.5199],
+            'panama': [8.9824, -79.5199],
+            'ciudad de panamá': [8.9824, -79.5199],
+            'la habana': [23.1136, -82.3666],
+            'guadalajara': [20.6597, -103.3496],
+            'monterrey': [25.6866, -100.3161],
+            'guayaquil': [-2.1709, -79.9224],
+            'rosario': [-32.9587, -60.6930],
+            'córdoba argentina': [-31.4201, -64.1888],
+
+            // Otros
+            'miami': [25.7617, -80.1918],
+            'nueva york': [40.7128, -74.0060],
+            'new york': [40.7128, -74.0060],
+            'londres': [51.5074, -0.1278],
+            'london': [51.5074, -0.1278],
+            'parís': [48.8566, 2.3522],
+            'paris': [48.8566, 2.3522],
+            'berlín': [52.5200, 13.4050],
+            'berlin': [52.5200, 13.4050],
+            'roma': [41.9028, 12.4964],
+            'rome': [41.9028, 12.4964],
+            'ámsterdam': [52.3676, 4.9041],
+            'amsterdam': [52.3676, 4.9041],
+            'zurich': [47.3769, 8.5417],
+            'zúrich': [47.3769, 8.5417],
+            'ginebra': [46.2044, 6.1432],
+            'dubai': [25.2048, 55.2708],
+            'dubái': [25.2048, 55.2708],
+            'singapur': [1.3521, 103.8198],
+            'singapore': [1.3521, 103.8198],
+            'tokio': [35.6762, 139.6503],
+            'tokyo': [35.6762, 139.6503],
+            'hong kong': [22.3193, 114.1694],
+            'estambul': [41.0082, 28.9784],
+            'istanbul': [41.0082, 28.9784]
+        }
+    };
+
+    // ═══════════════════════════════════════════════════════════════
+    // ESTADO INTERNO
+    // ═══════════════════════════════════════════════════════════════
+    let map = null;
+    let initialized = false;
+    let loadingCitizens = false;
+    let nodeLayer = null;
+    let citizenLayer = null;
+    let relayLayer = null;
+    let nodeLayerVisible = true;
+    let citizenLayerVisible = true;
+    let relayLayerVisible = true;
+
+    // ═══════════════════════════════════════════════════════════════
+    // GEOCODING (tabla local → cache → Nominatim)
+    // ═══════════════════════════════════════════════════════════════
+    function loadGeocodeCache() {
+        try {
+            const raw = localStorage.getItem(CONFIG.geocodeCacheKey);
+            return raw ? JSON.parse(raw) : {};
+        } catch (e) {
+            return {};
+        }
+    }
+    function saveGeocodeCache(cache) {
+        try {
+            localStorage.setItem(CONFIG.geocodeCacheKey, JSON.stringify(cache));
+        } catch (e) {}
+    }
+
+    async function geocodeCity(cityName) {
+        if (!cityName || typeof cityName !== 'string') return null;
+        const key = cityName.trim().toLowerCase();
+        if (!key) return null;
+
+        // 1. Tabla local
+        if (CONFIG.knownCities[key]) return CONFIG.knownCities[key];
+
+        // 2. Cache localStorage
+        const cache = loadGeocodeCache();
+        if (cache[key]) {
+            if (cache[key] === 'NOT_FOUND') return null;
+            return cache[key];
+        }
+
+        // 3. Nominatim (rate-limited; usar con moderación)
+        try {
+            const resp = await fetch(
+                `https://nominatim.openstreetmap.org/search?format=json&limit=1&q=${encodeURIComponent(cityName)}`,
+                { headers: { 'Accept-Language': 'es' } }
+            );
+            if (!resp.ok) throw new Error('nominatim ' + resp.status);
+            const data = await resp.json();
+            if (data && data.length > 0) {
+                const coords = [parseFloat(data[0].lat), parseFloat(data[0].lon)];
+                cache[key] = coords;
+                saveGeocodeCache(cache);
+                return coords;
+            }
+            cache[key] = 'NOT_FOUND';
+            saveGeocodeCache(cache);
+            return null;
+        } catch (e) {
+            console.warn('[LBW_Map] Geocoding falló para', cityName, e);
+            return null;
+        }
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // DATOS: ciudadanos por ciudad
+    // ═══════════════════════════════════════════════════════════════
+    // Filtro opcional por profesión. Si se pasa una professionCode, solo
+    // se cuentan usuarios cuyo `users.profession` coincida. Preserva la
+    // privacidad: seguimos agregando por ciudad, NUNCA listamos usuarios
+    // individuales.
+    async function loadCitizensByCity(professionFilter) {
+        try {
+            if (typeof supabaseClient === 'undefined') return {};
+            // Pedimos profession también para poder filtrar client-side.
+            // Si la columna no existe (migración pendiente), Supabase
+            // devuelve error → fallback al SELECT solo city.
+            let rows = null;
+            try {
+                const r = await supabaseClient.from('users').select('city, profession');
+                if (!r.error && r.data) rows = r.data;
+            } catch (e) {}
+            if (!rows) {
+                const r2 = await supabaseClient.from('users').select('city');
+                if (r2.error || !r2.data) return {};
+                rows = r2.data;
+            }
+
+            const filter = (professionFilter || '').trim();
+            const counts = {};
+            rows.forEach(u => {
+                const c = (u.city || '').trim();
+                if (!c) return;
+                if (filter && (u.profession || '') !== filter) return;
+                const key = c.toLowerCase();
+                if (!counts[key]) counts[key] = { name: c, count: 0 };
+                counts[key].count++;
+            });
+            return counts;
+        } catch (e) {
+            console.warn('[LBW_Map] loadCitizensByCity error', e);
+            return {};
+        }
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // ICONOS
+    // ═══════════════════════════════════════════════════════════════
+    function nodeIcon() {
+        return L.divIcon({
+            className: 'lbw-node-marker',
+            html: '<div class="lbw-node-pin"><span>🏛️</span></div>',
+            iconSize: [52, 52],
+            iconAnchor: [26, 26],
+            popupAnchor: [0, -22]
+        });
+    }
+
+    function citizenIcon(count) {
+        const size = Math.min(62, 28 + Math.log2(count + 1) * 8);
+        return L.divIcon({
+            className: 'lbw-citizen-marker',
+            html: `<div class="lbw-citizen-pin" style="width:${size}px;height:${size}px;font-size:${Math.max(12, size / 3)}px;"><span>${count}</span></div>`,
+            iconSize: [size, size],
+            iconAnchor: [size / 2, size / 2],
+            popupAnchor: [0, -size / 2]
+        });
+    }
+
+    function relayIcon() {
+        return L.divIcon({
+            className: 'lbw-relay-marker',
+            html: '<div class="lbw-relay-pin"><span>📡</span></div>',
+            iconSize: [44, 44],
+            iconAnchor: [22, 22],
+            popupAnchor: [0, -18]
+        });
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // RENDER
+    // ═══════════════════════════════════════════════════════════════
+    function renderNodes() {
+        if (!map) return;
+        if (nodeLayer) nodeLayer.clearLayers();
+        else nodeLayer = L.layerGroup();
+
+        CONFIG.physicalNodes.forEach(node => {
+            const marker = L.marker(node.coords, { icon: nodeIcon() });
+            marker.bindPopup(`
+                <div class="lbw-map-popup">
+                    <div class="lbw-map-popup-title">🏛️ ${node.name}</div>
+                    <div class="lbw-map-popup-subtitle">${node.subtitle}</div>
+                    <div class="lbw-map-popup-desc">${node.description}</div>
+                    <a href="${node.url}" target="_blank" rel="noopener" class="lbw-map-popup-link">
+                        Visitar sitio →
+                    </a>
+                </div>
+            `);
+            marker.addTo(nodeLayer);
+        });
+
+        if (nodeLayerVisible && !map.hasLayer(nodeLayer)) nodeLayer.addTo(map);
+        updateStatsBar();
+    }
+
+    function renderRelays() {
+        if (!map) return;
+        if (relayLayer) relayLayer.clearLayers();
+        else relayLayer = L.layerGroup();
+
+        CONFIG.relays.forEach(relay => {
+            const marker = L.marker(relay.coords, { icon: relayIcon() });
+            marker.bindPopup(`
+                <div class="lbw-map-popup">
+                    <div class="lbw-map-popup-title">📡 ${relay.name}</div>
+                    <div class="lbw-map-popup-subtitle">${relay.subtitle}</div>
+                    <div class="lbw-map-popup-desc">${relay.description}</div>
+                    <div class="lbw-map-popup-desc" style="font-size:0.75rem;opacity:0.75;">
+                        Operador: ${relay.operator}
+                    </div>
+                    <div class="lbw-map-popup-desc" style="font-family:'JetBrains Mono',monospace;font-size:0.75rem;color:var(--color-gold);">
+                        ${relay.url}
+                    </div>
+                </div>
+            `);
+            marker.addTo(relayLayer);
+        });
+
+        if (relayLayerVisible && !map.hasLayer(relayLayer)) relayLayer.addTo(map);
+        updateStatsBar();
+    }
+
+    // Profesión actualmente filtrada en la UI (vacío = todas)
+    let _activeProfession = '';
+
+    async function renderCitizens() {
+        if (!map || loadingCitizens) return;
+        loadingCitizens = true;
+
+        if (citizenLayer) citizenLayer.clearLayers();
+        else citizenLayer = L.layerGroup();
+
+        const statusEl = document.getElementById('lbwMapStatus');
+        if (statusEl) statusEl.textContent = '⏳ Cargando ciudadanos...';
+
+        const counts = await loadCitizensByCity(_activeProfession);
+        const entries = Object.values(counts);
+
+        let totalCitizens = 0;
+        let mappedCities = 0;
+        let pendingGeocode = 0;
+
+        for (const entry of entries) {
+            totalCitizens += entry.count;
+
+            // Primero intentamos sin tocar red (tabla local + cache)
+            const key = entry.name.trim().toLowerCase();
+            let coords = CONFIG.knownCities[key];
+            if (!coords) {
+                const cache = loadGeocodeCache();
+                if (cache[key] && cache[key] !== 'NOT_FOUND') coords = cache[key];
+            }
+
+            // Si seguimos sin coords, geocoding online (diferido)
+            if (!coords) {
+                pendingGeocode++;
+                // Dispara async sin bloquear — se refrescará al terminar
+                geocodeCity(entry.name).then(c => {
+                    if (c) addCitizenMarker(entry, c);
+                });
+                continue;
+            }
+            addCitizenMarker(entry, coords);
+            mappedCities++;
+        }
+
+        if (citizenLayerVisible && !map.hasLayer(citizenLayer)) citizenLayer.addTo(map);
+
+        if (statusEl) {
+            const pendingTxt = pendingGeocode > 0 ? ` · ${pendingGeocode} ciudad(es) geocodificándose` : '';
+            statusEl.textContent = `${totalCitizens} ciudadano(s) · ${mappedCities} ciudad(es) mapeadas${pendingTxt}`;
+        }
+        updateStatsBar(totalCitizens, mappedCities);
+        loadingCitizens = false;
+    }
+
+    function addCitizenMarker(entry, coords) {
+        if (!citizenLayer) return;
+        const marker = L.marker(coords, { icon: citizenIcon(entry.count) });
+        const word = entry.count === 1 ? 'ciudadano' : 'ciudadanos';
+        // Si hay filtro de profesión activo, lo reflejamos en el popup
+        // (manteniendo agregado por privacidad — solo el count cambia).
+        let profLine = '';
+        if (_activeProfession && typeof window.LBW_Professions !== 'undefined') {
+            const label = window.LBW_Professions.getLabel(_activeProfession);
+            if (label) {
+                profLine = `<div class="lbw-map-popup-desc" style="font-size:0.78rem;color:#90CAF9;margin-top:0.2rem;">${label}</div>`;
+            }
+        }
+        marker.bindPopup(`
+            <div class="lbw-map-popup">
+                <div class="lbw-map-popup-title">📍 ${entry.name}</div>
+                <div class="lbw-map-popup-count">
+                    <strong>${entry.count}</strong> ${word}
+                </div>
+                ${profLine}
+                <div class="lbw-map-popup-desc" style="font-size:0.75rem;opacity:0.7;">
+                    Agregado por privacidad
+                </div>
+            </div>
+        `);
+        marker.addTo(citizenLayer);
+    }
+
+    function updateStatsBar(totalCitizens, mappedCities) {
+        const citizenCountEl = document.getElementById('lbwMapCitizenCount');
+        const cityCountEl = document.getElementById('lbwMapCityCount');
+        const nodeCountEl = document.getElementById('lbwMapNodeCount');
+        const relayCountEl = document.getElementById('lbwMapRelayCount');
+        if (citizenCountEl && typeof totalCitizens === 'number') citizenCountEl.textContent = totalCitizens;
+        if (cityCountEl && typeof mappedCities === 'number') cityCountEl.textContent = mappedCities;
+        if (nodeCountEl) nodeCountEl.textContent = CONFIG.physicalNodes.length;
+        if (relayCountEl) relayCountEl.textContent = CONFIG.relays.length;
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // TOGGLES DE CAPA
+    // ═══════════════════════════════════════════════════════════════
+    function toggleNodes() {
+        if (!map || !nodeLayer) return;
+        nodeLayerVisible = !nodeLayerVisible;
+        if (nodeLayerVisible) nodeLayer.addTo(map);
+        else map.removeLayer(nodeLayer);
+        const btn = document.getElementById('lbwMapToggleNodes');
+        if (btn) btn.classList.toggle('active', nodeLayerVisible);
+    }
+    function toggleCitizens() {
+        if (!map || !citizenLayer) return;
+        citizenLayerVisible = !citizenLayerVisible;
+        if (citizenLayerVisible) citizenLayer.addTo(map);
+        else map.removeLayer(citizenLayer);
+        const btn = document.getElementById('lbwMapToggleCitizens');
+        if (btn) btn.classList.toggle('active', citizenLayerVisible);
+    }
+    function toggleRelays() {
+        if (!map || !relayLayer) return;
+        relayLayerVisible = !relayLayerVisible;
+        if (relayLayerVisible) relayLayer.addTo(map);
+        else map.removeLayer(relayLayer);
+        const btn = document.getElementById('lbwMapToggleRelays');
+        if (btn) btn.classList.toggle('active', relayLayerVisible);
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // CSS (inyectado para mantener el módulo autocontenido)
+    // ═══════════════════════════════════════════════════════════════
+    function injectStyles() {
+        if (document.getElementById('lbw-map-styles')) return;
+        const style = document.createElement('style');
+        style.id = 'lbw-map-styles';
+        style.textContent = `
+            #lbwMapContainer {
+                width: 100%;
+                height: calc(100vh - 260px);
+                min-height: 400px;
+                border-radius: 16px;
+                border: 2px solid var(--color-border);
+                background: var(--color-bg-dark);
+                overflow: hidden;
+                z-index: 1;
+            }
+            /* Header compacto con título + stats inline + privacy */
+            .lbw-map-header {
+                display: flex;
+                align-items: center;
+                gap: 1rem;
+                flex-wrap: wrap;
+                margin-bottom: 0.75rem;
+            }
+            .lbw-map-title {
+                color: var(--color-gold);
+                font-size: 1.4rem;
+                margin: 0;
+                flex-shrink: 0;
+            }
+            .lbw-map-stats-inline {
+                display: flex;
+                gap: 0.9rem;
+                flex: 1;
+                flex-wrap: wrap;
+                align-items: center;
+                font-family: 'JetBrains Mono', monospace;
+            }
+            .lbw-map-stat-inline {
+                color: var(--color-text-secondary);
+                font-size: 0.9rem;
+                white-space: nowrap;
+            }
+            .lbw-map-stat-inline .v {
+                color: var(--color-gold);
+                font-weight: 700;
+                font-size: 1rem;
+                margin-right: 0.2rem;
+            }
+            .lbw-map-privacy {
+                font-size: 1rem;
+                opacity: 0.6;
+                cursor: help;
+                flex-shrink: 0;
+            }
+            .lbw-map-privacy:hover { opacity: 1; }
+            /* Controles + status en misma fila */
+            .lbw-map-controls-row {
+                display: flex;
+                align-items: center;
+                gap: 0.75rem;
+                flex-wrap: wrap;
+                margin-bottom: 0.6rem;
+            }
+            .lbw-map-controls {
+                display: flex;
+                flex-wrap: wrap;
+                gap: 0.4rem;
+            }
+            .lbw-map-toggle {
+                padding: 0.35rem 0.75rem;
+                border-radius: 8px;
+                border: 2px solid var(--color-border);
+                background: var(--color-bg-card);
+                color: var(--color-text-secondary);
+                cursor: pointer;
+                font-size: 0.85rem;
+                font-weight: 600;
+                transition: all 0.2s ease;
+            }
+            .lbw-map-toggle:hover {
+                border-color: var(--color-gold);
+                color: var(--color-text-primary);
+            }
+            .lbw-map-toggle.active {
+                border-color: var(--color-gold);
+                background: rgba(229, 185, 92, 0.12);
+                color: var(--color-gold);
+            }
+            .lbw-map-status {
+                color: var(--color-text-secondary);
+                font-size: 0.8rem;
+                font-family: 'JetBrains Mono', monospace;
+                opacity: 0.75;
+                flex: 1;
+                min-width: 120px;
+            }
+
+            /* Markers */
+            .lbw-node-marker,
+            .lbw-citizen-marker,
+            .lbw-relay-marker {
+                background: transparent;
+                border: none;
+            }
+            .lbw-node-pin {
+                width: 52px;
+                height: 52px;
+                border-radius: 50%;
+                background: radial-gradient(circle, #E5B95C 0%, #c89a42 100%);
+                border: 3px solid var(--color-bg-dark);
+                box-shadow: 0 0 0 2px #E5B95C, 0 4px 16px rgba(229, 185, 92, 0.5);
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                font-size: 24px;
+                animation: lbw-pulse-gold 2.4s infinite;
+            }
+            .lbw-relay-pin {
+                width: 44px;
+                height: 44px;
+                border-radius: 12px;
+                background: radial-gradient(circle, #9C27B0 0%, #6A1B9A 100%);
+                border: 3px solid var(--color-bg-dark);
+                box-shadow: 0 0 0 2px #CE93D8, 0 4px 14px rgba(156, 39, 176, 0.6);
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                font-size: 20px;
+                animation: lbw-pulse-purple 3s infinite;
+            }
+            .lbw-citizen-pin {
+                border-radius: 50%;
+                background: radial-gradient(circle, rgba(44, 95, 111, 0.95) 0%, rgba(26, 61, 74, 0.95) 100%);
+                border: 2px solid var(--color-teal-light);
+                box-shadow: 0 2px 10px rgba(0, 0, 0, 0.4);
+                color: #fff;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                font-weight: 700;
+                font-family: 'JetBrains Mono', monospace;
+            }
+            @keyframes lbw-pulse-gold {
+                0%, 100% { box-shadow: 0 0 0 2px #E5B95C, 0 4px 16px rgba(229, 185, 92, 0.5); }
+                50%      { box-shadow: 0 0 0 2px #E5B95C, 0 4px 24px rgba(229, 185, 92, 0.9); }
+            }
+            @keyframes lbw-pulse-purple {
+                0%, 100% { box-shadow: 0 0 0 2px #CE93D8, 0 4px 14px rgba(156, 39, 176, 0.6); }
+                50%      { box-shadow: 0 0 0 2px #CE93D8, 0 4px 22px rgba(156, 39, 176, 1); }
+            }
+
+            /* Popups */
+            .leaflet-popup-content-wrapper {
+                background: var(--color-bg-card) !important;
+                color: var(--color-text-primary) !important;
+                border: 1px solid var(--color-gold) !important;
+                border-radius: 12px !important;
+            }
+            .leaflet-popup-tip {
+                background: var(--color-bg-card) !important;
+                border: 1px solid var(--color-gold) !important;
+            }
+            .leaflet-popup-content {
+                margin: 0.75rem 1rem !important;
+                min-width: 180px;
+            }
+            .lbw-map-popup-title {
+                font-weight: 700;
+                color: var(--color-gold);
+                font-size: 1rem;
+                margin-bottom: 0.25rem;
+            }
+            .lbw-map-popup-subtitle {
+                font-size: 0.8rem;
+                color: var(--color-text-secondary);
+                margin-bottom: 0.5rem;
+            }
+            .lbw-map-popup-desc {
+                font-size: 0.85rem;
+                margin-bottom: 0.5rem;
+            }
+            .lbw-map-popup-count {
+                font-size: 0.95rem;
+            }
+            .lbw-map-popup-count strong {
+                color: var(--color-gold);
+                font-size: 1.2rem;
+            }
+            .lbw-map-popup-link {
+                display: inline-block;
+                color: var(--color-gold) !important;
+                text-decoration: none;
+                font-weight: 600;
+                font-size: 0.85rem;
+                margin-top: 0.25rem;
+            }
+            .lbw-map-popup-link:hover { text-decoration: underline; }
+
+            /* Atribución y controles de Leaflet en tema oscuro */
+            .leaflet-control-attribution {
+                background: rgba(13, 24, 33, 0.85) !important;
+                color: var(--color-text-secondary) !important;
+                font-size: 0.7rem !important;
+            }
+            .leaflet-control-attribution a { color: var(--color-gold) !important; }
+            .leaflet-control-zoom a {
+                background: var(--color-bg-card) !important;
+                color: var(--color-text-primary) !important;
+                border-color: var(--color-border) !important;
+            }
+            .leaflet-control-zoom a:hover {
+                background: var(--color-teal) !important;
+                color: var(--color-gold) !important;
+            }
+
+            @media (max-width: 600px) {
+                #lbwMapContainer {
+                    height: calc(100vh - 220px);
+                    min-height: 350px;
+                }
+                .lbw-map-title { font-size: 1.15rem; width: 100%; }
+                .lbw-map-stats-inline { gap: 0.6rem; }
+                .lbw-map-stat-inline { font-size: 0.8rem; }
+                .lbw-map-stat-inline .v { font-size: 0.9rem; }
+                .lbw-map-toggle { padding: 0.3rem 0.6rem; font-size: 0.78rem; }
+                .lbw-map-status { font-size: 0.72rem; width: 100%; }
+            }
+        `;
+        document.head.appendChild(style);
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // INIT
+    // ═══════════════════════════════════════════════════════════════
+    function init() {
+        if (initialized) {
+            setTimeout(() => { if (map) map.invalidateSize(); }, 100);
+            return;
+        }
+        const container = document.getElementById('lbwMapContainer');
+        if (!container) {
+            console.warn('[LBW_Map] Contenedor #lbwMapContainer no encontrado');
+            return;
+        }
+        if (typeof L === 'undefined') {
+            console.warn('[LBW_Map] Leaflet no está cargado');
+            container.innerHTML =
+                '<div style="padding:2rem;text-align:center;color:var(--color-text-secondary);">' +
+                '⚠️ No se pudo cargar el mapa. Verifica tu conexión.</div>';
+            return;
+        }
+
+        injectStyles();
+
+        map = L.map(container, {
+            center: CONFIG.initialCenter,
+            zoom: CONFIG.initialZoom,
+            minZoom: CONFIG.minZoom,
+            maxZoom: CONFIG.maxZoom,
+            zoomControl: true,
+            attributionControl: true,
+            worldCopyJump: true
+        });
+
+        L.tileLayer(CONFIG.tileUrl, {
+            attribution: CONFIG.tileAttribution,
+            subdomains: 'abcd',
+            maxZoom: CONFIG.maxZoom
+        }).addTo(map);
+
+        renderNodes();
+        renderRelays();
+        renderCitizens();
+        _populateProfessionFilterDom();
+
+        initialized = true;
+        setTimeout(() => map.invalidateSize(), 250);
+
+        console.info('[LBW_Map] Inicializado');
+    }
+
+    // Rellena el <select id="lbwMapProfessionFilter"> con la taxonomía
+    // LBW_Professions. Idempotente — re-llamarlo no duplica opciones.
+    function _populateProfessionFilterDom() {
+        const sel = document.getElementById('lbwMapProfessionFilter');
+        if (!sel || typeof window.LBW_Professions === 'undefined') return;
+        const prev = sel.value || '';
+        const opts = ['<option value="">💼 Todas las profesiones</option>']
+            .concat(window.LBW_Professions.getList().map(p =>
+                '<option value="' + p.code + '">' + p.label + '</option>'
+            )).join('');
+        sel.innerHTML = opts;
+        if (prev) sel.value = prev;
+    }
+
+    async function refresh() {
+        if (!initialized) return init();
+        const statusEl = document.getElementById('lbwMapStatus');
+        if (statusEl) statusEl.textContent = '🔄 Refrescando...';
+        renderNodes();
+        renderRelays();
+        await renderCitizens();
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // AUTO-INIT: observa cuando #mapaSection recibe .active
+    // ═══════════════════════════════════════════════════════════════
+    function setupAutoInit() {
+        const section = document.getElementById('mapaSection');
+        if (!section) {
+            // La sección aún no existe en el DOM: reintenta
+            setTimeout(setupAutoInit, 500);
+            return;
+        }
+        const observer = new MutationObserver(() => {
+            if (section.classList.contains('active')) {
+                init();
+            }
+        });
+        observer.observe(section, { attributes: true, attributeFilter: ['class'] });
+        // Si ya está activa al cargar (caso raro), init inmediato
+        if (section.classList.contains('active')) init();
+    }
+
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', setupAutoInit);
+    } else {
+        setupAutoInit();
+    }
+
+    // Cambia el filtro de profesión y re-renderiza ciudadanos por
+    // ciudad. Pasar '' (cadena vacía) restaura "todos".
+    function setProfessionFilter(code) {
+        _activeProfession = (code || '').trim();
+        renderCitizens();
+    }
+
+    function getProfessionFilter() {
+        return _activeProfession;
+    }
+
+    // API pública
+    window.LBW_Map = {
+        init: init,
+        refresh: refresh,
+        toggleNodes: toggleNodes,
+        toggleCitizens: toggleCitizens,
+        toggleRelays: toggleRelays,
+        setProfessionFilter: setProfessionFilter,
+        getProfessionFilter: getProfessionFilter
+    };
+})(window);

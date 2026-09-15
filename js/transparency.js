@@ -1,0 +1,1208 @@
+// ============================================================
+// ColombiaP2P — Transparency Section (transparency.js)
+//
+// Vista pública de:
+//   - Méritos: toda emisión de kind:31002 (issuer, recipient, amount,
+//     category, reason, when). Datos vienen de LBW_Merits.getAllMerits()
+//     que mantiene la lista plana sincronizada con los relays.
+//   - Wallet: balance + movimientos de la treasury LBW vía endpoint
+//     serverless propio (/api/transparency/wallet) que hace proxy a la
+//     API de coinos.io con un token almacenado como env var.
+//
+// El módulo es 100% cliente-side; el serverless del wallet vendrá en una
+// fase aparte cuando el username de coinos + el token estén disponibles.
+// Mientras tanto la sub-sección Wallet muestra un placeholder informativo.
+// ============================================================
+
+const LBW_Transparency = (() => {
+    'use strict';
+
+    let _currentTab = 'merits';
+    let _meritFilter = { category: '', search: '' };
+    let _showAllUsers = false;
+    const USERS_TOP_DEFAULT = 10;
+    let _meritsPage = 1;
+    const MERITS_PAGE_SIZE = 25;
+    let _walletPage = 1;
+    const WALLET_PAGE_SIZE = 25;
+    let _walletData = null;
+    let _walletDataAt = 0;
+    let _walletError = null;
+    const WALLET_CACHE_TTL_MS = 30 * 1000;
+
+    function _esc(s) {
+        if (s === null || s === undefined) return '';
+        return String(s)
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#39;');
+    }
+
+    function _shortNpub(pubkey) {
+        if (!pubkey) return '—';
+        if (typeof LBW_Nostr !== 'undefined' && LBW_Nostr.pubkeyToNpub) {
+            try {
+                const npub = LBW_Nostr.pubkeyToNpub(pubkey);
+                if (npub) return npub.substring(0, 12) + '…' + npub.substring(npub.length - 4);
+            } catch (e) {}
+        }
+        return pubkey.substring(0, 10) + '…' + pubkey.substring(pubkey.length - 4);
+    }
+
+    // Sanitiza el "reason" del mérito: trunca a 80 chars y escapa HTML.
+    // No necesitamos anonimizar identidad porque el reason es lo que el
+    // Génesis escribió como motivo de la emisión, no es un memo de pago
+    // anónimo. Quien escribe la razón sabe que es público.
+    function _sanitizeReason(s, max = 80) {
+        if (!s) return '';
+        const str = String(s).trim();
+        if (str.length <= max) return _esc(str);
+        return _esc(str.substring(0, max - 1)) + '…';
+    }
+
+    function _formatDate(unix) {
+        if (!unix) return '—';
+        const d = new Date(unix * 1000);
+        const day = String(d.getDate()).padStart(2, '0');
+        const month = String(d.getMonth() + 1).padStart(2, '0');
+        const year = d.getFullYear();
+        const hour = String(d.getHours()).padStart(2, '0');
+        const min = String(d.getMinutes()).padStart(2, '0');
+        return `${day}/${month}/${year} ${hour}:${min}`;
+    }
+
+    function switchTab(tab) {
+        _currentTab = tab;
+        // Toggle styles
+        document.querySelectorAll('[data-tx-tab]').forEach(btn => {
+            const isActive = btn.dataset.txTab === tab;
+            btn.style.background = isActive ? 'rgba(229,185,92,0.15)' : 'transparent';
+            btn.style.borderColor = isActive ? 'var(--color-gold)' : 'var(--color-border)';
+            btn.style.color = isActive ? 'var(--color-gold)' : 'var(--color-text-secondary)';
+            btn.style.fontWeight = isActive ? '700' : '400';
+        });
+        // Toggle panels
+        const pMerits = document.getElementById('transparencyMeritsPanel');
+        const pWallet = document.getElementById('transparencyWalletPanel');
+        if (pMerits) pMerits.style.display = (tab === 'merits') ? '' : 'none';
+        if (pWallet) pWallet.style.display = (tab === 'wallet') ? '' : 'none';
+        if (tab === 'merits') renderMeritsPanel();
+        else renderWalletPanel();
+    }
+
+    // Renderiza el leaderboard de usuarios desde lbwm_user_merits.
+    // Cada entry: rank + nivel emoji + npub corto + total + breakdown
+    // (nostr + actividad). Muestra top 10 por defecto con toggle "Ver
+    // todos". Devuelve cadena vacía si no hay datos Supabase.
+    function _renderUsersLeaderboardHtml(users) {
+        if (!Array.isArray(users) || users.length === 0) return '';
+        const sorted = users.slice().sort((a, b) => (b.total || 0) - (a.total || 0));
+        const total = sorted.length;
+        const visible = _showAllUsers ? sorted : sorted.slice(0, USERS_TOP_DEFAULT);
+
+        const rows = visible.map((u, i) => {
+            const rank = i + 1;
+            const npub = u.npub || (u.pubkey ? _shortNpub(u.pubkey) : '—');
+            const npubShort = (u.npub && u.npub.length > 16)
+                ? u.npub.substring(0, 12) + '…' + u.npub.substring(u.npub.length - 4)
+                : npub;
+            const total = u.total || 0;
+            const nostr = (u.economica||0) + (u.productiva||0) + (u.responsabilidad||0) + (u.financiada||0) + (u.fundacional||0);
+            const act   = u.activity_merits || 0;
+            const lvlEmoji = u.nivel_emoji || '';
+            const lvlName  = u.nivel || '';
+            const rankColor = rank === 1 ? '#FFD700' : rank === 2 ? '#C0C0C0' : rank === 3 ? '#CD7F32' : 'var(--color-text-secondary)';
+            return `
+                <div style="display:grid;grid-template-columns:auto 1fr auto;gap:0.6rem;align-items:center;background:var(--color-bg-card);border:1px solid var(--color-border);border-radius:8px;padding:0.5rem 0.75rem;">
+                    <div style="font-weight:700;color:${rankColor};font-size:0.85rem;min-width:1.8rem;">#${rank}</div>
+                    <div style="min-width:0;">
+                        <div style="display:flex;align-items:center;gap:0.4rem;flex-wrap:wrap;">
+                            <span title="${_esc(lvlName)}" style="font-size:0.9rem;">${_esc(lvlEmoji)}</span>
+                            <span data-pubkey-slot="${u.pubkey}" style="font-family:var(--font-mono);font-size:0.78rem;color:var(--color-text-primary);overflow:hidden;text-overflow:ellipsis;" title="${_esc(u.pubkey)}">${_esc(npubShort)}</span>
+                        </div>
+                        ${act > 0 ? `<div style="font-size:0.68rem;color:var(--color-text-secondary);opacity:0.75;margin-top:0.1rem;">Nostr ${nostr.toLocaleString('es-ES')} + Actividad ${act.toLocaleString('es-ES')}</div>` : ''}
+                    </div>
+                    <div style="font-weight:700;color:var(--color-gold);font-size:0.95rem;text-align:right;">${total.toLocaleString('es-ES')}</div>
+                </div>
+            `;
+        }).join('');
+
+        const toggleBtn = total > USERS_TOP_DEFAULT
+            ? `<button onclick="LBW_Transparency.toggleAllUsers()"
+                style="margin-top:0.5rem;width:100%;font-size:0.78rem;padding:0.4rem;border-radius:6px;border:1px dashed var(--color-border);background:transparent;color:var(--color-text-secondary);cursor:pointer;">
+                ${_showAllUsers ? `▲ Ver solo top ${USERS_TOP_DEFAULT}` : `▼ Ver los ${total} usuarios`}
+            </button>`
+            : '';
+
+        return `
+            <div style="margin-bottom:1.25rem;">
+                <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.5rem;flex-wrap:wrap;gap:0.4rem;">
+                    <div style="font-size:0.78rem;color:var(--color-text-secondary);font-weight:600;">🏆 Méritos totales por usuario (Nostr + Actividad)</div>
+                    <div style="font-size:0.7rem;color:var(--color-text-secondary);opacity:0.7;">${total} usuarios</div>
+                </div>
+                <div style="display:flex;flex-direction:column;gap:0.35rem;">
+                    ${rows}
+                </div>
+                ${toggleBtn}
+            </div>
+        `;
+    }
+
+    function _resolveNameInto(pubkey, slotSelector) {
+        if (!pubkey || typeof LBW_Sync === 'undefined' || !LBW_Sync.resolveProfile) return;
+        LBW_Sync.resolveProfile(pubkey).then(p => {
+            if (!p) return;
+            const name = p.name || p.display_name || '';
+            if (!name) return;
+            document.querySelectorAll(slotSelector).forEach(el => {
+                el.textContent = name;
+                el.title = pubkey;
+            });
+        }).catch(() => {});
+    }
+
+    // Cache de datos del ledger Supabase para evitar refetch en cada
+    // re-render por cambio de filtro. Se invalida al cabo de 60s o cuando
+    // el usuario pulsa "Actualizar".
+    let _supabaseDataCache = null;
+    let _supabaseDataCacheAt = 0;
+    const SUPABASE_CACHE_TTL_MS = 60 * 1000;
+    let _activityEventsCache = null;
+    let _activityEventsCacheAt = 0;
+
+    // Fetcha los eventos Nostr que cuentan como "actividad" (kind:1
+    // community chat, kind:30402 marketplace, kind:31000 propuestas,
+    // kind:31001 votos) y los convierte en entradas tipo-mérito con
+    // amount=10 y categoría actividad_*. Estos no son emisiones
+    // formales kind:31002, pero se incluyen en el registro inmutable
+    // para reflejar TODO mérito generado en el ecosistema (formal +
+    // actividad). El cap de 300 por usuario solo afecta al total
+    // ponderado del Ledger Maestro, no al registro per-evento de aquí.
+    //
+    // IMPORTANTE: leemos de IndexedDB (LBW_Store), NO de relays vía
+    // LBW_Nostr.subscribe. Motivo: LBW_Nostr.subscribe tiene un dedup
+    // global _seenEvents (nostr.js:865) que bloquea cualquier evento ya
+    // visto por otra suscripción. Como chat/marketplace/gobernanza ya
+    // habrán cargado estos kinds antes de que el usuario abra
+    // Transparency, el callback no recibiría nada. LBW_Store sí tiene
+    // todos los eventos persistidos vía LBW_Sync.syncedSubscribe.
+    async function _fetchActivityEvents(force) {
+        if (!force && _activityEventsCache && (Date.now() - _activityEventsCacheAt < SUPABASE_CACHE_TTL_MS)) {
+            console.warn('[Transparency] activity cache hit:', _activityEventsCache.length);
+            return _activityEventsCache;
+        }
+        if (typeof LBW_Store === 'undefined' || !LBW_Store.getEventsByKind) {
+            console.warn('[Transparency] LBW_Store no disponible para fetch de actividad');
+            return [];
+        }
+        console.warn('[Transparency] leyendo actividad desde IndexedDB (4 kinds)…');
+        const all = [];
+        const seen = new Set();
+        const counts = { chat: 0, marketplace: 0, proposal: 0, vote: 0 };
+        function add(event, category, reasonContent, countKey) {
+            if (!event || !event.id || seen.has(event.id)) return;
+            seen.add(event.id);
+            counts[countKey]++;
+            all.push({
+                id: event.id,
+                dTag: '',
+                recipient: event.pubkey,
+                issuer: '',                                // sistema, sin issuer
+                amount: 10,
+                category,
+                reason: (reasonContent || '').toString().substring(0, 80),
+                created_at: event.created_at || 0,
+                source: 'actividad'
+            });
+        }
+        try {
+            const [chat, market, props, votes] = await Promise.all([
+                LBW_Store.getEventsByKind(1,     { limit: 1000, tags: { t: ['colombiap2p', 'c2p', 'bitcoin'] } }).catch(() => []),
+                LBW_Store.getEventsByKind(30402, { limit: 1000, tags: { t: ['colombiap2p-market', 'c2p-market'] } }).catch(() => []),
+                LBW_Store.getEventsByKind(31000, { limit: 1000, tags: { t: ['lbw-proposal'] } }).catch(() => []),
+                LBW_Store.getEventsByKind(31001, { limit: 1000, tags: { t: ['lbw-governance'] } }).catch(() => [])
+            ]);
+            (chat || []).forEach(e => {
+                const hasTag = e.tags && e.tags.some(t => t[0] === 't' && (t[1] === 'colombiap2p' || t[1] === 'c2p' || t[1] === 'bitcoin'));
+                if (hasTag) add(e, 'actividad_chat', e.content || '', 'chat');
+            });
+            (market || []).forEach(e => {
+                const title = (e.tags && (e.tags.find(t => t[0] === 'title') || [])[1]) || '';
+                add(e, 'actividad_marketplace', title, 'marketplace');
+            });
+            (props || []).forEach(e => {
+                const title = (e.tags && (e.tags.find(t => t[0] === 'title') || [])[1]) || '';
+                add(e, 'actividad_proposal', title, 'proposal');
+            });
+            (votes || []).forEach(e => {
+                add(e, 'actividad_vote', e.content || '', 'vote');
+            });
+            console.warn('[Transparency] ✅ actividad cargada: ' + all.length + ' eventos · ' + JSON.stringify(counts));
+        } catch (e) {
+            console.warn('[Transparency] error leyendo actividad:', e && e.message);
+        }
+        _activityEventsCache = all;
+        _activityEventsCacheAt = Date.now();
+        return all;
+    }
+
+    async function _fetchSupabaseLedger(force) {
+        if (!force && _supabaseDataCache && (Date.now() - _supabaseDataCacheAt < SUPABASE_CACHE_TTL_MS)) {
+            return _supabaseDataCache;
+        }
+        if (typeof supabaseClient === 'undefined') return null;
+        try {
+            // Stats agregadas + leaderboard completo (mismo getter que
+            // usa el Ledger Maestro de la sección Méritos).
+            let stats = null;
+            let users = [];
+            if (typeof LBW_MeritsSync !== 'undefined' && LBW_MeritsSync.loadSupabaseLedger) {
+                const ledger = await LBW_MeritsSync.loadSupabaseLedger({ limit: 999 });
+                if (ledger) {
+                    if (ledger.stats) stats = ledger.stats;
+                    if (Array.isArray(ledger.users)) users = ledger.users;
+                }
+            }
+            // Lista de emisiones individuales (kind:31002) más recientes
+            const { data, error } = await supabaseClient
+                .from('lbwm_merit_events')
+                .select('id, pubkey, npub, amount, category, reason, awarded_by, nostr_d_tag, nostr_created_at, source')
+                .order('nostr_created_at', { ascending: false })
+                .limit(500);
+            if (error) {
+                console.warn('[Transparency] Supabase lbwm_merit_events error:', error.message);
+                return stats ? { stats, users, entries: [] } : null;
+            }
+            const entries = (data || []).map(r => ({
+                id: r.id,
+                dTag: r.nostr_d_tag || '',
+                recipient: r.pubkey,
+                issuer: r.awarded_by || '',
+                amount: r.amount || 0,
+                category: r.category || '',
+                reason: r.reason || '',
+                created_at: r.nostr_created_at || 0,
+                source: r.source || ''
+            }));
+            _supabaseDataCache = { stats, users, entries };
+            _supabaseDataCacheAt = Date.now();
+            return _supabaseDataCache;
+        } catch (e) {
+            console.warn('[Transparency] _fetchSupabaseLedger error:', e.message);
+            return null;
+        }
+    }
+
+    async function renderMeritsPanel() {
+        const panel = document.getElementById('transparencyMeritsPanel');
+        if (!panel) return;
+        if (typeof LBW_Merits === 'undefined' || !LBW_Merits.getAllMerits) {
+            panel.innerHTML = '<div class="placeholder"><p>Sistema de méritos no disponible.</p></div>';
+            return;
+        }
+
+        // Prefer Supabase (canonical, igual fuente que Ledger Maestro).
+        // Fallback a memoria local si Supabase falla. Además fetcheamos
+        // los eventos de actividad (chat, marketplace, votos, propuestas)
+        // para incluirlos como filas del registro.
+        const supa = await _fetchSupabaseLedger(false);
+        const activityEntries = await _fetchActivityEvents(false);
+
+        let stats, merits, dataSource;
+        // Combinar formal (Supabase entries) + actividad. Dedup por id.
+        let formalEntries = [];
+        if (supa && supa.entries) {
+            formalEntries = supa.entries;
+        } else if (LBW_Merits && LBW_Merits.getAllMerits) {
+            formalEntries = LBW_Merits.getAllMerits({ limit: 500 });
+        }
+        const seenIds = new Set();
+        const mergedAll = [];
+        for (const e of formalEntries) {
+            if (e && e.id && !seenIds.has(e.id)) { seenIds.add(e.id); mergedAll.push(e); }
+        }
+        for (const e of activityEntries) {
+            if (e && e.id && !seenIds.has(e.id)) { seenIds.add(e.id); mergedAll.push(e); }
+        }
+
+        // byCategory recomputado desde la lista mergeada (incluye formal
+        // + actividad). Así los chips de categoría reflejan TODO.
+        const byCategoryMerged = {};
+        const uniqueRecip = new Set();
+        const uniqueIssuersFormal = new Set();
+        for (const m of mergedAll) {
+            byCategoryMerged[m.category] = (byCategoryMerged[m.category] || 0) + (m.amount || 0);
+            if (m.recipient) uniqueRecip.add(m.recipient);
+            if (m.issuer) uniqueIssuersFormal.add(m.issuer);
+        }
+
+        if (supa && supa.stats) {
+            // Total y users del Ledger Maestro (con cap aplicado por usuario).
+            // No re-sumamos las filas de actividad porque eso ignoraría el cap
+            // de 300 — mantenemos coherencia con el resto de la app.
+            stats = {
+                count: mergedAll.length,
+                total: supa.stats.totalMerits || 0,
+                byCategory: byCategoryMerged,
+                uniqueIssuers: uniqueIssuersFormal.size,
+                uniqueRecipients: supa.stats.totalUsers || uniqueRecip.size
+            };
+            dataSource = 'supabase';
+        } else {
+            const baseStats = LBW_Merits.getAllMeritsStats();
+            stats = {
+                count: mergedAll.length,
+                total: baseStats.total || 0,
+                byCategory: byCategoryMerged,
+                uniqueIssuers: uniqueIssuersFormal.size,
+                uniqueRecipients: uniqueRecip.size
+            };
+            dataSource = 'memory';
+        }
+
+        // Asignar nº de bloque a TODOS los merits antes de filtrar.
+        // El bloque #1 es el más antiguo (génesis), el #N el más reciente.
+        // Así el número se mantiene estable aunque el usuario filtre.
+        const sortedAsc = mergedAll.slice().sort((a, b) => (a.created_at || 0) - (b.created_at || 0));
+        sortedAsc.forEach((m, i) => { m._blockNum = i + 1; });
+        const totalBlocks = sortedAsc.length;
+
+        // Aplicar filtro de categoría sobre el mergeado
+        let merged = mergedAll;
+        if (_meritFilter.category) {
+            merged = merged.filter(m => m.category === _meritFilter.category);
+        }
+        merged.sort((a, b) => (b.created_at || 0) - (a.created_at || 0));
+        merits = merged;
+
+        const searchQ = (_meritFilter.search || '').toLowerCase();
+        const filtered = searchQ
+            ? merits.filter(m =>
+                (m.reason || '').toLowerCase().includes(searchQ) ||
+                (m.category || '').toLowerCase().includes(searchQ)
+              )
+            : merits;
+
+        // Paginación: clamp page al rango válido
+        const totalPages = Math.max(1, Math.ceil(filtered.length / MERITS_PAGE_SIZE));
+        if (_meritsPage > totalPages) _meritsPage = totalPages;
+        if (_meritsPage < 1) _meritsPage = 1;
+        const pageStart = (_meritsPage - 1) * MERITS_PAGE_SIZE;
+        const pageEnd = pageStart + MERITS_PAGE_SIZE;
+        const pageRows = filtered.slice(pageStart, pageEnd);
+
+        // Render
+        const catEntries = Object.entries(stats.byCategory).sort((a, b) => b[1] - a[1]);
+
+        // Bloque "Tu actividad personal" — solo current user, los activity
+        // merits son client-side (no se publican como kind:31002).
+        let myActivityHtml = '';
+        try {
+            if (typeof getUnifiedMerits === 'function' && typeof LBW_Nostr !== 'undefined' && LBW_Nostr.isLoggedIn()) {
+                const u = getUnifiedMerits();
+                if (u && u.activityMerits >= 0) {
+                    const a = u.activity || {};
+                    myActivityHtml = `
+                        <div style="background:rgba(81,207,102,0.06);border:1px solid rgba(81,207,102,0.25);border-radius:10px;padding:0.85rem 1rem;margin-bottom:1.25rem;">
+                            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.5rem;flex-wrap:wrap;gap:0.5rem;">
+                                <div style="font-weight:700;color:#51cf66;font-size:0.92rem;">🏃 Tu actividad personal</div>
+                                <div style="font-size:0.78rem;color:var(--color-text-secondary);">Nostr <strong style="color:var(--color-gold);">${(u.nostrMerits||0).toLocaleString('es-ES')}</strong> + Actividad <strong style="color:#51cf66;">${(u.activityMerits||0).toLocaleString('es-ES')}</strong> = <strong>${(u.total||0).toLocaleString('es-ES')}</strong></div>
+                            </div>
+                            <div style="display:flex;flex-wrap:wrap;gap:0.4rem;font-size:0.78rem;color:var(--color-text-primary);">
+                                <span style="background:rgba(13,23,30,0.6);padding:0.25rem 0.6rem;border-radius:14px;">💬 ${a.posts||0} mensajes</span>
+                                <span style="background:rgba(13,23,30,0.6);padding:0.25rem 0.6rem;border-radius:14px;">🛍️ ${a.offers||0} ofertas</span>
+                                <span style="background:rgba(13,23,30,0.6);padding:0.25rem 0.6rem;border-radius:14px;">🗳️ ${a.votes||0} votos</span>
+                                <span style="background:rgba(13,23,30,0.6);padding:0.25rem 0.6rem;border-radius:14px;">📋 ${a.proposals||0} propuestas</span>
+                            </div>
+                            <div style="font-size:0.7rem;color:var(--color-text-secondary);opacity:0.75;margin-top:0.5rem;line-height:1.4;">
+                                Cada acción cuenta 10 pts (cap ${u.activityCap||300} pts). Esta cifra se calcula en tu cliente — no se publica como evento Nostr y por eso solo se ve la tuya, no la de otros usuarios. Las emisiones formales kind:31002 de los Génesis sí son públicas y aparecen abajo.
+                            </div>
+                        </div>
+                    `;
+                }
+            }
+        } catch (e) {}
+
+        const sourceBadge = dataSource === 'supabase'
+            ? `<span style="font-size:0.65rem;background:rgba(81,207,102,0.15);color:#51cf66;padding:0.2rem 0.5rem;border-radius:10px;border:1px solid rgba(81,207,102,0.3);">📚 Ledger Maestro (Supabase)</span>`
+            : `<span style="font-size:0.65rem;background:rgba(255,167,38,0.15);color:#FFA726;padding:0.2rem 0.5rem;border-radius:10px;border:1px solid rgba(255,167,38,0.3);">💾 Cache local (Supabase no disponible)</span>`;
+
+        panel.innerHTML = `
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.5rem;flex-wrap:wrap;gap:0.5rem;">
+                <div style="font-size:0.78rem;color:var(--color-text-secondary);font-weight:600;">📜 Emisiones formales (kind:31002 por Génesis)</div>
+                <div style="display:flex;gap:0.4rem;align-items:center;">
+                    ${sourceBadge}
+                    <button onclick="LBW_Transparency.refreshMerits()"
+                        style="font-size:0.7rem;padding:0.25rem 0.6rem;border-radius:10px;background:transparent;border:1px solid var(--color-border);color:var(--color-text-secondary);cursor:pointer;">
+                        🔄 Actualizar
+                    </button>
+                </div>
+            </div>
+            <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:0.75rem;margin-bottom:1.25rem;">
+                <div class="stat-card" style="background:rgba(229,185,92,0.08);border:1px solid rgba(229,185,92,0.25);border-radius:10px;padding:0.85rem;text-align:center;">
+                    <div style="font-size:1.6rem;font-weight:700;color:var(--color-gold);">${stats.total.toLocaleString('es-ES')}</div>
+                    <div style="font-size:0.72rem;color:var(--color-text-secondary);margin-top:0.15rem;">LBWM emitidos</div>
+                </div>
+                <div class="stat-card" style="background:rgba(64,196,255,0.08);border:1px solid rgba(64,196,255,0.25);border-radius:10px;padding:0.85rem;text-align:center;">
+                    <div style="font-size:1.6rem;font-weight:700;color:#40C4FF;">${stats.count.toLocaleString('es-ES')}</div>
+                    <div style="font-size:0.72rem;color:var(--color-text-secondary);margin-top:0.15rem;">Emisiones (eventos)</div>
+                </div>
+                <div class="stat-card" style="background:rgba(81,207,102,0.08);border:1px solid rgba(81,207,102,0.25);border-radius:10px;padding:0.85rem;text-align:center;">
+                    <div style="font-size:1.6rem;font-weight:700;color:#51cf66;">${stats.uniqueIssuers}</div>
+                    <div style="font-size:0.72rem;color:var(--color-text-secondary);margin-top:0.15rem;">Génesis emisores</div>
+                </div>
+                <div class="stat-card" style="background:rgba(206,147,216,0.08);border:1px solid rgba(206,147,216,0.25);border-radius:10px;padding:0.85rem;text-align:center;">
+                    <div style="font-size:1.6rem;font-weight:700;color:#CE93D8;">${stats.uniqueRecipients}</div>
+                    <div style="font-size:0.72rem;color:var(--color-text-secondary);margin-top:0.15rem;">Receptores únicos</div>
+                </div>
+            </div>
+
+            ${catEntries.length > 0 ? `
+                <div style="margin-bottom:1.25rem;">
+                    <div style="font-size:0.78rem;color:var(--color-text-secondary);margin-bottom:0.4rem;">Emitidos por categoría</div>
+                    <div style="display:flex;flex-wrap:wrap;gap:0.4rem;">
+                        ${catEntries.map(([cat, amt]) => `
+                            <button onclick="LBW_Transparency.setMeritCategoryFilter('${_esc(cat)}')"
+                                style="font-size:0.78rem;padding:0.3rem 0.7rem;border-radius:14px;background:${_meritFilter.category === cat ? 'rgba(229,185,92,0.2)' : 'rgba(44,95,111,0.1)'};border:1px solid ${_meritFilter.category === cat ? 'var(--color-gold)' : 'var(--color-border)'};color:${_meritFilter.category === cat ? 'var(--color-gold)' : 'var(--color-text-primary)'};cursor:pointer;">
+                                ${_esc(cat)}: <strong>${amt.toLocaleString('es-ES')}</strong>
+                            </button>
+                        `).join('')}
+                        ${_meritFilter.category ? `
+                            <button onclick="LBW_Transparency.setMeritCategoryFilter('')"
+                                style="font-size:0.78rem;padding:0.3rem 0.7rem;border-radius:14px;background:transparent;border:1px dashed var(--color-text-secondary);color:var(--color-text-secondary);cursor:pointer;">
+                                ✕ Limpiar filtro
+                            </button>` : ''}
+                    </div>
+                </div>` : ''}
+
+            <div style="margin-bottom:0.75rem;">
+                <input type="text" id="meritSearchInput" placeholder="🔍 Buscar por razón o categoría..."
+                    value="${_esc(_meritFilter.search)}"
+                    oninput="LBW_Transparency.setMeritSearch(this.value)"
+                    style="width:100%;padding:0.6rem 0.75rem;background:var(--color-bg-dark);border:1px solid var(--color-border);border-radius:8px;color:var(--color-text-primary);font-family:var(--font-display);">
+            </div>
+
+            ${filtered.length === 0 ? `
+                <div class="placeholder" style="text-align:center;padding:2rem;color:var(--color-text-secondary);">
+                    <div style="font-size:2rem;margin-bottom:0.5rem;">🏅</div>
+                    <p>No hay méritos que coincidan con el filtro actual.</p>
+                </div>
+            ` : `
+                <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.5rem;flex-wrap:wrap;gap:0.4rem;">
+                    <div style="font-size:0.78rem;color:var(--color-text-secondary);display:flex;align-items:center;gap:0.4rem;">
+                        <span style="color:var(--color-gold);font-weight:700;">⛓️</span>
+                        <span>Cadena de méritos · <strong style="color:var(--color-text-primary);">${totalBlocks.toLocaleString('es-ES')}</strong> bloques · más recientes primero</span>
+                    </div>
+                    <button onclick="LBW_Transparency.exportMeritsCSV()"
+                        style="font-size:0.7rem;padding:0.25rem 0.6rem;border-radius:10px;background:transparent;border:1px solid var(--color-border);color:var(--color-text-secondary);cursor:pointer;">
+                        ⬇️ Exportar CSV (todos)
+                    </button>
+                </div>
+                <div style="font-size:0.7rem;color:var(--color-text-secondary);opacity:0.7;margin-bottom:0.6rem;line-height:1.4;">
+                    💡 Cada bloque es un evento Nostr firmado e inmutable. El hash de la izquierda es el <code style="font-family:var(--font-mono);font-size:0.68rem;background:rgba(44,95,111,0.18);padding:0.05rem 0.3rem;border-radius:3px;">event.id</code> (SHA-256 del payload canónico). El bloque #1 es el génesis del registro. Incluye emisiones formales kind:31002 + eventos de actividad. El total LBWM aplica un cap de 300 pts de actividad por usuario, por eso la suma de filas puede superar el total agregado.
+                </div>
+                <div style="overflow-x:auto;border:1px solid var(--color-border);border-radius:10px;background:linear-gradient(180deg,rgba(13,23,30,0.6) 0%,rgba(13,23,30,0.35) 100%);box-shadow:inset 0 0 0 1px rgba(229,185,92,0.05);">
+                    <table style="width:100%;border-collapse:collapse;font-size:0.78rem;color:var(--color-text-primary);min-width:880px;font-family:var(--font-mono);">
+                        <thead>
+                            <tr style="background:linear-gradient(180deg,rgba(229,185,92,0.06),rgba(13,23,30,0.55));border-bottom:1px solid rgba(229,185,92,0.25);">
+                                <th style="text-align:left;padding:0.55rem 0.7rem;font-size:0.66rem;font-weight:700;color:var(--color-gold);text-transform:uppercase;letter-spacing:0.08em;border-right:1px solid rgba(229,185,92,0.1);">Bloque</th>
+                                <th style="text-align:left;padding:0.55rem 0.7rem;font-size:0.66rem;font-weight:700;color:var(--color-text-secondary);text-transform:uppercase;letter-spacing:0.08em;">Hash</th>
+                                <th style="text-align:left;padding:0.55rem 0.7rem;font-size:0.66rem;font-weight:700;color:var(--color-text-secondary);text-transform:uppercase;letter-spacing:0.08em;">Timestamp</th>
+                                <th style="text-align:right;padding:0.55rem 0.7rem;font-size:0.66rem;font-weight:700;color:var(--color-text-secondary);text-transform:uppercase;letter-spacing:0.08em;">LBWM</th>
+                                <th style="text-align:left;padding:0.55rem 0.7rem;font-size:0.66rem;font-weight:700;color:var(--color-text-secondary);text-transform:uppercase;letter-spacing:0.08em;">Categoría</th>
+                                <th style="text-align:left;padding:0.55rem 0.7rem;font-size:0.66rem;font-weight:700;color:var(--color-text-secondary);text-transform:uppercase;letter-spacing:0.08em;">Emisor → Destinatario</th>
+                                <th style="text-align:left;padding:0.55rem 0.7rem;font-size:0.66rem;font-weight:700;color:var(--color-text-secondary);text-transform:uppercase;letter-spacing:0.08em;">Memo</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            ${pageRows.map((m, idx) => {
+                                const blockNum = m._blockNum || 0;
+                                const isGenesis = blockNum === 1;
+                                const isLatest = blockNum === totalBlocks;
+                                const blockLabel = '#' + String(blockNum).padStart(4, '0');
+                                const hashShort = m.id ? (m.id.substring(0, 10) + '…' + m.id.substring(m.id.length - 6)) : '—';
+                                const blockBg = idx % 2 === 0 ? 'rgba(13,23,30,0.35)' : 'rgba(13,23,30,0.15)';
+                                const issuerHtml = m.issuer
+                                    ? `<span data-pubkey-slot="${m.issuer}" title="${_esc(m.issuer)}" style="color:var(--color-text-primary);">${_shortNpub(m.issuer)}</span>`
+                                    : `<span style="color:#51cf66;opacity:0.85;" title="Sistema (evento de actividad)">⚙ sistema</span>`;
+                                const recipHtml = `<span data-pubkey-slot="${m.recipient}" title="${_esc(m.recipient)}" style="color:var(--color-gold);">${_shortNpub(m.recipient)}</span>`;
+                                return `
+                                <tr style="border-bottom:1px solid rgba(44,95,111,0.18);background:${blockBg};border-left:3px solid ${isGenesis ? 'var(--color-gold)' : (isLatest ? '#51cf66' : 'rgba(229,185,92,0.18)')};">
+                                    <td style="padding:0.55rem 0.7rem;white-space:nowrap;border-right:1px solid rgba(229,185,92,0.08);">
+                                        <div style="display:flex;flex-direction:column;gap:0.15rem;">
+                                            <span style="font-weight:700;color:var(--color-gold);font-size:0.82rem;letter-spacing:0.02em;">${blockLabel}</span>
+                                            ${isGenesis ? '<span style="font-size:0.6rem;color:var(--color-gold);opacity:0.8;text-transform:uppercase;letter-spacing:0.1em;">génesis</span>' : ''}
+                                            ${isLatest && !isGenesis ? '<span style="font-size:0.6rem;color:#51cf66;text-transform:uppercase;letter-spacing:0.1em;">latest</span>' : ''}
+                                        </div>
+                                    </td>
+                                    <td style="padding:0.55rem 0.7rem;white-space:nowrap;font-size:0.68rem;">
+                                        <span title="${_esc(m.id)} (click para copiar el hash completo)" onclick="LBW_Transparency.copyToClipboard('${_esc(m.id)}', this)" style="cursor:pointer;color:var(--color-text-secondary);background:rgba(44,95,111,0.15);padding:0.2rem 0.5rem;border-radius:4px;border:1px solid rgba(44,95,111,0.3);">⛓ ${hashShort}</span>
+                                    </td>
+                                    <td style="padding:0.55rem 0.7rem;white-space:nowrap;color:var(--color-text-secondary);font-size:0.72rem;">${_formatDate(m.created_at)}</td>
+                                    <td style="padding:0.55rem 0.7rem;text-align:right;font-weight:700;color:var(--color-gold);white-space:nowrap;">+${m.amount.toLocaleString('es-ES')}</td>
+                                    <td style="padding:0.55rem 0.7rem;white-space:nowrap;">
+                                        <span style="font-size:0.68rem;background:rgba(64,196,255,0.12);color:#40C4FF;padding:0.18rem 0.55rem;border-radius:10px;border:1px solid rgba(64,196,255,0.25);font-family:var(--font-display);">${_esc(m.category)}</span>
+                                    </td>
+                                    <td style="padding:0.55rem 0.7rem;white-space:nowrap;font-size:0.72rem;">
+                                        ${issuerHtml} <span style="color:var(--color-text-secondary);opacity:0.5;">→</span> ${recipHtml}
+                                    </td>
+                                    <td style="padding:0.55rem 0.7rem;max-width:260px;color:var(--color-text-secondary);font-style:italic;font-family:var(--font-display);font-size:0.76rem;">
+                                        ${m.reason ? `"${_sanitizeReason(m.reason, 80)}"` : '<span style="opacity:0.4;">—</span>'}
+                                    </td>
+                                </tr>
+                            `;}).join('')}
+                        </tbody>
+                    </table>
+                </div>
+                <div style="display:flex;justify-content:space-between;align-items:center;margin-top:0.6rem;flex-wrap:wrap;gap:0.5rem;">
+                    <div style="font-size:0.72rem;color:var(--color-text-secondary);">
+                        Mostrando <strong style="color:var(--color-text-primary);">${(pageStart + 1).toLocaleString('es-ES')}</strong>–<strong style="color:var(--color-text-primary);">${Math.min(pageEnd, filtered.length).toLocaleString('es-ES')}</strong> de <strong style="color:var(--color-text-primary);">${filtered.length.toLocaleString('es-ES')}</strong> bloques${(_meritFilter.category || _meritFilter.search) ? ` (filtrado de ${totalBlocks.toLocaleString('es-ES')})` : ''}
+                    </div>
+                    <div style="display:flex;gap:0.3rem;align-items:center;">
+                        <button onclick="LBW_Transparency.goToMeritsPage(1)" ${_meritsPage <= 1 ? 'disabled' : ''}
+                            style="font-size:0.72rem;padding:0.3rem 0.55rem;border-radius:6px;background:transparent;border:1px solid var(--color-border);color:var(--color-text-secondary);cursor:${_meritsPage <= 1 ? 'not-allowed' : 'pointer'};opacity:${_meritsPage <= 1 ? '0.35' : '1'};font-family:var(--font-mono);" title="Primera página">⏮</button>
+                        <button onclick="LBW_Transparency.goToMeritsPage(${_meritsPage - 1})" ${_meritsPage <= 1 ? 'disabled' : ''}
+                            style="font-size:0.72rem;padding:0.3rem 0.65rem;border-radius:6px;background:transparent;border:1px solid var(--color-border);color:var(--color-text-secondary);cursor:${_meritsPage <= 1 ? 'not-allowed' : 'pointer'};opacity:${_meritsPage <= 1 ? '0.35' : '1'};font-family:var(--font-mono);">◀ Prev</button>
+                        <span style="font-size:0.72rem;color:var(--color-text-primary);padding:0 0.55rem;font-family:var(--font-mono);">Página <strong style="color:var(--color-gold);">${_meritsPage}</strong> / ${totalPages}</span>
+                        <button onclick="LBW_Transparency.goToMeritsPage(${_meritsPage + 1})" ${_meritsPage >= totalPages ? 'disabled' : ''}
+                            style="font-size:0.72rem;padding:0.3rem 0.65rem;border-radius:6px;background:transparent;border:1px solid var(--color-border);color:var(--color-text-secondary);cursor:${_meritsPage >= totalPages ? 'not-allowed' : 'pointer'};opacity:${_meritsPage >= totalPages ? '0.35' : '1'};font-family:var(--font-mono);">Next ▶</button>
+                        <button onclick="LBW_Transparency.goToMeritsPage(${totalPages})" ${_meritsPage >= totalPages ? 'disabled' : ''}
+                            style="font-size:0.72rem;padding:0.3rem 0.55rem;border-radius:6px;background:transparent;border:1px solid var(--color-border);color:var(--color-text-secondary);cursor:${_meritsPage >= totalPages ? 'not-allowed' : 'pointer'};opacity:${_meritsPage >= totalPages ? '0.35' : '1'};font-family:var(--font-mono);" title="Última página">⏭</button>
+                    </div>
+                </div>
+            `}
+
+            <div style="margin-top:1.5rem;"></div>
+            ${myActivityHtml}
+            ${_renderUsersLeaderboardHtml(supa && supa.users)}
+        `;
+
+        // Resolver nombres async
+        const uniquePubkeys = new Set();
+        filtered.forEach(m => { if (m.issuer) uniquePubkeys.add(m.issuer); if (m.recipient) uniquePubkeys.add(m.recipient); });
+        // También resuelve nombres de los usuarios del leaderboard
+        if (supa && Array.isArray(supa.users)) {
+            supa.users.forEach(u => { if (u.pubkey) uniquePubkeys.add(u.pubkey); });
+        }
+        for (const pk of uniquePubkeys) {
+            _resolveNameInto(pk, `[data-pubkey-slot="${pk}"]`);
+        }
+    }
+
+    async function _fetchWalletData(force) {
+        if (!force && _walletData && (Date.now() - _walletDataAt < WALLET_CACHE_TTL_MS)) {
+            return _walletData;
+        }
+        try {
+            // 1. Perfil público de coinos (lightning address, avatar, etc.)
+            const r = await fetch('/api/transparency/wallet', { cache: 'no-store' });
+            const data = await r.json();
+            if (!r.ok && data && !data.configured) {
+                _walletData = null;
+                _walletError = data;
+                return null;
+            }
+            // 2. Snapshot de balance + movimientos desde Supabase
+            //    (poblada por GitHub Action treasury-sync cada 15 min).
+            //    Si existe, sobrescribimos balance/movements y desactivamos
+            //    authNotSupported para que el render use la tabla blockchain.
+            try {
+                if (typeof supabaseClient !== 'undefined') {
+                    const { data: snaps } = await supabaseClient
+                        .from('treasury_snapshots')
+                        .select('balance, total_in, total_out, tx_count, movements, fetched_at')
+                        .order('fetched_at', { ascending: false })
+                        .limit(1);
+                    if (snaps && snaps.length > 0) {
+                        const s = snaps[0];
+                        data.balance = s.balance || 0;
+                        data.totalIn = s.total_in || 0;
+                        data.totalOut = s.total_out || 0;
+                        data.txCount = s.tx_count || 0;
+                        data.movements = Array.isArray(s.movements) ? s.movements : [];
+                        data.snapshotAt = s.fetched_at;
+                        data.authNotSupported = false;
+                    }
+                }
+            } catch (e) {
+                console.warn('[Transparency] snapshot treasury fallo:', e && e.message);
+                // Seguimos con el perfil público — la UI lo soporta vía authNotSupported
+            }
+            // 3. Zaps NIP-57 (kind:9735) firmados por coinos con #p=treasury.
+            //    Los emparejamos por amount+ts con cada movimiento entrante
+            //    para mostrar la pubkey verificable del donante.
+            try {
+                if (data.pubkey && Array.isArray(data.movements) && data.movements.length > 0) {
+                    const zaps = await _fetchZapsForTreasury(data.pubkey, false);
+                    if (zaps.length > 0) {
+                        data.movements = _matchMovementsWithZaps(data.movements, zaps);
+                        data.zapsFound = zaps.length;
+                    }
+                }
+            } catch (e) {
+                console.warn('[Transparency] zaps fetch fallo:', e && e.message);
+            }
+            _walletData = data;
+            _walletDataAt = Date.now();
+            _walletError = data && data.error ? data : null;
+            return data;
+        } catch (e) {
+            _walletError = { error: 'red caída', detail: e.message };
+            return null;
+        }
+    }
+
+    // Sanitiza memo: trunca + escapa HTML. NO oculta npub/email porque si
+    // alguien los escribe en el memo es voluntario (quiere ser identificado).
+    // Solo oculta nsec porque eso sería siempre un blunder de seguridad.
+    function _sanitizeMemo(s) {
+        if (!s) return '';
+        let str = String(s).trim();
+        str = str.replace(/nsec1[a-z0-9]{50,}/gi, '[nsec ocultada]');
+        if (str.length > 200) str = str.substring(0, 200) + '…';
+        return _esc(str);
+    }
+
+    // ── Zap receipts NIP-57 (kind:9735) ──────────────────────
+    // Cuando alguien paga la tesorería como zap Nostr (no como Lightning
+    // address genérico), coinos publica un kind:9735 con la pubkey del
+    // donante en el evento embebido (description tag = kind:9734 zap req
+    // firmado por el sender). Eso nos da atribución verificable.
+    let _zapsCache = null;
+    let _zapsCacheAt = 0;
+    const ZAPS_CACHE_TTL_MS = 60 * 1000;
+    async function _fetchZapsForTreasury(treasuryPubkey, force) {
+        if (!treasuryPubkey) return [];
+        if (!force && _zapsCache && (Date.now() - _zapsCacheAt < ZAPS_CACHE_TTL_MS)) {
+            return _zapsCache;
+        }
+        if (typeof LBW_Nostr === 'undefined' || !LBW_Nostr.subscribe) return [];
+        const zaps = await new Promise(resolve => {
+            const out = [];
+            const seen = new Set();
+            const timeout = setTimeout(() => resolve(out), 8000);
+            let done = false;
+            function finish() {
+                if (done) return;
+                done = true;
+                clearTimeout(timeout);
+                resolve(out);
+            }
+            const sub = LBW_Nostr.subscribe(
+                { kinds: [9735], '#p': [treasuryPubkey], limit: 200 },
+                (event) => {
+                    if (!event || !event.id || seen.has(event.id)) return;
+                    seen.add(event.id);
+                    const descTag = (event.tags || []).find(t => t[0] === 'description');
+                    if (!descTag) return;
+                    let zapReq;
+                    try { zapReq = JSON.parse(descTag[1]); } catch (e) { return; }
+                    if (!zapReq || !zapReq.pubkey) return;
+                    const amountTag = (event.tags || []).find(t => t[0] === 'amount')
+                                    || (zapReq.tags || []).find(t => t[0] === 'amount');
+                    const msats = amountTag ? Number(amountTag[1]) : 0;
+                    const sats = Math.floor(msats / 1000);
+                    out.push({
+                        id: event.id,
+                        senderPubkey: zapReq.pubkey,
+                        senderMessage: (zapReq.content || '').toString().substring(0, 200),
+                        sats,
+                        ts: event.created_at || 0
+                    });
+                },
+                () => {
+                    try { LBW_Nostr.unsubscribe(sub); } catch (e) {}
+                    finish();
+                }
+            );
+        });
+        _zapsCache = zaps;
+        _zapsCacheAt = Date.now();
+        return zaps;
+    }
+
+    // Empareja cada movimiento entrante con su zap (si lo hay) por amount + ts ±10min
+    function _matchMovementsWithZaps(movements, zaps) {
+        if (!Array.isArray(zaps) || zaps.length === 0) return movements;
+        const WINDOW_SECS = 600;
+        return movements.map(m => {
+            if (m.type !== 'in') return m;
+            const matches = zaps.filter(z => z.sats === m.amount && Math.abs(z.ts - m.ts) < WINDOW_SECS);
+            if (matches.length === 0) return m;
+            const best = matches.reduce((a, b) =>
+                Math.abs(a.ts - m.ts) < Math.abs(b.ts - m.ts) ? a : b
+            );
+            return Object.assign({}, m, { zap: best });
+        });
+    }
+
+    async function renderWalletPanel() {
+        const panel = document.getElementById('transparencyWalletPanel');
+        if (!panel) return;
+
+        // Loading inicial
+        if (!_walletData && !_walletError) {
+            panel.innerHTML = `
+                <div style="text-align:center;padding:2.5rem;color:var(--color-text-secondary);">
+                    <div style="font-size:2rem;margin-bottom:0.5rem;">⚡</div>
+                    <div style="font-size:0.85rem;">Cargando wallet de tesorería…</div>
+                </div>
+            `;
+        }
+
+        const data = await _fetchWalletData(false);
+
+        // Estado no configurado
+        if (!data || data.configured === false) {
+            const errMsg = (_walletError && _walletError.detail) || 'Configura LNBITS_READ_KEY en Vercel para ver el balance';
+            panel.innerHTML = `
+                <div style="background:rgba(255,167,38,0.08);border:1px solid rgba(255,167,38,0.3);border-radius:10px;padding:1rem 1.2rem;">
+                    <div style="color:#FFA726;font-weight:600;font-size:0.9rem;margin-bottom:0.4rem;">⚙️ Wallet no configurada</div>
+                    <div style="color:var(--color-text-secondary);font-size:0.8rem;line-height:1.5;">${_esc(errMsg)}</div>
+                </div>
+            `;
+            return;
+        }
+
+        // Modo "auth-not-supported": coinos.io requiere NIP-98 para balance + tx,
+        // que no podemos firmar en el lambda de Vercel (los noble libs crashean).
+        // Renderizamos sólo la info pública con link directo a coinos para auditoría.
+        if (data.authNotSupported) {
+            const lnAddr = data.lightning || '';
+            const publicUrl = data.publicUrl || '';
+            panel.innerHTML = `
+                <div style="background:linear-gradient(135deg,rgba(229,185,92,0.08),rgba(44,95,111,0.08));border:1px solid rgba(229,185,92,0.25);border-radius:12px;padding:1.25rem;margin-bottom:1.25rem;">
+                    <div style="display:flex;align-items:center;gap:0.9rem;flex-wrap:wrap;">
+                        ${data.picture ? `<img src="${_esc(data.picture)}" alt="" style="width:56px;height:56px;border-radius:50%;border:2px solid var(--color-gold);object-fit:cover;">` : ''}
+                        <div style="flex:1;min-width:200px;">
+                            <div style="font-size:0.7rem;color:var(--color-text-secondary);text-transform:uppercase;letter-spacing:0.08em;">Wallet de tesorería</div>
+                            <div style="font-size:1.1rem;color:var(--color-gold);font-weight:700;margin-top:0.1rem;">${_esc(data.display || data.username)}</div>
+                            ${data.about ? `<div style="font-size:0.78rem;color:var(--color-text-secondary);margin-top:0.3rem;line-height:1.4;">${_esc(data.about)}</div>` : ''}
+                        </div>
+                    </div>
+                </div>
+
+                <div style="background:rgba(229,185,92,0.06);border:1px solid rgba(229,185,92,0.3);border-radius:10px;padding:1rem 1.2rem;margin-bottom:1rem;">
+                    <div style="font-size:0.7rem;color:var(--color-text-secondary);text-transform:uppercase;letter-spacing:0.05em;margin-bottom:0.4rem;">⚡ Lightning address</div>
+                    <div style="display:flex;align-items:center;gap:0.5rem;flex-wrap:wrap;">
+                        <span style="font-family:var(--font-mono);font-size:1rem;color:var(--color-gold);font-weight:700;flex:1;">${_esc(lnAddr)}</span>
+                        <button onclick="LBW_Transparency.copyToClipboard('${_esc(lnAddr)}', this)" style="font-size:0.78rem;padding:0.35rem 0.75rem;border-radius:8px;background:rgba(229,185,92,0.15);border:1px solid var(--color-gold);color:var(--color-gold);cursor:pointer;font-weight:600;">📋 Copiar</button>
+                    </div>
+                    <div style="font-size:0.72rem;color:var(--color-text-secondary);margin-top:0.5rem;line-height:1.4;">
+                        Envía sats por Lightning a esta dirección para contribuir a la tesorería comunitaria. Compatible con Alby, Wallet of Satoshi, Phoenix, Zeus, BlueWallet, y cualquier wallet que soporte Lightning Address.
+                    </div>
+                </div>
+
+                <div style="background:rgba(64,196,255,0.06);border:1px solid rgba(64,196,255,0.25);border-radius:10px;padding:1rem 1.2rem;margin-bottom:1rem;">
+                    <div style="font-size:0.78rem;color:#40C4FF;font-weight:600;margin-bottom:0.4rem;">🔍 Auditoría de saldo y movimientos</div>
+                    <div style="font-size:0.78rem;color:var(--color-text-secondary);line-height:1.5;margin-bottom:0.6rem;">
+                        Configura la variable LNBITS_READ_KEY en Vercel para activar el balance en tiempo real. De momento la auditoría se puede hacer abriendo la wallet directamente en colsats.com.
+                    </div>
+                    <a href="${_esc(publicUrl)}" target="_blank" rel="noopener noreferrer"
+                       style="display:inline-flex;align-items:center;gap:0.4rem;font-size:0.8rem;padding:0.4rem 0.8rem;border-radius:8px;background:rgba(64,196,255,0.12);border:1px solid rgba(64,196,255,0.4);color:#40C4FF;text-decoration:none;font-weight:600;">
+                        ↗ Ver wallet en colsats.com
+                    </a>
+                </div>
+
+                ${data.lnurlp ? `
+                    <div style="background:var(--color-bg-card);border:1px solid var(--color-border);border-radius:10px;padding:0.85rem 1rem;">
+                        <div style="font-size:0.7rem;color:var(--color-text-secondary);text-transform:uppercase;letter-spacing:0.05em;margin-bottom:0.5rem;">Parámetros LNURLP</div>
+                        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:0.5rem;font-size:0.75rem;font-family:var(--font-mono);">
+                            <div><span style="color:var(--color-text-secondary);">Min:</span> <strong style="color:var(--color-text-primary);">${Math.floor((data.lnurlp.minSendable||0)/1000).toLocaleString('es-ES')}</strong> sats</div>
+                            <div><span style="color:var(--color-text-secondary);">Max:</span> <strong style="color:var(--color-text-primary);">${Math.floor((data.lnurlp.maxSendable||0)/1000).toLocaleString('es-ES')}</strong> sats</div>
+                            <div><span style="color:var(--color-text-secondary);">Memo:</span> <strong style="color:var(--color-text-primary);">${data.lnurlp.commentAllowed || 0}</strong> chars</div>
+                            <div><span style="color:var(--color-text-secondary);">Nostr zaps:</span> <strong style="color:${data.lnurlp.allowsNostr ? '#51cf66' : '#ff4d4f'};">${data.lnurlp.allowsNostr ? 'sí' : 'no'}</strong></div>
+                        </div>
+                    </div>
+                ` : ''}
+
+                <div style="text-align:right;margin-top:1rem;">
+                    <button onclick="LBW_Transparency.refreshWallet()" style="font-size:0.72rem;padding:0.3rem 0.7rem;border-radius:8px;background:transparent;border:1px solid var(--color-border);color:var(--color-text-secondary);cursor:pointer;">🔄 Actualizar</button>
+                </div>
+            `;
+            return;
+        }
+
+        const movs = Array.isArray(data.movements) ? data.movements : [];
+        // Asignar número de bloque (1 = más antiguo)
+        const sortedAsc = movs.slice().sort((a, b) => (a.ts || 0) - (b.ts || 0));
+        sortedAsc.forEach((m, i) => { m._blockNum = i + 1; });
+        const totalBlocks = sortedAsc.length;
+
+        // Paginación
+        const totalPages = Math.max(1, Math.ceil(movs.length / WALLET_PAGE_SIZE));
+        if (_walletPage > totalPages) _walletPage = totalPages;
+        if (_walletPage < 1) _walletPage = 1;
+        const pageStart = (_walletPage - 1) * WALLET_PAGE_SIZE;
+        const pageEnd = pageStart + WALLET_PAGE_SIZE;
+        const pageRows = movs.slice(pageStart, pageEnd);
+
+        const lnAddr = data.lightning || '';
+        const username = data.username || '';
+
+        // Edad del snapshot (worker treasury-sync corre cada 15 min)
+        let snapshotAgeMin = null;
+        if (data.snapshotAt) {
+            const ageMs = Date.now() - new Date(data.snapshotAt).getTime();
+            snapshotAgeMin = Math.max(0, Math.floor(ageMs / 60000));
+        }
+        const staleBadge = data.stale
+            ? `<span title="${_esc(data.error || '')}" style="font-size:0.65rem;background:rgba(255,77,79,0.15);color:#ff4d4f;padding:0.2rem 0.5rem;border-radius:10px;border:1px solid rgba(255,77,79,0.3);">⚠ datos viejos</span>`
+            : (snapshotAgeMin !== null
+                ? `<span title="Snapshot del worker treasury-sync (cada 15 min)" style="font-size:0.65rem;background:rgba(81,207,102,0.15);color:#51cf66;padding:0.2rem 0.5rem;border-radius:10px;border:1px solid rgba(81,207,102,0.3);">🟢 hace ${snapshotAgeMin}m</span>`
+                : `<span style="font-size:0.65rem;background:rgba(81,207,102,0.15);color:#51cf66;padding:0.2rem 0.5rem;border-radius:10px;border:1px solid rgba(81,207,102,0.3);">🟢 colsats.com</span>`);
+
+        panel.innerHTML = `
+            <div style="background:linear-gradient(135deg,rgba(229,185,92,0.08),rgba(44,95,111,0.08));border:1px solid rgba(229,185,92,0.25);border-radius:12px;padding:1rem 1.2rem;margin-bottom:1.25rem;">
+                <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:0.5rem;">
+                    <div>
+                        <div style="font-size:0.7rem;color:var(--color-text-secondary);text-transform:uppercase;letter-spacing:0.08em;">Wallet de tesorería</div>
+                        <div style="font-family:var(--font-mono);font-size:0.95rem;color:var(--color-gold);font-weight:700;margin-top:0.15rem;">⚡ ${_esc(lnAddr || username || '—')}</div>
+                    </div>
+                    <div style="display:flex;gap:0.4rem;align-items:center;">
+                        ${staleBadge}
+                        ${lnAddr ? `<button onclick="LBW_Transparency.copyToClipboard('${_esc(lnAddr)}', this)" style="font-size:0.7rem;padding:0.25rem 0.6rem;border-radius:10px;background:rgba(229,185,92,0.12);border:1px solid rgba(229,185,92,0.35);color:var(--color-gold);cursor:pointer;">📋 Copiar address</button>` : ''}
+                        <button onclick="LBW_Transparency.refreshWallet()" style="font-size:0.7rem;padding:0.25rem 0.6rem;border-radius:10px;background:transparent;border:1px solid var(--color-border);color:var(--color-text-secondary);cursor:pointer;">🔄 Actualizar</button>
+                    </div>
+                </div>
+            </div>
+
+            <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:0.75rem;margin-bottom:1.25rem;">
+                <div style="background:rgba(229,185,92,0.08);border:1px solid rgba(229,185,92,0.25);border-radius:10px;padding:0.85rem;text-align:center;">
+                    <div style="font-size:1.6rem;font-weight:700;color:var(--color-gold);">${(data.balance || 0).toLocaleString('es-ES')}</div>
+                    <div style="font-size:0.72rem;color:var(--color-text-secondary);margin-top:0.15rem;">sats · Saldo actual</div>
+                </div>
+                <div style="background:rgba(81,207,102,0.08);border:1px solid rgba(81,207,102,0.25);border-radius:10px;padding:0.85rem;text-align:center;">
+                    <div style="font-size:1.6rem;font-weight:700;color:#51cf66;">+${(data.totalIn || 0).toLocaleString('es-ES')}</div>
+                    <div style="font-size:0.72rem;color:var(--color-text-secondary);margin-top:0.15rem;">sats · Total recibido</div>
+                </div>
+                <div style="background:rgba(255,77,79,0.08);border:1px solid rgba(255,77,79,0.25);border-radius:10px;padding:0.85rem;text-align:center;">
+                    <div style="font-size:1.6rem;font-weight:700;color:#ff4d4f;">−${(data.totalOut || 0).toLocaleString('es-ES')}</div>
+                    <div style="font-size:0.72rem;color:var(--color-text-secondary);margin-top:0.15rem;">sats · Total gastado</div>
+                </div>
+                <div style="background:rgba(64,196,255,0.08);border:1px solid rgba(64,196,255,0.25);border-radius:10px;padding:0.85rem;text-align:center;">
+                    <div style="font-size:1.6rem;font-weight:700;color:#40C4FF;">${(data.txCount || 0).toLocaleString('es-ES')}</div>
+                    <div style="font-size:0.72rem;color:var(--color-text-secondary);margin-top:0.15rem;">movimientos</div>
+                </div>
+            </div>
+
+            ${movs.length === 0 ? `
+                <div class="placeholder" style="text-align:center;padding:2rem;color:var(--color-text-secondary);">
+                    <div style="font-size:2rem;margin-bottom:0.5rem;">⚡</div>
+                    <p>Aún sin movimientos en esta wallet.</p>
+                </div>
+            ` : `
+                <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.5rem;flex-wrap:wrap;gap:0.4rem;">
+                    <div style="font-size:0.78rem;color:var(--color-text-secondary);display:flex;align-items:center;gap:0.4rem;">
+                        <span style="color:var(--color-gold);font-weight:700;">⛓️</span>
+                        <span>Cadena de movimientos · <strong style="color:var(--color-text-primary);">${totalBlocks.toLocaleString('es-ES')}</strong> bloques · más recientes primero</span>
+                    </div>
+                    <button onclick="LBW_Transparency.exportWalletCSV()"
+                        style="font-size:0.7rem;padding:0.25rem 0.6rem;border-radius:10px;background:transparent;border:1px solid var(--color-border);color:var(--color-text-secondary);cursor:pointer;">
+                        ⬇️ Exportar CSV
+                    </button>
+                </div>
+                <div style="font-size:0.7rem;color:var(--color-text-secondary);opacity:0.75;margin-bottom:0.6rem;line-height:1.4;">
+                    💡 Cada bloque es un pago Lightning real con su hash. Los <span style="color:#CE93D8;">badges ⚡ zap</span> indican donantes identificados criptográficamente vía NIP-57 (sender pubkey firmada por el proveedor Lightning en el zap receipt kind:9735).${data.zapsFound ? ` <strong style="color:#CE93D8;">${data.zapsFound}</strong> zap${data.zapsFound===1?'':'s'} encontrados.` : ''} Los memos en texto libre son lo que escribió el pagador.
+                </div>
+                <div style="overflow-x:auto;border:1px solid var(--color-border);border-radius:10px;background:linear-gradient(180deg,rgba(13,23,30,0.6) 0%,rgba(13,23,30,0.35) 100%);box-shadow:inset 0 0 0 1px rgba(229,185,92,0.05);">
+                    <table style="width:100%;border-collapse:collapse;font-size:0.78rem;color:var(--color-text-primary);min-width:760px;font-family:var(--font-mono);">
+                        <thead>
+                            <tr style="background:linear-gradient(180deg,rgba(229,185,92,0.06),rgba(13,23,30,0.55));border-bottom:1px solid rgba(229,185,92,0.25);">
+                                <th style="text-align:left;padding:0.55rem 0.7rem;font-size:0.66rem;font-weight:700;color:var(--color-gold);text-transform:uppercase;letter-spacing:0.08em;border-right:1px solid rgba(229,185,92,0.1);">Bloque</th>
+                                <th style="text-align:left;padding:0.55rem 0.7rem;font-size:0.66rem;font-weight:700;color:var(--color-text-secondary);text-transform:uppercase;letter-spacing:0.08em;">Tx hash</th>
+                                <th style="text-align:left;padding:0.55rem 0.7rem;font-size:0.66rem;font-weight:700;color:var(--color-text-secondary);text-transform:uppercase;letter-spacing:0.08em;">Timestamp</th>
+                                <th style="text-align:center;padding:0.55rem 0.7rem;font-size:0.66rem;font-weight:700;color:var(--color-text-secondary);text-transform:uppercase;letter-spacing:0.08em;">Tipo</th>
+                                <th style="text-align:right;padding:0.55rem 0.7rem;font-size:0.66rem;font-weight:700;color:var(--color-text-secondary);text-transform:uppercase;letter-spacing:0.08em;">Sats</th>
+                                <th style="text-align:left;padding:0.55rem 0.7rem;font-size:0.66rem;font-weight:700;color:var(--color-text-secondary);text-transform:uppercase;letter-spacing:0.08em;">Memo</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            ${pageRows.map((m, idx) => {
+                                const blockNum = m._blockNum || 0;
+                                const isGenesis = blockNum === 1;
+                                const isLatest = blockNum === totalBlocks;
+                                const blockLabel = '#' + String(blockNum).padStart(4, '0');
+                                const hash = m.hash || m.id || '';
+                                const hashShort = hash ? (hash.substring(0, 10) + '…' + hash.substring(Math.max(0, hash.length - 6))) : '—';
+                                const isIn = m.type === 'in';
+                                const sign = isIn ? '+' : '−';
+                                const color = isIn ? '#51cf66' : '#ff4d4f';
+                                const typeLabel = isIn ? '↓ in' : '↑ out';
+                                const blockBg = idx % 2 === 0 ? 'rgba(13,23,30,0.35)' : 'rgba(13,23,30,0.15)';
+                                const borderLeft = isGenesis ? 'var(--color-gold)' : (isLatest ? '#51cf66' : (isIn ? 'rgba(81,207,102,0.4)' : 'rgba(255,77,79,0.4)'));
+                                return `
+                                <tr style="border-bottom:1px solid rgba(44,95,111,0.18);background:${blockBg};border-left:3px solid ${borderLeft};">
+                                    <td style="padding:0.55rem 0.7rem;white-space:nowrap;border-right:1px solid rgba(229,185,92,0.08);">
+                                        <div style="display:flex;flex-direction:column;gap:0.15rem;">
+                                            <span style="font-weight:700;color:var(--color-gold);font-size:0.82rem;letter-spacing:0.02em;">${blockLabel}</span>
+                                            ${isGenesis ? '<span style="font-size:0.6rem;color:var(--color-gold);opacity:0.8;text-transform:uppercase;letter-spacing:0.1em;">génesis</span>' : ''}
+                                            ${isLatest && !isGenesis ? '<span style="font-size:0.6rem;color:#51cf66;text-transform:uppercase;letter-spacing:0.1em;">latest</span>' : ''}
+                                        </div>
+                                    </td>
+                                    <td style="padding:0.55rem 0.7rem;white-space:nowrap;font-size:0.68rem;">
+                                        ${hash ? `<span title="${_esc(hash)} (click para copiar)" onclick="LBW_Transparency.copyToClipboard('${_esc(hash)}', this)" style="cursor:pointer;color:var(--color-text-secondary);background:rgba(44,95,111,0.15);padding:0.2rem 0.5rem;border-radius:4px;border:1px solid rgba(44,95,111,0.3);">⛓ ${hashShort}</span>` : '<span style="opacity:0.4;">—</span>'}
+                                    </td>
+                                    <td style="padding:0.55rem 0.7rem;white-space:nowrap;color:var(--color-text-secondary);font-size:0.72rem;">${_formatDate(m.ts)}</td>
+                                    <td style="padding:0.55rem 0.7rem;text-align:center;white-space:nowrap;">
+                                        <span style="font-size:0.68rem;background:${isIn ? 'rgba(81,207,102,0.12)' : 'rgba(255,77,79,0.12)'};color:${color};padding:0.18rem 0.55rem;border-radius:10px;border:1px solid ${isIn ? 'rgba(81,207,102,0.3)' : 'rgba(255,77,79,0.3)'};font-family:var(--font-display);">${typeLabel}</span>
+                                    </td>
+                                    <td style="padding:0.55rem 0.7rem;text-align:right;font-weight:700;color:${color};white-space:nowrap;">${sign}${Math.abs(m.amount || 0).toLocaleString('es-ES')}</td>
+                                    <td style="padding:0.55rem 0.7rem;max-width:280px;color:var(--color-text-secondary);font-family:var(--font-display);font-size:0.76rem;">
+                                        ${m.zap ? `
+                                            <div style="display:flex;flex-direction:column;gap:0.2rem;">
+                                                <div style="display:flex;align-items:center;gap:0.35rem;">
+                                                    <span title="Donante verificado vía zap Nostr (NIP-57)" style="font-size:0.65rem;background:rgba(206,147,216,0.15);color:#CE93D8;padding:0.1rem 0.4rem;border-radius:8px;border:1px solid rgba(206,147,216,0.3);font-family:var(--font-display);">⚡ zap</span>
+                                                    <span data-pubkey-slot="${m.zap.senderPubkey}" title="${_esc(m.zap.senderPubkey)}" style="font-family:var(--font-mono);font-size:0.72rem;color:#CE93D8;font-weight:600;">${_shortNpub(m.zap.senderPubkey)}</span>
+                                                </div>
+                                                ${m.zap.senderMessage ? `<div style="font-style:italic;color:var(--color-text-secondary);">"${_sanitizeMemo(m.zap.senderMessage)}"</div>` : ''}
+                                            </div>
+                                        ` : (m.memo ? `<span style="font-style:italic;">"${_sanitizeMemo(m.memo)}"</span>` : '<span style="opacity:0.4;">—</span>')}
+                                    </td>
+                                </tr>
+                            `;}).join('')}
+                        </tbody>
+                    </table>
+                </div>
+                <div style="display:flex;justify-content:space-between;align-items:center;margin-top:0.6rem;flex-wrap:wrap;gap:0.5rem;">
+                    <div style="font-size:0.72rem;color:var(--color-text-secondary);">
+                        Mostrando <strong style="color:var(--color-text-primary);">${(pageStart + 1).toLocaleString('es-ES')}</strong>–<strong style="color:var(--color-text-primary);">${Math.min(pageEnd, movs.length).toLocaleString('es-ES')}</strong> de <strong style="color:var(--color-text-primary);">${movs.length.toLocaleString('es-ES')}</strong> bloques
+                    </div>
+                    <div style="display:flex;gap:0.3rem;align-items:center;">
+                        <button onclick="LBW_Transparency.goToWalletPage(1)" ${_walletPage <= 1 ? 'disabled' : ''}
+                            style="font-size:0.72rem;padding:0.3rem 0.55rem;border-radius:6px;background:transparent;border:1px solid var(--color-border);color:var(--color-text-secondary);cursor:${_walletPage <= 1 ? 'not-allowed' : 'pointer'};opacity:${_walletPage <= 1 ? '0.35' : '1'};font-family:var(--font-mono);" title="Primera">⏮</button>
+                        <button onclick="LBW_Transparency.goToWalletPage(${_walletPage - 1})" ${_walletPage <= 1 ? 'disabled' : ''}
+                            style="font-size:0.72rem;padding:0.3rem 0.65rem;border-radius:6px;background:transparent;border:1px solid var(--color-border);color:var(--color-text-secondary);cursor:${_walletPage <= 1 ? 'not-allowed' : 'pointer'};opacity:${_walletPage <= 1 ? '0.35' : '1'};font-family:var(--font-mono);">◀ Prev</button>
+                        <span style="font-size:0.72rem;color:var(--color-text-primary);padding:0 0.55rem;font-family:var(--font-mono);">Página <strong style="color:var(--color-gold);">${_walletPage}</strong> / ${totalPages}</span>
+                        <button onclick="LBW_Transparency.goToWalletPage(${_walletPage + 1})" ${_walletPage >= totalPages ? 'disabled' : ''}
+                            style="font-size:0.72rem;padding:0.3rem 0.65rem;border-radius:6px;background:transparent;border:1px solid var(--color-border);color:var(--color-text-secondary);cursor:${_walletPage >= totalPages ? 'not-allowed' : 'pointer'};opacity:${_walletPage >= totalPages ? '0.35' : '1'};font-family:var(--font-mono);">Next ▶</button>
+                        <button onclick="LBW_Transparency.goToWalletPage(${totalPages})" ${_walletPage >= totalPages ? 'disabled' : ''}
+                            style="font-size:0.72rem;padding:0.3rem 0.55rem;border-radius:6px;background:transparent;border:1px solid var(--color-border);color:var(--color-text-secondary);cursor:${_walletPage >= totalPages ? 'not-allowed' : 'pointer'};opacity:${_walletPage >= totalPages ? '0.35' : '1'};font-family:var(--font-mono);" title="Última">⏭</button>
+                    </div>
+                </div>
+            `}
+        `;
+
+        // Resolver nombres async de las pubkeys de donantes (zaps)
+        const donorPubkeys = new Set();
+        for (const m of pageRows) {
+            if (m.zap && m.zap.senderPubkey) donorPubkeys.add(m.zap.senderPubkey);
+        }
+        for (const pk of donorPubkeys) {
+            _resolveNameInto(pk, `[data-pubkey-slot="${pk}"]`);
+        }
+    }
+
+    async function refreshWallet() {
+        _walletData = null;
+        _walletDataAt = 0;
+        _walletError = null;
+        _zapsCache = null;
+        _zapsCacheAt = 0;
+        await renderWalletPanel();
+    }
+
+    function goToWalletPage(n) {
+        const next = parseInt(n, 10);
+        if (!Number.isFinite(next) || next < 1) return;
+        _walletPage = next;
+        renderWalletPanel();
+    }
+
+    function exportWalletCSV() {
+        if (!_walletData || !Array.isArray(_walletData.movements)) {
+            alert('No hay movimientos para exportar.');
+            return;
+        }
+        const movs = _walletData.movements;
+        const esc = v => {
+            if (v === null || v === undefined) return '';
+            const s = String(v).replace(/"/g, '""');
+            return /[",\n;]/.test(s) ? '"' + s + '"' : s;
+        };
+        const header = ['fecha_iso', 'fecha_unix', 'tipo', 'sats', 'memo_sanitizado', 'tx_hash'];
+        const rows = movs.map(m => [
+            new Date((m.ts || 0) * 1000).toISOString(),
+            m.ts || 0,
+            m.type || '',
+            m.amount || 0,
+            (m.memo || '').replace(/(npub1|nsec1)[a-z0-9]{20,}/gi, '[id oculto]')
+                          .replace(/[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}/gi, '[email oculto]'),
+            m.hash || m.id || ''
+        ].map(esc).join(','));
+        const csv = header.join(',') + '\n' + rows.join('\n');
+        const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = 'lbw-wallet-' + new Date().toISOString().substring(0, 10) + '.csv';
+        document.body.appendChild(a);
+        a.click();
+        setTimeout(() => { document.body.removeChild(a); URL.revokeObjectURL(url); }, 100);
+    }
+
+    function setMeritCategoryFilter(cat) {
+        _meritFilter.category = cat || '';
+        _meritsPage = 1;
+        renderMeritsPanel();
+    }
+
+    function setMeritSearch(val) {
+        _meritFilter.search = (val || '').trim();
+        _meritsPage = 1;
+        // Re-render del panel — preservar el cursor del input es overkill
+        // aquí, dejamos que el usuario re-focusee si quiere seguir tipeando.
+        renderMeritsPanel();
+        // Devolver el focus al input para mejor UX
+        const input = document.getElementById('meritSearchInput');
+        if (input) {
+            input.focus();
+            const len = input.value.length;
+            input.setSelectionRange(len, len);
+        }
+    }
+
+    function goToMeritsPage(n) {
+        const next = parseInt(n, 10);
+        if (!Number.isFinite(next) || next < 1) return;
+        _meritsPage = next;
+        renderMeritsPanel();
+        // Scroll suave al tope de la tabla
+        const panel = document.getElementById('transparencyMeritsPanel');
+        if (panel) {
+            try { panel.scrollIntoView({ behavior: 'smooth', block: 'start' }); } catch (e) {}
+        }
+    }
+
+    // Arranca la suscripción a méritos si todavía no está activa.
+    // Importante: el feed de méritos en LBW_Merits.subscribeMerits solo
+    // se abre cuando alguien lo pide (típicamente la sección Gobernanza
+    // o Méritos). Si el usuario entra directo a Transparencia sin pasar
+    // por ahí, _allMerits queda vacío. Aquí lo forzamos.
+    let _meritsSubStarted = false;
+    let _meritsRefreshTimer = null;
+    function _ensureMeritsSubscription() {
+        if (_meritsSubStarted) return;
+        try {
+            if (typeof LBW_NostrBridge !== 'undefined' && LBW_NostrBridge.startMerits) {
+                LBW_NostrBridge.startMerits();
+                _meritsSubStarted = true;
+                // Re-render del panel cada 2s durante el primer minuto para
+                // recoger eventos que el relay vaya enviando. Después
+                // paramos para no consumir recursos.
+                let ticks = 0;
+                _meritsRefreshTimer = setInterval(() => {
+                    if (_currentTab === 'merits') {
+                        try { renderMeritsPanel(); } catch (e) {}
+                    }
+                    ticks++;
+                    if (ticks >= 30) {
+                        clearInterval(_meritsRefreshTimer);
+                        _meritsRefreshTimer = null;
+                    }
+                }, 2000);
+            } else if (typeof LBW_Merits !== 'undefined' && LBW_Merits.subscribeMerits) {
+                // Fallback: bridge no disponible, llamamos directo
+                LBW_Merits.subscribeMerits();
+                _meritsSubStarted = true;
+            }
+        } catch (e) {
+            console.warn('[Transparency] No se pudo iniciar subscribeMerits:', e.message);
+        }
+    }
+
+    // Punto de entrada cuando se abre la sección
+    function init() {
+        _ensureMeritsSubscription();
+        switchTab(_currentTab);
+    }
+
+    // Fuerza refetch de Supabase + actividad y re-render
+    async function refreshMerits() {
+        _supabaseDataCache = null;
+        _supabaseDataCacheAt = 0;
+        _activityEventsCache = null;
+        _activityEventsCacheAt = 0;
+        await renderMeritsPanel();
+    }
+
+    async function toggleAllUsers() {
+        _showAllUsers = !_showAllUsers;
+        await renderMeritsPanel();
+    }
+
+    // Exporta el registro filtrado a CSV. Usa los mismos filtros activos
+    // (categoría + búsqueda) que están aplicados en la vista. Incluye
+    // tanto emisiones formales como eventos de actividad.
+    async function exportMeritsCSV() {
+        const supa = await _fetchSupabaseLedger(false);
+        const activity = await _fetchActivityEvents(false);
+        const formal = (supa && Array.isArray(supa.entries))
+            ? supa.entries
+            : (LBW_Merits && LBW_Merits.getAllMerits ? LBW_Merits.getAllMerits({ limit: 9999 }) : []);
+        const seen = new Set();
+        let entries = [];
+        for (const e of formal)   { if (e && e.id && !seen.has(e.id)) { seen.add(e.id); entries.push(e); } }
+        for (const e of activity) { if (e && e.id && !seen.has(e.id)) { seen.add(e.id); entries.push(e); } }
+        entries.sort((a, b) => (b.created_at || 0) - (a.created_at || 0));
+        if (_meritFilter.category) entries = entries.filter(m => m.category === _meritFilter.category);
+        if (_meritFilter.search) {
+            const q = _meritFilter.search.toLowerCase();
+            entries = entries.filter(m =>
+                (m.reason || '').toLowerCase().includes(q) ||
+                (m.category || '').toLowerCase().includes(q)
+            );
+        }
+        if (entries.length === 0) {
+            alert('No hay méritos para exportar con el filtro actual.');
+            return;
+        }
+        const esc = v => {
+            if (v === null || v === undefined) return '';
+            const s = String(v).replace(/"/g, '""');
+            return /[",\n;]/.test(s) ? '"' + s + '"' : s;
+        };
+        const header = ['fecha_iso', 'fecha_unix', 'amount', 'category', 'issuer', 'recipient', 'reason', 'event_id', 'd_tag', 'source'];
+        const rows = entries.map(m => [
+            new Date((m.created_at || 0) * 1000).toISOString(),
+            m.created_at || 0,
+            m.amount || 0,
+            m.category || '',
+            m.issuer || '',
+            m.recipient || '',
+            m.reason || '',
+            m.id || '',
+            m.dTag || '',
+            m.source || ''
+        ].map(esc).join(','));
+        const csv = header.join(',') + '\n' + rows.join('\n');
+        const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = 'lbwm-merits-' + new Date().toISOString().substring(0, 10) + '.csv';
+        document.body.appendChild(a);
+        a.click();
+        setTimeout(() => { document.body.removeChild(a); URL.revokeObjectURL(url); }, 100);
+    }
+
+    // Copia un valor al portapapeles y da feedback visual en el elemento
+    async function copyToClipboard(text, el) {
+        try {
+            await navigator.clipboard.writeText(text);
+            if (el) {
+                const orig = el.textContent;
+                el.textContent = '✅ copiado';
+                setTimeout(() => { el.textContent = orig; }, 1200);
+            }
+        } catch (e) {
+            console.warn('[Transparency] Clipboard error:', e.message);
+        }
+    }
+
+    return { init, switchTab, setMeritCategoryFilter, setMeritSearch, renderMeritsPanel, renderWalletPanel, refreshMerits, refreshWallet, toggleAllUsers, exportMeritsCSV, exportWalletCSV, copyToClipboard, goToMeritsPage, goToWalletPage };
+})();
+
+window.LBW_Transparency = LBW_Transparency;

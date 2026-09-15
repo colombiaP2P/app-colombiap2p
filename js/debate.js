@@ -1,0 +1,161 @@
+// LiberBit World — Debate Module v1.3
+// Gate por admisión (NIP-72): solo se puede debatir si la propuesta
+// ha sido admitida por mayoría Génesis. Añade además `a`-tag NIP-72
+// al community kind:34550 emitido al admitirse, de forma que clientes
+// Nostr externos (Coracle, Habla) reconocen el hilo de debate.
+
+window.LBW_Debate = {
+
+    _messages: {},
+    _subscriptions: {},
+    _callbacks: {},
+
+    _tag: function(dTag) { return 'lbw-debate-' + dTag; },
+
+    // ¿La propuesta está admitida (puede debatirse)?
+    // Las legacy sin admission_required cuentan como admitidas.
+    _isOpen: function(dTag) {
+        try {
+            if (typeof window.LBW_Governance === 'undefined' || !window.LBW_Governance.isAdmitted) return true;
+            return window.LBW_Governance.isAdmitted(dTag);
+        } catch (e) {
+            return true;  // fail-open para no romper UI legacy
+        }
+    },
+
+    _ensureCache: function(dTag) {
+        if (!this._messages[dTag]) this._messages[dTag] = {};
+    },
+
+    _normalize: function(event) {
+        var replyTo = null;
+        for (var i = 0; i < event.tags.length; i++) {
+            if (event.tags[i][0] === 'e' && event.tags[i][3] === 'reply') {
+                replyTo = event.tags[i][1];
+            }
+        }
+        return {
+            id:        event.id,
+            pubkey:    event.pubkey,
+            content:   event.content,
+            createdAt: event.created_at,
+            replyTo:   replyTo,
+            tags:      event.tags
+        };
+    },
+
+    subscribeDebate: function(proposalDTag, onMessage) {
+        var self = this;
+        self._ensureCache(proposalDTag);
+
+        if (!self._callbacks[proposalDTag]) self._callbacks[proposalDTag] = [];
+        if (onMessage) self._callbacks[proposalDTag].push(onMessage);
+
+        // Gate de admisión: si la propuesta requiere admisión y aún no
+        // ha sido admitida, no abrimos suscripción. La UI debería
+        // mostrar un placeholder "debate bloqueado hasta admisión".
+        if (!self._isOpen(proposalDTag)) {
+            if (onMessage) onMessage(null, 'admission-pending');
+            return;
+        }
+
+        if (self._subscriptions[proposalDTag]) {
+            var cached = self.getMessages(proposalDTag);
+            for (var i = 0; i < cached.length; i++) {
+                if (onMessage) onMessage(cached[i], 'cached');
+            }
+            return;
+        }
+
+        if (!window.LBW_Nostr || typeof window.LBW_Nostr.subscribe !== 'function') {
+            console.warn('[Debate] LBW_Nostr no disponible');
+            return;
+        }
+
+        var filter = { kinds: [1], '#t': [self._tag(proposalDTag)], limit: 200 };
+
+        var sub = window.LBW_Nostr.subscribe(
+            [filter],
+            function(event) {
+                self._ensureCache(proposalDTag);
+                var msg = self._normalize(event);
+                if (!self._messages[proposalDTag][msg.id]) {
+                    self._messages[proposalDTag][msg.id] = msg;
+                    var cbs = self._callbacks[proposalDTag] || [];
+                    for (var i = 0; i < cbs.length; i++) cbs[i](msg, 'new');
+                }
+            },
+            function() {
+                var cbs = self._callbacks[proposalDTag] || [];
+                for (var i = 0; i < cbs.length; i++) cbs[i](null, 'eose');
+            }
+        );
+
+        self._subscriptions[proposalDTag] = sub;
+    },
+
+    unsubscribeDebate: function(proposalDTag) {
+        if (this._subscriptions[proposalDTag]) {
+            try {
+                var s = this._subscriptions[proposalDTag];
+                // SimplePool subs se cierran con .close(); unsub no existe en nostr-tools 2.x.
+                // LBW_Nostr.unsubscribe limpia _activeSubs y llama close() correctamente.
+                if (window.LBW_Nostr && typeof LBW_Nostr.unsubscribe === 'function') {
+                    LBW_Nostr.unsubscribe(s);
+                } else if (s && typeof s.close === 'function') {
+                    s.close();
+                }
+            } catch(e) {}
+            delete this._subscriptions[proposalDTag];
+        }
+        delete this._callbacks[proposalDTag];
+    },
+
+    publishDebateMessage: async function(proposalDTag, content, replyToEventId) {
+        if (!window.LBW_Nostr || !window.LBW_Nostr.isLoggedIn()) {
+            throw new Error('Necesitas estar conectado con Nostr para participar.');
+        }
+        if (!content || !content.trim()) {
+            throw new Error('El mensaje no puede estar vacío.');
+        }
+        if (!this._isOpen(proposalDTag)) {
+            throw new Error('Esta propuesta aún no ha sido admitida por los Génesis. Espera a que se admita para debatir.');
+        }
+        var tags = [
+            ['t', 'lbw-debate'],
+            ['t', this._tag(proposalDTag)]
+        ];
+        // NIP-72: si existe community kind:34550 para esta propuesta,
+        // añadimos su `a`-tag para que clientes externos vean el debate.
+        try {
+            if (typeof window.LBW_Governance !== 'undefined' && window.LBW_Governance.getCommunityATag) {
+                var aTag = window.LBW_Governance.getCommunityATag(proposalDTag);
+                if (aTag) tags.push(['a', aTag, '', 'root']);
+            }
+        } catch (e) {}
+        if (replyToEventId) {
+            tags.push(['e', replyToEventId, '', 'reply']);
+        }
+        await window.LBW_Nostr.publishEvent({ kind: window.LBW_Nostr.EVENT_KINDS.TEXT_NOTE, content: content.trim(), tags: tags });
+    },
+
+    getMessages: function(proposalDTag) {
+        this._ensureCache(proposalDTag);
+        var msgs = this._messages[proposalDTag];
+        var arr = [];
+        for (var id in msgs) { arr.push(msgs[id]); }
+        arr.sort(function(a, b) { return a.createdAt - b.createdAt; });
+        return arr;
+    },
+
+    getMessageCount: function(proposalDTag) {
+        if (!this._messages[proposalDTag]) return 0;
+        return Object.keys(this._messages[proposalDTag]).length;
+    },
+
+    clearCache: function(proposalDTag) {
+        delete this._messages[proposalDTag];
+    }
+};
+
+console.log('[Debate] ✅ LBW_Debate cargado v1.3 (admission gate + NIP-72 a-tag)');

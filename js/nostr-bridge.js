@@ -1,0 +1,2550 @@
+// ============================================================
+// LiberBit World — Nostr Bridge v3.1 (nostr-bridge.js)
+// FIX 2026-02-27c: Supabase-first name resolution (not relay-only)
+//
+// CHANGES v3.0:
+//   ✅ Hydrate-from-cache: instant UI from IndexedDB on load
+//   ✅ SyncEngine: incremental relay sync with cursors
+//   ✅ MediaService: multi-provider upload + fallback URLs
+//   ✅ Cache-first profile resolution
+//   ✅ Login mode indicator
+//   ✅ Feature subscription lifecycle (start/stop per feature)
+//
+// Load order: nostr-store.js → nostr-sync.js → nostr-media.js
+//             → nostr.js → nostr-bridge.js
+// ============================================================
+
+const LBW_NostrBridge = (() => {
+    'use strict';
+
+    // ── Feed handles ─────────────────────────────────────────
+    let _chatFeedId = null;
+    let _dmFeedId = null;
+    let _marketFeedId = null;
+    let _reactionSub = null;
+    let _replySub = null;
+    let _zapsByEvent = {};
+    let _incomingZaps = [];      // zaps ⚡ recibidos en mis mensajes
+    let _incomingReplies = [];   // replies a mis mensajes
+
+    // ── Data ─────────────────────────────────────────────────
+    let _dmConversations = {};     // pubkey -> [messages]
+    let _nameCache = {};           // pubkey -> resolved display name
+    let _marketplaceListings = [];
+    let _replyToEventId = null;
+    let _replyToAuthorPubkey = null;
+    let _activeDMPubkey = null;
+    let _seenChatIds = new Set();  // dedup chat render
+    let _seenMarketIds = new Set();
+    let _myChatCount = 0;          // count of my community chat messages
+
+    // ── Init ─────────────────────────────────────────────────
+    async function init() {
+        // Initialize IndexedDB store
+        try {
+            await LBW_Store.init();
+        } catch (e) {
+            console.warn('[Bridge] IndexedDB no disponible, operando sin cache:', e);
+        }
+
+        _setupRelayStatusUI();
+        _setupNIP07Detection();
+        _setupPrivacyModeUI();
+        _setupNip42AuthListener();
+        console.log('[Bridge] ✅ v4.0 inicializado (NIP-65 + NIP-44 + cache + sync + media)');
+    }
+
+    // [NIP-42] Cuando un relay confirma que nos autenticamos, re-emitir las
+    // subs de PRIVATE_KINDS. La razón: nostr-rs-relay con nip42_dms=true
+    // cierra la primera sub de DMs con CLOSED "auth-required" antes de que
+    // pueda enviar el OK del AUTH. Sin re-suscribirnos los DMs no llegan.
+    let _reauthDebounce = null;
+    function _setupNip42AuthListener() {
+        window.addEventListener('nostr-auth-success', (e) => {
+            if (_reauthDebounce) clearTimeout(_reauthDebounce);
+            _reauthDebounce = setTimeout(() => {
+                console.log('[Bridge] [NIP-42] re-suscribiendo feeds privados tras AUTH OK con', e.detail?.relay);
+                try {
+                    if (_dmFeedId && LBW_Sync && LBW_Sync.unsyncFeed) LBW_Sync.unsyncFeed(_dmFeedId);
+                    _dmFeedId = null;
+                    if (LBW_Nostr.isLoggedIn()) startDirectMessages();
+                } catch (err) {
+                    console.warn('[Bridge] re-sub DMs tras AUTH falló:', err.message);
+                }
+            }, 500);   // debounce: si llegan AUTH de varios relays en burst, una sola re-sub
+        });
+    }
+
+    // ── Relay Status UI ──────────────────────────────────────
+    function _setupRelayStatusUI() {
+        window.addEventListener('nostr-relay-status', (e) => {
+            _updateRelayIndicators(e.detail);
+        });
+    }
+
+    function _updateRelayIndicators(status) {
+        const container = document.getElementById('relayStatusIndicators');
+        if (!container) return;
+
+        const sysPriv = LBW_Nostr.SYSTEM_PRIVATE_RELAYS;
+        const entries = Object.entries(status);
+        const cPriv = entries.filter(([u, s]) => s === 'connected' && sysPriv.includes(u)).length;
+        const cUser = entries.filter(([u, s]) => s === 'connected' && !sysPriv.includes(u) && !LBW_Nostr.SYSTEM_PUBLIC_RELAYS.includes(u)).length;
+        const cPub = entries.filter(([u, s]) => s === 'connected' && LBW_Nostr.SYSTEM_PUBLIC_RELAYS.includes(u)).length;
+        const strict = LBW_Nostr.isPrivacyStrict();
+
+        container.innerHTML = `
+            <div style="width:7px;height:7px;border-radius:50%;display:inline-block;margin-right:2px;
+                background:${cPriv > 0 ? '#4CAF50' : '#ff4444'};
+                box-shadow:0 0 5px ${cPriv > 0 ? 'rgba(76,175,80,0.5)' : 'rgba(255,68,68,0.3)'};"
+                title="${cPriv} relays privados"></div>
+            ${cUser > 0 ? `<div style="width:7px;height:7px;border-radius:50%;display:inline-block;margin-right:2px;background:#FFD700;box-shadow:0 0 5px rgba(255,215,0,0.4);" title="${cUser} relays NIP-65"></div>` : ''}
+            <div style="width:7px;height:7px;border-radius:50%;display:inline-block;margin-right:5px;
+                background:${cPub > 0 ? '#2196F3' : (strict ? '#ff4444' : '#666')};
+                box-shadow:0 0 5px ${cPub > 0 ? 'rgba(33,150,243,0.4)' : 'none'};"
+                title="${strict ? '🔒 Privacy Strict' : `${cPub} relays públicos`}"></div>
+            <span style="font-size:0.65rem;color:var(--color-text-secondary);font-family:var(--font-mono);">${cPriv}🔒${cUser > 0 ? ` ${cUser}👤` : ''} ${strict ? '🚫pub' : `${cPub}🌐`}</span>
+        `;
+
+        const relaysEl = document.getElementById('relaysCount');
+        if (relaysEl) relaysEl.textContent = cPriv;
+        const chatDot = document.getElementById('chatRelayDot');
+        if (chatDot) chatDot.style.background = (cPriv + cPub) > 0 ? '#4CAF50' : '#ff4444';
+    }
+
+    // ── Login Mode Indicator ─────────────────────────────────
+    function _updateLoginModeUI(method) {
+        let el = document.getElementById('loginModeIndicator');
+        if (!el) {
+            const badge = document.getElementById('userBadge');
+            if (badge) {
+                el = document.createElement('div');
+                el.id = 'loginModeIndicator';
+                el.style.cssText = 'font-size:0.6rem;padding:0.15rem 0.4rem;border-radius:12px;margin-top:0.2rem;text-align:center;';
+                badge.parentNode.insertBefore(el, badge.nextSibling);
+            }
+        }
+        if (!el) return;
+
+        const configs = {
+            extension:  { text: '🔌 NIP-07',   bg: 'rgba(142,36,170,0.2)', border: '#CE93D8', color: '#CE93D8' },
+            privatekey: { text: '🔑 nsec',      bg: 'rgba(229,185,92,0.15)', border: 'var(--color-gold)', color: 'var(--color-gold)' },
+            nsec:       { text: '🔑 nsec',      bg: 'rgba(229,185,92,0.15)', border: 'var(--color-gold)', color: 'var(--color-gold)' },
+            created:    { text: '✨ Nueva ID',  bg: 'rgba(76,175,80,0.15)',  border: '#4CAF50', color: '#81C784' },
+            bunker:     { text: '🛰️ NIP-46',    bg: 'rgba(64,196,255,0.15)', border: '#40C4FF', color: '#40C4FF' }
+        };
+
+        const cfg = configs[method];
+        if (cfg) {
+            el.textContent = cfg.text;
+            el.style.cssText += `background:${cfg.bg};border:1px solid ${cfg.border};color:${cfg.color};display:block;`;
+        } else {
+            el.style.display = 'none';
+        }
+    }
+
+    // ── NIP-07 Detection ─────────────────────────────────────
+    function _setupNIP07Detection() {
+        setTimeout(async () => {
+            const has = await LBW_Nostr.waitForExtension(2000);
+            ['nip07LoginBtn', 'nip07LoginBtn2'].forEach(id => {
+                const b = document.getElementById(id);
+                if (b) { has ? (b.classList.remove('hidden'), b.style.display = '') : (b.style.display = 'none'); }
+            });
+            if (has) {
+                const info = document.getElementById('nip07Info');
+                const miss = document.getElementById('nip07Missing');
+                if (info) info.classList.remove('hidden');
+                if (miss) miss.style.display = 'none';
+            }
+        }, 500);
+    }
+
+    // ── Privacy Strict Mode UI ───────────────────────────────
+    function _setupPrivacyModeUI() {
+        // Listen for privacy mode changes
+        window.addEventListener('nostr-privacy-mode', (e) => {
+            const strict = e.detail.strict;
+            // Header badge indicator
+            const indicator = document.getElementById('privacyModeIndicator');
+            if (indicator) {
+                indicator.textContent = strict ? '🔒 Strict' : '🌐 Normal';
+                indicator.className = strict
+                    ? 'badge badge-sm badge-error' : 'badge badge-sm badge-ghost';
+            }
+            // Profile DaisyUI toggle checkbox
+            const toggle = document.getElementById('privacyStrictToggle');
+            if (toggle) toggle.checked = strict;
+            // Profile label
+            const label = document.getElementById('privacyStrictLabel');
+            if (label) label.textContent = strict ? '🔒 Privacy Strict ON' : '🔒 Privacy Strict';
+            // Refresh relay indicators
+            _updateRelayIndicators(LBW_Nostr.getRelayStatus());
+        });
+
+        // Load saved preference
+        const saved = localStorage.getItem('lbw_privacy_strict');
+        if (saved === 'true') {
+            LBW_Nostr.setPrivacyStrict(true);
+        }
+    }
+
+    function togglePrivacyStrict() {
+        const current = LBW_Nostr.isPrivacyStrict();
+        const newVal = !current;
+        LBW_Nostr.setPrivacyStrict(newVal);
+        localStorage.setItem('lbw_privacy_strict', String(newVal));
+        // Reconnect with new relay policy
+        if (LBW_Nostr.isLoggedIn()) {
+            LBW_Nostr.connectToRelays();
+        }
+        return newVal;
+    }
+
+    // ── Helper: registrar al usuario en Supabase si aún no existe ─────
+    // Llamado desde todos los flujos de login (nsec, NIP-07, NIP-46) para
+    // que TODO usuario que acceda quede registrado en `users` y aparezca
+    // en el contador "ID Registradas". Sin esto, solo los que crean cuenta
+    // nueva via "Crear identidad" quedaban en Supabase; los que entraban
+    // con su nsec/extension/bunker existente quedaban fuera del dashboard.
+    //
+    // Idempotente: si el usuario ya existe (matched por public_key=npub),
+    // devuelve su id sin tocar nada. Si no existe, inserta con citizenship
+    // 'Amigo' por defecto (LBWM v2.0 calcula el level real desde méritos).
+    async function _ensureUserInSupabase(npub, displayName) {
+        if (typeof supabaseClient === 'undefined') return null;
+        if (!npub || typeof npub !== 'string' || !npub.startsWith('npub1')) return null;
+        try {
+            // Check first — evita race con insert si ya existe
+            const { data: existing, error: selErr } = await supabaseClient
+                .from('users')
+                .select('id, name')
+                .eq('public_key', npub)
+                .maybeSingle();
+            if (selErr) {
+                console.warn('[Bridge] _ensureUserInSupabase select error:', selErr.message);
+                return null;
+            }
+            if (existing && existing.id) {
+                // Si el nombre actual parece un placeholder (un npub o
+                // truncado) y ahora tenemos un nombre real desde Nostr,
+                // lo actualizamos. Esto cubre el caso del backfill SQL
+                // que dejó name=npub para usuarios registrados sin haber
+                // hecho login todavía.
+                try {
+                    const looksLikePlaceholder = existing.name && (
+                        existing.name.startsWith('npub1') ||
+                        existing.name.endsWith('...') ||
+                        existing.name.endsWith('…')
+                    );
+                    const haveRealName = displayName &&
+                        typeof displayName === 'string' &&
+                        displayName.trim() &&
+                        !displayName.startsWith('npub1') &&
+                        !displayName.endsWith('...') &&
+                        !displayName.endsWith('…');
+                    if (looksLikePlaceholder && haveRealName && displayName.trim() !== existing.name) {
+                        const { error: updErr } = await supabaseClient
+                            .from('users')
+                            .update({ name: displayName.trim().substring(0, 80) })
+                            .eq('id', existing.id);
+                        if (!updErr) {
+                            console.log('[Bridge] 📝 Nombre actualizado en Supabase (placeholder → real):', displayName);
+                        }
+                    }
+                } catch (e) {}
+                return existing.id;
+            }
+
+            // Insert nuevo
+            const name = (displayName && typeof displayName === 'string')
+                ? displayName.trim().substring(0, 80)
+                : '';
+            const newId = (typeof generateUUID === 'function')
+                ? generateUUID()
+                : ('lbw-' + Date.now() + '-' + Math.random().toString(36).slice(2, 10));
+            const { data: inserted, error: insErr } = await supabaseClient
+                .from('users')
+                .insert([{
+                    id: newId,
+                    public_key: npub,
+                    name: name || npub.substring(0, 16),
+                    citizenship_type: 'Amigo',
+                    registration_date: new Date().toISOString()
+                }])
+                .select('id')
+                .single();
+            if (insErr) {
+                console.warn('[Bridge] _ensureUserInSupabase insert error:', insErr.message);
+                return null;
+            }
+            console.log('[Bridge] 📋 Usuario registrado en Supabase:', npub.substring(0, 20) + '…');
+            return inserted ? inserted.id : newId;
+        } catch (e) {
+            console.warn('[Bridge] _ensureUserInSupabase exception:', e.message);
+            return null;
+        }
+    }
+
+    // ── Auth ─────────────────────────────────────────────────
+    async function handleNIP07Login() {
+        const btn = document.getElementById('nip07LoginBtn');
+        const orig = btn?.innerHTML;
+        try {
+            if (btn) { btn.disabled = true; btn.innerHTML = '⏳ Conectando...'; }
+            const result = await LBW_Nostr.loginWithExtension();
+            const session = {
+                pubkey: result.pubkeyHex, npub: result.npub,
+                name: result.profile?.name || result.profile?.display_name || 'Nostr User',
+                method: 'extension', loginTime: Date.now()
+            };
+            localStorage.setItem('lbw_nostr_session', JSON.stringify(session));
+            // Registrar en Supabase si es la primera vez que entra a LBW
+            // (idempotente — no duplica si ya existe). Best-effort: si
+            // falla, el login continúa, simplemente no aparecerá en el
+            // dashboard hasta que vuelva a entrar.
+            _ensureUserInSupabase(result.npub, session.name).then(id => {
+                if (id && typeof currentUser !== 'undefined' && currentUser) {
+                    currentUser.id = id;
+                    try { window.LBW_persistKeys && window.LBW_persistKeys(currentUser); } catch(e) {}
+                }
+            }).catch(() => {});
+            _applyLoginToUI(session);
+            _updateLoginModeUI('extension');
+            await _startAllFeeds();
+            return result;
+        } catch (e) {
+            alert('❌ ' + e.message);
+            if (btn) { btn.disabled = false; btn.innerHTML = orig; }
+            throw e;
+        }
+    }
+
+    // ── NIP-46 login (bunker:// o nostrconnect:// con QR) ───
+    // El modal de LBW_NIP46 expone dos pestañas: pegar URL del signer
+    // o generar QR para que el signer escanee. connectInteractive() se
+    // encarga del flujo completo y, si conecta, deja LBW_NIP46 en estado
+    // conectado. Aquí solo sincronizamos con LBW_Nostr y la UI.
+    //
+    // Session-only en ambos modos: nada se persiste; la sesión guardada
+    // es solo el método para que la UI sepa qué badge mostrar mientras
+    // la pestaña vive, pero restoreSession() limpia y exige reconectar
+    // al recargar.
+    async function handleBunkerLogin() {
+        if (!window.LBW_NIP46) {
+            alert('❌ Módulo NIP-46 no cargado. Recarga la página.');
+            return;
+        }
+        let connectResult;
+        try {
+            connectResult = await LBW_NIP46.connectInteractive({});
+        } catch (e) {
+            console.error('[Bridge] NIP-46 modal error:', e);
+            return;
+        }
+        if (!connectResult) return; // usuario canceló
+
+        try {
+            const result = await LBW_Nostr.loginWithConnectedSigner();
+            const session = {
+                pubkey: result.pubkeyHex, npub: result.npub,
+                name: result.profile?.name || result.profile?.display_name || 'Nostr User',
+                picture: result.profile?.picture || '',
+                method: 'bunker', loginTime: Date.now()
+            };
+            localStorage.setItem('lbw_nostr_session', JSON.stringify(session));
+
+            if (typeof currentUser !== 'undefined') {
+                currentUser = {
+                    pubkey: result.npub,
+                    publicKey: result.npub,
+                    name: session.name,
+                    id: null
+                };
+                window.LBW_persistKeys && window.LBW_persistKeys(currentUser);
+            }
+
+            // Registrar en Supabase (idempotente) para que aparezca en
+            // el contador "ID Registradas"
+            _ensureUserInSupabase(result.npub, session.name).then(id => {
+                if (id && typeof currentUser !== 'undefined' && currentUser) {
+                    currentUser.id = id;
+                    try { window.LBW_persistKeys && window.LBW_persistKeys(currentUser); } catch(e) {}
+                }
+            }).catch(() => {});
+
+            _applyLoginToUI(session);
+            _updateLoginModeUI('bunker');
+            await _startAllFeeds();
+            console.log('[Bridge] ✅ Login NIP-46 (' + connectResult.mode + '):', result.npub);
+            return result;
+        } catch (e) {
+            console.error('[Bridge] NIP-46 post-connect error:', e);
+            alert('❌ NIP-46: ' + (e.message || 'Error tras conectar'));
+            try { LBW_Nostr.logout(); } catch (_) {}
+            throw e;
+        }
+    }
+
+    async function handlePrivateKeyLogin(input) {
+        const result = LBW_Nostr.loginWithPrivateKey(input);
+        const session = {
+            pubkey: result.pubkeyHex, npub: result.npub,
+            name: '', picture: '', method: 'nsec', loginTime: Date.now()
+        };
+
+        // ══ NIP-49 — flujo inteligente ══
+        // Si ya hay un ncryptsec guardado en este navegador:
+        //   a) mismo npub (identidad conocida) → modo "unlock" con la contraseña
+        //      existente. No se crea ninguna contraseña nueva.
+        //   b) npub distinto → confirmar reemplazo y crear contraseña nueva.
+        //   c) ncryptsec antiguo SIN npub guardado (ncryptsec creado antes de
+        //      esta versión) → intentar unlock y comparar. Si la nsec
+        //      desbloqueada coincide con la que el usuario acaba de pegar,
+        //      anotamos el npub para futuras sesiones y seguimos. Si no
+        //      coincide o el usuario cancela, pedimos confirmación para
+        //      reemplazar y creamos contraseña nueva.
+        let needsPasswordSetup = true;
+        try {
+            if (LBW_Passlock.hasEncrypted()) {
+                const storedNpub = LBW_Passlock.loadEncryptedNpub && LBW_Passlock.loadEncryptedNpub();
+                const knownIdentity = !!storedNpub;
+                const sameIdentity = knownIdentity && storedNpub === result.npub;
+
+                if (knownIdentity && !sameIdentity) {
+                    // Identidad distinta confirmada → confirmar reemplazo
+                    const replace = confirm('Hay otra identidad cifrada en este navegador. ¿Reemplazarla por la que acabas de pegar?');
+                    if (!replace) {
+                        try { LBW_Nostr.logout(); } catch (_) {}
+                        throw new Error('Login cancelado: la identidad guardada es distinta');
+                    }
+                    LBW_Passlock.clearEncrypted();
+                } else {
+                    // Misma identidad O ncryptsec antiguo sin npub → unlock
+                    try {
+                        const unlockRes = await LBW_Passlock.unlockWithPasswordPrompt({
+                            title: sameIdentity ? '🔓 Desbloquea tu cuenta' : '🔓 Identidad cifrada detectada',
+                            desc: sameIdentity
+                                ? 'Ya tienes esta cuenta cifrada aquí. Introduce tu contraseña existente. (Pulsa "Cerrar sesión" para crear una contraseña nueva.)'
+                                : 'Si esta es tu cuenta, introduce tu contraseña existente. Si no, pulsa "Cerrar sesión" para reemplazarla.'
+                        });
+                        if (unlockRes && unlockRes.logout) {
+                            // El usuario quiere empezar de cero
+                            LBW_Passlock.clearEncrypted();
+                        } else if (unlockRes && unlockRes.nsec === result.nsec) {
+                            // Match — reusar ncryptsec existente, password ya cacheada
+                            if (!storedNpub && LBW_Passlock.annotateNpub) {
+                                try { LBW_Passlock.annotateNpub(result.npub); } catch (_) {}
+                            }
+                            needsPasswordSetup = false;
+                            console.log('[Bridge] ✅ Identidad existente desbloqueada (no se pide nueva contraseña)');
+                        } else if (unlockRes && unlockRes.nsec) {
+                            // Desbloqueó otra identidad distinta de la pegada
+                            const replace = confirm('La cuenta cifrada aquí es distinta de la que has pegado. ¿Reemplazarla?');
+                            if (!replace) {
+                                try { LBW_Nostr.logout(); } catch (_) {}
+                                throw new Error('Login cancelado');
+                            }
+                            LBW_Passlock.clearEncrypted();
+                        }
+                    } catch (e) {
+                        if (e && e.message === 'Cancelado') {
+                            // Usuario cerró el modal de unlock → reemplazar
+                            LBW_Passlock.clearEncrypted();
+                        } else {
+                            throw e;
+                        }
+                    }
+                }
+            }
+
+            if (needsPasswordSetup) {
+                await LBW_Passlock.setupPasswordAndStore(result.nsec, {
+                    title: '🔒 Crea una contraseña',
+                    desc: 'Cifrará tu clave privada (nsec) en este navegador con NIP-49. La pedirás cada vez que vuelvas a entrar.',
+                    npub: result.npub
+                });
+            }
+        } catch (e) {
+            // Cancelación o error → revertir login
+            try { LBW_Nostr.logout(); } catch (_) {}
+            throw new Error(e && e.message ? e.message : 'Login cancelado: necesitas crear o desbloquear una contraseña');
+        }
+
+        // Aseguramos que NO queda nsec en claro en ningún almacén
+        try { localStorage.removeItem('lbw_nsec_persist'); } catch (e) {}
+        try { sessionStorage.removeItem('lbw_nsec_session'); } catch (e) {}
+
+        // ══ CRITICAL: Reset currentUser COMPLETELY for new login ══
+        // privateKey se mantiene en MEMORIA pero nunca se persiste (LBW_persistKeys la elimina)
+        currentUser = {
+            pubkey: result.npub,
+            publicKey: result.npub,
+            privateKey: result.nsec,
+            name: '',
+            id: null
+        };
+        
+        // Clear old profile cache for this key
+        try { localStorage.removeItem('userProfile_' + result.npub); } catch(e) {}
+
+        // ── Resolve name & avatar: Supabase with auto-migration ──
+        let foundInSupabase = false;
+        try {
+            if (typeof supabaseClient !== 'undefined') {
+                // Step 1: Try exact match by npub (correct format)
+                let { data } = await supabaseClient
+                    .from('users')
+                    .select('name, id, avatar_url, public_key')
+                    .eq('public_key', result.npub)
+                    .maybeSingle();
+                
+                // Step 2: If not found, try by hex format (old format)
+                if (!data) {
+                    const hexResult = await supabaseClient
+                        .from('users')
+                        .select('name, id, avatar_url, public_key')
+                        .eq('public_key', result.pubkeyHex)
+                        .maybeSingle();
+                    
+                    if (hexResult.data) {
+                        data = hexResult.data;
+                        const oldHexKey = data.public_key;
+                        // Auto-migrate hex to npub format
+                        console.log('[Bridge] 🔄 Migrando public_key de hex a npub...');
+                        await supabaseClient
+                            .from('users')
+                            .update({ public_key: result.npub })
+                            .eq('id', data.id);
+                        // Migrate related tables
+                        try {
+                            await supabaseClient.from('posts').update({ author_public_key: result.npub }).eq('author_public_key', oldHexKey);
+                            await supabaseClient.from('offers').update({ author_public_key: result.npub }).eq('author_public_key', oldHexKey);
+                            await supabaseClient.from('post_likes').update({ user_public_key: result.npub }).eq('user_public_key', oldHexKey);
+                        } catch (migErr) {
+                            console.warn('[Bridge] ⚠️ Migración tablas relacionadas (hex):', migErr.message);
+                        }
+                        console.log('[Bridge] ✅ public_key migrado a npub');
+                    }
+                }
+                
+                // Step 3: If still not found, get name from Nostr relays first
+                if (!data) {
+                    console.log('[Bridge] 🔍 Usuario no encontrado por npub/hex, buscando en relays...');
+                    await new Promise(r => setTimeout(r, 1500));
+                    const nostrProfile = await Promise.race([
+                        LBW_Sync.resolveProfile(result.pubkeyHex),
+                        new Promise(r => setTimeout(() => r(null), 4000))
+                    ]);
+                    
+                    // If we got a name from Nostr, try to find user by name (legacy migration)
+                    if (nostrProfile && nostrProfile.name) {
+                        const nameToSearch = nostrProfile.name;
+                        console.log('[Bridge] 🔍 Buscando por nombre:', nameToSearch);
+                        
+                        const nameResult = await supabaseClient
+                            .from('users')
+                            .select('name, id, avatar_url, public_key')
+                            .eq('name', nameToSearch);
+                        
+                        // Only migrate if EXACTLY ONE user found with that name
+                        if (nameResult.data && nameResult.data.length === 1) {
+                            data = nameResult.data[0];
+                            const oldKey = data.public_key;
+                            
+                            // Update to correct npub
+                            console.log('[Bridge] 🔄 Migrando public_key legacy:', oldKey.substring(0,20), '→', result.npub.substring(0,20));
+                            await supabaseClient
+                                .from('users')
+                                .update({ public_key: result.npub })
+                                .eq('id', data.id);
+                            // Migrate related tables
+                            try {
+                                await supabaseClient.from('posts').update({ author_public_key: result.npub }).eq('author_public_key', oldKey);
+                                await supabaseClient.from('offers').update({ author_public_key: result.npub }).eq('author_public_key', oldKey);
+                                await supabaseClient.from('post_likes').update({ user_public_key: result.npub }).eq('user_public_key', oldKey);
+                            } catch (migErr) {
+                                console.warn('[Bridge] ⚠️ Migración tablas relacionadas (legacy):', migErr.message);
+                            }
+                            console.log('[Bridge] ✅ public_key legacy migrado correctamente');
+                        } else if (nameResult.data && nameResult.data.length > 1) {
+                            console.warn('[Bridge] ⚠️ Múltiples usuarios con nombre "' + nameToSearch + '", no se puede migrar automáticamente');
+                        }
+                        
+                        // Use Nostr profile data
+                        if (nostrProfile.name) {
+                            session.name = nostrProfile.name;
+                            currentUser.name = nostrProfile.name;
+                        }
+                        if (nostrProfile.picture) {
+                            session.picture = nostrProfile.picture;
+                        }
+                    }
+                }
+                
+                // Step 4: If still not found, ask user for their name (manual migration)
+                if (!data) {
+                    console.log('[Bridge] 🔍 Usuario no encontrado automáticamente, pidiendo nombre...');
+                    const userName = prompt(
+                        '⚠️ No se encontró tu cuenta automáticamente.\n\n' +
+                        'Si ya tenías cuenta en LiberBit World, escribe tu nombre de usuario exacto para vincular tu identidad.\n\n' +
+                        'Si eres nuevo, pulsa Cancelar y usa "Crear Identidad" en su lugar.'
+                    );
+                    
+                    if (userName && userName.trim()) {
+                        const trimmedName = userName.trim();
+                        console.log('[Bridge] 🔍 Buscando por nombre manual:', trimmedName);
+                        
+                        const nameResult = await supabaseClient
+                            .from('users')
+                            .select('name, id, avatar_url, public_key')
+                            .ilike('name', trimmedName);
+                        
+                        if (nameResult.data && nameResult.data.length === 1) {
+                            data = nameResult.data[0];
+                            const oldKey = data.public_key;
+                            
+                            // Migrate public_key in users table
+                            console.log('[Bridge] 🔄 Migrando public_key manual:', oldKey.substring(0,20), '→', result.npub.substring(0,20));
+                            await supabaseClient
+                                .from('users')
+                                .update({ public_key: result.npub })
+                                .eq('id', data.id);
+                            
+                            // Migrate related tables
+                            try {
+                                await supabaseClient.from('posts').update({ author_public_key: result.npub }).eq('author_public_key', oldKey);
+                                await supabaseClient.from('offers').update({ author_public_key: result.npub }).eq('author_public_key', oldKey);
+                                await supabaseClient.from('post_likes').update({ user_public_key: result.npub }).eq('user_public_key', oldKey);
+                            } catch (migErr) {
+                                console.warn('[Bridge] ⚠️ Migración tablas relacionadas:', migErr.message);
+                            }
+                            
+                            console.log('[Bridge] ✅ Migración manual completada para:', trimmedName);
+                        } else if (nameResult.data && nameResult.data.length > 1) {
+                            alert('⚠️ Hay múltiples usuarios con ese nombre. Contacta al administrador para resolver la migración.');
+                        } else {
+                            alert('❌ No se encontró ningún usuario con el nombre "' + trimmedName + '".\n\nSi eres nuevo, usa "Crear Identidad".');
+                        }
+                    }
+                }
+
+                // Apply data if found
+                if (data) {
+                    foundInSupabase = true;
+                    if (data.name && !data.name.startsWith('npub1') && !data.name.endsWith('...')) {
+                        session.name = data.name;
+                        currentUser.name = data.name;
+                        console.log('[Bridge] ✅ Nombre desde Supabase:', data.name);
+                    }
+                    if (data.id) {
+                        currentUser.id = data.id;
+                    }
+                    if (data.avatar_url) {
+                        session.picture = data.avatar_url;
+                        console.log('[Bridge] ✅ Avatar desde Supabase');
+                    }
+                }
+            }
+        } catch(e) {
+            console.warn('[Bridge] Supabase lookup failed:', e.message);
+        }
+        
+        // ── Fallback: If still no name/picture, try relays ──
+        if (!session.name || !session.picture) {
+            try {
+                if (!foundInSupabase) {
+                    // Only wait if we haven't already fetched from relays above
+                    await new Promise(r => setTimeout(r, 1000));
+                }
+                const p = await Promise.race([
+                    LBW_Sync.resolveProfile(result.pubkeyHex),
+                    new Promise(r => setTimeout(() => r(null), 3000))
+                ]);
+                if (p) {
+                    if (!session.name) {
+                        const resolvedName = p.name || p.display_name || '';
+                        if (resolvedName) {
+                            session.name = resolvedName;
+                            currentUser.name = resolvedName;
+                            console.log('[Bridge] ✅ Nombre desde relays:', resolvedName);
+                        }
+                    }
+                    if (!session.picture && p.picture) {
+                        session.picture = p.picture;
+                        console.log('[Bridge] ✅ Avatar desde relays');
+                    }
+                }
+            } catch(e) {
+                console.warn('[Bridge] Relay lookup failed:', e.message);
+            }
+        }
+
+        // Si tras todo el lookup no apareció en Supabase, lo registramos
+        // ahora con el nombre resuelto (de Nostr o npub corto como
+        // fallback). Idempotente — si ya existe no hace nada. Garantiza
+        // que TODO usuario que accede vía "Ya tengo cuenta" quede en el
+        // contador "ID Registradas".
+        if (!foundInSupabase) {
+            const nameForReg = (session.name && !session.name.startsWith('npub1') && !session.name.endsWith('...'))
+                ? session.name
+                : '';
+            const ensuredId = await _ensureUserInSupabase(result.npub, nameForReg);
+            if (ensuredId) {
+                currentUser.id = ensuredId;
+                try { window.LBW_persistKeys && window.LBW_persistKeys(currentUser); } catch(e) {}
+            }
+        }
+
+        // Save synced currentUser to localStorage
+        try { window.LBW_persistKeys && window.LBW_persistKeys(currentUser); } catch(e) {}
+
+        localStorage.setItem('lbw_nostr_session', JSON.stringify(session));
+        _applyLoginToUI(session);
+        _updateLoginModeUI('nsec');
+        await _startAllFeeds();
+
+        return result;
+    }
+
+    async function handleCreateIdentity(name) {
+        const result = await LBW_Nostr.createIdentity(name);
+        const session = {
+            pubkey: result.pubkeyHex, npub: result.npub,
+            name, method: 'created', loginTime: Date.now()
+        };
+
+        // ══ NIP-49: pedir contraseña y cifrar la nsec recién creada ══
+        // Una identidad NUEVA siempre sobrescribe cualquier ncryptsec previo
+        // (sería de otra cuenta — no hay forma de que coincida).
+        try {
+            if (LBW_Passlock.hasEncrypted()) {
+                const storedNpub = LBW_Passlock.loadEncryptedNpub && LBW_Passlock.loadEncryptedNpub();
+                if (storedNpub && storedNpub !== result.npub) {
+                    // Hay otra identidad cifrada — confirmar reemplazo
+                    const replace = confirm('Hay otra identidad cifrada en este navegador. ¿Reemplazarla por la que vas a crear?');
+                    if (!replace) {
+                        try { LBW_Nostr.logout(); } catch (_) {}
+                        throw new Error('Creación cancelada: hay otra identidad guardada');
+                    }
+                }
+                LBW_Passlock.clearEncrypted();
+            }
+            await LBW_Passlock.setupPasswordAndStore(result.nsec, {
+                title: '🔒 Protege tu nueva identidad',
+                desc: 'Cifraremos tu clave privada (nsec) en este navegador con una contraseña (NIP-49). Apunta también la nsec en un sitio seguro: es tu único respaldo si olvidas la contraseña.',
+                npub: result.npub
+            });
+        } catch (e) {
+            try { LBW_Nostr.logout(); } catch (_) {}
+            throw new Error(e && e.message ? e.message : 'Creación cancelada: necesitas crear una contraseña');
+        }
+
+        try { localStorage.removeItem('lbw_nsec_persist'); } catch (e) {}
+        try { sessionStorage.removeItem('lbw_nsec_session'); } catch (e) {}
+        localStorage.setItem('lbw_nostr_session', JSON.stringify(session));
+
+        // ══ CRITICAL: Set currentUser so the rest of the app can use it ══
+        if (typeof currentUser !== 'undefined') {
+            currentUser = {
+                pubkey: result.npub,
+                publicKey: result.npub,
+                privateKey: result.nsec,
+                name: name,
+                id: null
+            };
+            window.LBW_persistKeys && window.LBW_persistKeys(currentUser);
+        }
+
+        // ══ Save new user to Supabase immediately ══
+        try {
+            if (typeof supabaseClient !== 'undefined' && typeof generateUUID === 'function') {
+                // Check first if already exists (avoid duplicate insert error)
+                const { data: existing } = await supabaseClient
+                    .from('users')
+                    .select('id')
+                    .eq('public_key', result.npub)
+                    .maybeSingle();
+
+                if (!existing) {
+                    const newId = generateUUID();
+                    const { data: newUser, error: insertError } = await supabaseClient
+                        .from('users')
+                        .insert([{
+                            id: newId,
+                            public_key: result.npub,
+                            name: name,
+                            citizenship_type: 'Amigo',
+                            registration_date: new Date().toISOString()
+                        }])
+                        .select()
+                        .single();
+
+                    if (insertError) {
+                        console.warn('[Bridge] ⚠️ Supabase insert error (non-fatal):', insertError.message);
+                    } else if (newUser) {
+                        if (typeof currentUser !== 'undefined' && currentUser) {
+                            currentUser.id = newUser.id;
+                            try { window.LBW_persistKeys && window.LBW_persistKeys(currentUser); } catch(e) {}
+                        }
+                        console.log('[Bridge] ✅ Nueva identidad guardada en Supabase:', name, result.npub.substring(0, 20));
+                    }
+                } else {
+                    console.log('[Bridge] ℹ️ Usuario ya existe en Supabase, id:', existing.id);
+                    if (typeof currentUser !== 'undefined' && currentUser) {
+                        currentUser.id = existing.id;
+                        try { window.LBW_persistKeys && window.LBW_persistKeys(currentUser); } catch(e) {}
+                    }
+                }
+            }
+        } catch (e) {
+            console.warn('[Bridge] ⚠️ Error guardando en Supabase (non-fatal):', e.message);
+        }
+
+        _updateLoginModeUI('created');
+        await _startAllFeeds();
+        return result;
+    }
+
+    function handleLogout() {
+        _stopAllFeeds();
+        LBW_Nostr.logout();
+        _dmConversations = {};
+        _marketplaceListings = [];
+        _seenChatIds.clear();
+        _seenMarketIds.clear();
+        _myChatCount = 0;
+        _activeDMPubkey = null;
+        _incomingZaps = [];
+        _incomingReplies = [];
+        if (typeof LBW_Governance !== 'undefined') LBW_Governance.reset();
+        if (typeof LBW_Merits !== 'undefined') LBW_Merits.reset();
+        if (typeof LBW_Delegations !== 'undefined') LBW_Delegations.reset();
+        _updateLoginModeUI(null);
+        
+        // ══ Clear session/state but preserve encrypted backup ══
+        // El ncryptsec (clave cifrada con contraseña del usuario) NO se
+        // borra al cerrar sesión: la próxima vez que el usuario vuelva con
+        // su nsec, el flujo de handlePrivateKeyLogin detectará que ya hay
+        // una identidad cifrada para ese npub y le pedirá la contraseña
+        // existente en lugar de obligarle a crear una nueva.
+        // El usuario que quiera reset completo puede ir a Perfil → "Olvidar
+        // identidad en este dispositivo" (o limpiar datos del navegador).
+        localStorage.removeItem('lbw_nostr_session');
+        localStorage.removeItem('lbw_nsec_persist');
+        localStorage.removeItem('liberbit_keys');
+        try { sessionStorage.removeItem('lbw_nsec_session'); } catch (e) {}
+        // NIP-49: solo limpiar la contraseña cacheada en memoria y los
+        // restos de nsec en claro (legacy). El ncryptsec se queda.
+        if (window.LBW_Passlock) {
+            try { LBW_Passlock.clearCachedPassword(); } catch (e) {}
+            try { LBW_Passlock.clearLegacyPlaintext(); } catch (e) {}
+        }
+        
+        // Reset currentUser
+        if (typeof currentUser !== 'undefined') {
+            currentUser = null;
+        }
+    }
+
+    async function restoreSession() {
+        const saved = localStorage.getItem('lbw_nostr_session');
+        if (!saved) return false;
+        try {
+            const s = JSON.parse(saved);
+            let sessionRestored = false;
+            
+            if (s.method === 'extension' || s.method === 'nip07') {
+                if (await LBW_Nostr.waitForExtension(3000)) {
+                    await LBW_Nostr.loginWithExtension();
+                    _applyLoginToUI(s);
+                    _updateLoginModeUI('extension');
+                    await _startAllFeeds();
+                    sessionRestored = true;
+                }
+            } else if (s.method === 'bunker') {
+                // NIP-46 session-only: la clave efímera del cliente vivía
+                // solo en memoria, así que no podemos reusar la conexión.
+                // Limpiamos la sesión guardada y pedimos al usuario que
+                // reconecte manualmente desde el modal de login.
+                console.log('[Bridge] Sesión NIP-46 detectada (session-only) — reconectar manualmente');
+                localStorage.removeItem('lbw_nostr_session');
+                return false;
+            } else if (s.method === 'nsec' || s.method === 'created') {
+                // ── NIP-49: pedir contraseña y descifrar la nsec ──
+                // Tres situaciones posibles, en este orden:
+                //   1) Hay lbw_ncryptsec → flujo normal, pedir contraseña.
+                //   2) Hay nsec en claro (legacy) y no hay ncryptsec → migración obligatoria.
+                //   3) No hay ni una cosa ni la otra → sesión huérfana, limpiar.
+                let nsec = null;
+                if (LBW_Passlock.hasEncrypted()) {
+                    try {
+                        const res = await LBW_Passlock.unlockWithPasswordPrompt({
+                            title: '🔓 Desbloquea LiberBit World',
+                            desc: 'Introduce tu contraseña para descifrar tu identidad Nostr en este navegador.'
+                        });
+                        if (res && res.logout) { handleLogout(); return false; }
+                        nsec = res && res.nsec;
+                    } catch (e) {
+                        console.warn('[Bridge] Desbloqueo cancelado:', e.message);
+                        return false;
+                    }
+                } else if (LBW_Passlock.hasLegacyPlaintext()) {
+                    try {
+                        const res = await LBW_Passlock.migrateLegacyToEncrypted();
+                        if (res && res.logout) { handleLogout(); return false; }
+                        nsec = res && res.nsec;
+                        if (nsec) console.log('[Bridge] ✅ Migración NIP-49 completada');
+                    } catch (e) {
+                        console.error('[Bridge] Error en migración NIP-49:', e);
+                        return false;
+                    }
+                }
+
+                if (nsec) {
+                    LBW_Nostr.loginWithPrivateKey(nsec);
+
+                    // ══ CRITICAL: Reset currentUser COMPLETELY with session data ══
+                    currentUser = {
+                        pubkey: s.npub,
+                        publicKey: s.npub,
+                        privateKey: nsec,
+                        name: (s.name && !s.name.startsWith('npub1') && !s.name.endsWith('...')) ? s.name : '',
+                        id: null
+                    };
+                    window.LBW_persistKeys && window.LBW_persistKeys(currentUser);
+
+                    _applyLoginToUI(s);
+                    _updateLoginModeUI('nsec');
+                    await _startAllFeeds();
+                    console.log('[Bridge] ✅ Sesión nsec restaurada');
+                    sessionRestored = true;
+                } else {
+                    console.warn('[Bridge] Sesión nsec guardada pero clave no disponible. Re-login necesario.');
+                    localStorage.removeItem('lbw_nostr_session');
+                }
+            }
+            
+            // ── Fix bad names or missing picture: check Supabase first, then relays ──
+            if (sessionRestored && s.pubkey) {
+                const nameIsBad = !s.name || s.name.startsWith('npub1') || s.name.endsWith('...');
+                const needsPicture = !s.picture;
+                
+                if (nameIsBad || needsPicture) {
+                    console.log('[Bridge] Datos faltantes, buscando...');
+                    let resolvedName = '';
+                    let resolvedPicture = '';
+                    
+                    // 1. Try Supabase (primary source of truth)
+                    try {
+                        if (typeof supabaseClient !== 'undefined') {
+                            const npub = s.npub || (typeof hexToNpub === 'function' ? hexToNpub(s.pubkey) : '');
+                            if (npub) {
+                                const { data } = await supabaseClient
+                                    .from('users')
+                                    .select('name, avatar_url, id')
+                                    .eq('public_key', npub)
+                                    .single();
+                                if (data) {
+                                    if (nameIsBad && data.name && !data.name.startsWith('npub1') && !data.name.endsWith('...')) {
+                                        resolvedName = data.name;
+                                        console.log('[Bridge] ✅ Nombre desde Supabase:', resolvedName);
+                                    }
+                                    if (needsPicture && data.avatar_url) {
+                                        resolvedPicture = data.avatar_url;
+                                        console.log('[Bridge] ✅ Avatar desde Supabase');
+                                    }
+                                    if (data.id && typeof currentUser !== 'undefined' && currentUser) {
+                                        currentUser.id = data.id;
+                                    }
+                                }
+                            }
+                        }
+                    } catch(e) {}
+                    
+                    // 2. Fallback: try relays
+                    if ((nameIsBad && !resolvedName) || (needsPicture && !resolvedPicture)) {
+                        try {
+                            const p = await Promise.race([
+                                LBW_Sync.resolveProfile(s.pubkey),
+                                new Promise(r => setTimeout(() => r(null), 4000))
+                            ]);
+                            if (p) {
+                                if (nameIsBad && !resolvedName) resolvedName = p.name || p.display_name || '';
+                                if (needsPicture && !resolvedPicture && p.picture) resolvedPicture = p.picture;
+                            }
+                        } catch(e) {}
+                    }
+                    
+                    // 3. Apply resolved data
+                    let updated = false;
+                    if (resolvedName && !resolvedName.startsWith('npub1')) {
+                        s.name = resolvedName;
+                        _updateDisplayName(resolvedName);
+                        if (typeof currentUser !== 'undefined' && currentUser) {
+                            currentUser.name = resolvedName;
+                            window.LBW_persistKeys && window.LBW_persistKeys(currentUser);
+                        }
+                        console.log('[Bridge] ✅ Nombre restaurado:', resolvedName);
+                        updated = true;
+                    }
+                    if (resolvedPicture) {
+                        s.picture = resolvedPicture;
+                        ['homeAvatar', 'profileAvatar'].forEach(id => {
+                            const el = document.getElementById(id);
+                            if (el) el.src = resolvedPicture;
+                        });
+                        console.log('[Bridge] ✅ Avatar restaurado');
+                        updated = true;
+                    }
+                    if (updated) {
+                        localStorage.setItem('lbw_nostr_session', JSON.stringify(s));
+                    }
+                }
+            }
+            
+            return sessionRestored;
+        } catch (e) { console.error('[Bridge] ❌ restoreSession error:', e); return false; }
+    }
+
+    function _applyLoginToUI(session) {
+        const name = session.name || session.npub.substring(0, 16) + '...';
+        _updateDisplayName(name);
+        ['homeNpub', 'profileNpub'].forEach(id => {
+            const el = document.getElementById(id);
+            if (el) el.textContent = session.npub.substring(0, 24) + '...';
+        });
+        const badge = document.getElementById('userBadge');
+        if (badge) {
+            badge.classList.remove('hidden');
+            const n = document.getElementById('userName');
+            if (n) n.textContent = name;
+        }
+        ['activeNodesCounterHeader', 'identitiesCounterHeader', 'relaysCounterHeader',
+         'citiesCounterHeader', 'activeCitiesCounterHeader'].forEach(id => {
+            const el = document.getElementById(id);
+            if (el) el.classList.remove('hidden');
+        });
+        // Aplicar avatar si existe en la sesión
+        if (session.picture) {
+            ['homeAvatar', 'profileAvatar'].forEach(id => {
+                const el = document.getElementById(id);
+                if (el) el.src = session.picture;
+            });
+        }
+    }
+
+    function _updateDisplayName(name) {
+        if (!name) return;
+        ['homeUserName', 'userName', 'profileName'].forEach(id => {
+            const el = document.getElementById(id);
+            if (el) el.textContent = name;
+        });
+        // Persist name in currentUser and liberbit_keys so it survives page reloads
+        if (typeof currentUser !== 'undefined' && currentUser) {
+            currentUser.name = name;
+            try { window.LBW_persistKeys && window.LBW_persistKeys(currentUser); } catch(e) {}
+        }
+    }
+
+    // ── Feature Lifecycle ────────────────────────────────────
+    async function _startAllFeeds() {
+        try {
+            await startCommunityChat();
+        } catch (e) { console.error('[Bridge] ❌ Community chat failed:', e); }
+        try {
+            await startMarketplace();
+        } catch (e) { console.error('[Bridge] ❌ Marketplace failed:', e); }
+
+        // ── Esperar a que un private relay esté conectado antes de abrir las
+        //    suscripciones a PRIVATE_KINDS (DMs, gobernanza, méritos). Sin esto
+        //    se produce una race condition: las subs se abren contra los
+        //    fallbacks públicos en los primeros 1-3s del bootstrap y quedan
+        //    pinned ahí aunque los privados conecten poco después.
+        try {
+            const ok = await LBW_Nostr.waitForPrivateRelay(5000);
+            if (ok) {
+                console.log('[Bridge] ✅ Private relay listo, abriendo subs privadas');
+            } else {
+                console.warn('[Bridge] ⚠️ Ningún private relay disponible tras 5s, continuando con fallback público');
+            }
+        } catch (e) { console.error('[Bridge] waitForPrivateRelay error:', e); }
+
+        try {
+            await startDirectMessages();
+        } catch (e) { console.error('[Bridge] ❌ DMs failed:', e); }
+        try {
+            await startGovernance();
+        } catch (e) { console.error('[Bridge] ❌ Governance failed:', e); }
+        try {
+            await startMerits();
+        } catch (e) { console.error('[Bridge] ❌ Merits failed:', e); }
+        try {
+            await startDelegations();
+        } catch (e) { console.error('[Bridge] ❌ Delegations failed:', e); }
+        console.log('[Bridge] ✅ All feeds started');
+    }
+
+    function _stopAllFeeds() {
+        stopCommunityChat();
+        stopDirectMessages();
+        stopMarketplace();
+        stopGovernance();
+        stopMerits();
+        stopDelegations();
+    }
+
+    // ── Governance (Nostr) ───────────────────────────────────
+    async function startGovernance() {
+        if (typeof LBW_Governance === 'undefined') return;
+        LBW_Governance.subscribeProposals((proposal, action) => {
+            console.log(`[Bridge] 📋 Proposal ${action}: ${proposal.title}`);
+            // Auto-refresh UI whenever proposals arrive
+            if (typeof displayProposals === 'function') {
+                try { updateGovStats(); displayProposals(); } catch (e) {}
+            }
+        });
+        // Ensure governance UI is refreshed once relay delivers initial batch
+        // (covers the case where proposals arrive after section was already rendered)
+        setTimeout(() => {
+            try {
+                if (typeof updateGovStats === 'function') updateGovStats();
+                if (typeof displayProposals === 'function') displayProposals();
+            } catch(e) {}
+        }, 4000);
+        setTimeout(() => {
+            try {
+                if (typeof updateGovStats === 'function') updateGovStats();
+                if (typeof displayProposals === 'function') displayProposals();
+            } catch(e) {}
+        }, 9000);
+        console.log('[Bridge] ✅ Governance feed started');
+    }
+
+    function stopGovernance() {
+        if (typeof LBW_Governance !== 'undefined') {
+            LBW_Governance.unsubscribeAll();
+        }
+    }
+
+    // ── Merits LBWM (Nostr) ─────────────────────────────────
+    async function startMerits() {
+        if (typeof LBW_Merits === 'undefined') return;
+        LBW_Merits.subscribeMerits((merit) => {
+            console.log(`[Bridge] 🏅 Merit: ${merit.amount} [${merit.category}]`);
+        });
+        LBW_Merits.subscribeContributions((contrib) => {
+            console.log(`[Bridge] 📝 Contribution: ${contrib.meritPoints} LBWM [${contrib.category}]`);
+        });
+        LBW_Merits.subscribeSnapshots();
+        console.log('[Bridge] ✅ Merits feed started');
+    }
+
+    function stopMerits() {
+        if (typeof LBW_Merits !== 'undefined') {
+            LBW_Merits.unsubscribeAll();
+        }
+    }
+
+    // ── Delegations (Nostr) ─────────────────────────────────
+    async function startDelegations() {
+        if (typeof LBW_Delegations === 'undefined') return;
+        LBW_Delegations.subscribeDelegations((delegation, action) => {
+            const who = delegation.delegator?.substring(0, 8);
+            const to  = delegation.delegate?.substring(0, 8) || '—';
+            console.log(`[Bridge] 🗳️ Delegation ${action}: ${who} → ${to} (${delegation.scope})`);
+        });
+        console.log('[Bridge] ✅ Delegations feed started');
+    }
+
+    function stopDelegations() {
+        if (typeof LBW_Delegations !== 'undefined') {
+            LBW_Delegations.unsubscribeAll();
+        }
+    }
+
+    // ── Community Chat (Synced) ──────────────────────────────
+    async function startCommunityChat() {
+        if (_chatFeedId) LBW_Sync.unsyncFeed(_chatFeedId);
+        _seenChatIds.clear();
+        _myChatCount = 0;
+        _zapsByEvent = {};
+
+        _chatFeedId = await LBW_Sync.syncCommunityChat(
+            (msg) => {
+                if (_seenChatIds.has(msg.id)) return;
+                _seenChatIds.add(msg.id);
+                _renderCommunityMessage(msg);
+            },
+            (cachedEvents) => {
+                console.log(`[Bridge] 💬 Chat: ${cachedEvents.length} mensajes desde cache`);
+            }
+        );
+
+        const myPubkey = LBW_Nostr.getPubkey();
+
+        // ── Suscripción a reacciones ⚡ (todas, filtrar por eventId en callback) ──
+        if (_reactionSub) { try { LBW_Nostr.unsubscribe(_reactionSub); } catch(e) {} }
+        _reactionSub = LBW_Nostr.subscribe(
+            { kinds: [7], limit: 200 },
+            event => {
+                if (event.content !== '⚡') return;
+                const eTag = event.tags.find(t => t[0] === 'e');
+                if (!eTag) return;
+                const eventId = eTag[1];
+                if (!_zapsByEvent[eventId]) _zapsByEvent[eventId] = new Set();
+                _zapsByEvent[eventId].add(event.pubkey);
+                _updateZapBadge(eventId);
+
+                // Si el zap va dirigido a un mensaje mío, guardar para notificaciones
+                const pTag = event.tags.find(t => t[0] === 'p');
+                if (pTag && pTag[1] === myPubkey && event.pubkey !== myPubkey) {
+                    const alreadyStored = _incomingZaps.some(z => z.id === event.id);
+                    if (!alreadyStored) {
+                        _incomingZaps.push({
+                            id: event.id,
+                            pubkey: event.pubkey,
+                            eventId,
+                            created_at: event.created_at
+                        });
+                        _scheduleNotifRefresh();
+                    }
+                }
+            }
+        );
+
+        // ── Suscripción a replies a mis mensajes (kind:1 con #p: [myPubkey]) ──
+        if (_replySub) { try { LBW_Nostr.unsubscribe(_replySub); } catch(e) {} }
+        if (myPubkey) {
+            _replySub = LBW_Nostr.subscribe(
+                { kinds: [1], '#p': [myPubkey], '#t': ['liberbit'], limit: 50 },
+                event => {
+                    if (event.pubkey === myPubkey) return; // ignorar mis propios replies
+                    const hasReplyTag = event.tags.some(t => t[0] === 'e');
+                    if (!hasReplyTag) return;
+                    const alreadyStored = _incomingReplies.some(r => r.id === event.id);
+                    if (!alreadyStored) {
+                        _incomingReplies.push({
+                            id: event.id,
+                            pubkey: event.pubkey,
+                            content: event.content,
+                            created_at: event.created_at
+                        });
+                        _scheduleNotifRefresh();
+                    }
+                }
+            );
+        }
+    }
+
+    function stopCommunityChat() {
+        if (_chatFeedId) { LBW_Sync.unsyncFeed(_chatFeedId); _chatFeedId = null; }
+        if (_reactionSub) { try { LBW_Nostr.unsubscribe(_reactionSub); } catch(e) {} _reactionSub = null; }
+        if (_replySub)    { try { LBW_Nostr.unsubscribe(_replySub);    } catch(e) {} _replySub = null; }
+    }
+
+    function _renderCommunityMessage(msg) {
+        const container = document.getElementById('postsList');
+        if (!container) return;
+
+        const empty = container.querySelector('.chat-empty-state');
+        if (empty) empty.remove();
+
+        // Don't re-add if already in DOM
+        if (document.getElementById(`msg-${msg.id}`)) return;
+
+        const isMine = msg.pubkey === LBW_Nostr.getPubkey();
+        if (isMine) _myChatCount++;
+
+        _resolveProfileData(msg.pubkey).then(profile => {
+            const name = profile.name;
+            const el = document.createElement('div');
+            el.className = `chat-message ${isMine ? 'chat-message-mine' : 'chat-message-other'}`;
+            el.id = `msg-${msg.id}`;
+
+            const time = new Date(msg.created_at * 1000).toLocaleTimeString('es', { hour: '2-digit', minute: '2-digit' });
+            const msgDate = new Date(msg.created_at * 1000);
+            const dateStr = msgDate.toLocaleDateString('es', { day: 'numeric', month: 'long', year: 'numeric' });
+            const dateKey = msgDate.toDateString();
+            const src = '';
+
+            let replyHtml = '';
+            if (msg.isReply) replyHtml = `<div class="chat-msg-reply-indicator">↩️ Respuesta</div>`;
+
+            // Nombre clicable que abre DM con el autor del mensaje. Para
+            // mensajes propios lo dejamos como span estático (no tiene
+            // sentido abrir DM contigo mismo). Para el resto, span con
+            // role=button + data-lbw-action delegado al bridge.
+            const nameHtml = isMine
+                ? `<span class="chat-msg-name" style="color:var(--color-gold);">${_esc(name)}</span>`
+                : `<span class="chat-msg-name chat-msg-name-clickable"
+                       role="button" tabindex="0"
+                       data-lbw-action="bridgeStartDM"
+                       data-pubkey="${_esc(msg.pubkey)}"
+                       title="Enviar mensaje privado a ${_esc(name).replace(/"/g,'&quot;')}"
+                       style="color:var(--color-teal-light);cursor:pointer;text-decoration:underline;text-decoration-style:dotted;text-decoration-thickness:1px;text-underline-offset:3px;">${_esc(name)}</span>`;
+
+            el.innerHTML = `
+                <div class="chat-msg-header">
+                    <div class="chat-msg-author-row">
+                        ${_avatarHtml('chat-msg-avatar', name, profile.picture)}
+                        ${nameHtml}
+                    </div>
+                    <span class="chat-msg-time">${time}</span>
+                </div>
+                ${replyHtml}
+                <div class="chat-msg-body">${typeof LBW_ChatAttach !== 'undefined' ? LBW_ChatAttach.renderContent(msg.content) : _esc(msg.content)}</div>
+                <div class="chat-msg-zaps" id="zaps-${msg.id}"></div>
+                <div class="chat-msg-actions">
+                    <button data-reply-id="${msg.id}" data-reply-name="${_esc(name).replace(/"/g,'&quot;')}" onclick="LBW_NostrBridge.replyToMessage(this.dataset.replyId, this.dataset.replyName)" class="chat-msg-action-btn">↩️ Responder</button>
+                    <button data-zap-id="${msg.id}" data-zap-pk="${msg.pubkey}" onclick="LBW_NostrBridge.zapMessage(this.dataset.zapId, this.dataset.zapPk, this)" class="chat-msg-action-btn chat-zap-btn">⚡</button>
+                    ${!isMine ? `<button data-lbw-action="bridgeMuteUser" data-pubkey="${_esc(msg.pubkey)}" data-name="${_esc(name).replace(/"/g,'&quot;')}" class="chat-msg-action-btn" title="Silenciar a este usuario (no verás sus mensajes)">🔇</button>` : ''}
+                </div>`;
+
+            // Aplicar mute si la pubkey está en la lista de silenciados.
+            // No saltamos el render — la guardamos hidden para poder
+            // reactivar sin re-fetch del backlog.
+            if (typeof LBW_Mute !== 'undefined' && LBW_Mute.isMuted(msg.pubkey)) {
+                el.style.display = 'none';
+                el.dataset.muted = '1';
+            }
+
+            // Insert sorted DESCENDING (newest first)
+            const existing = container.querySelectorAll('.chat-message');
+            let inserted = false;
+            for (const child of existing) {
+                const childTime = parseInt(child.dataset.createdAt || '0', 10);
+                if (msg.created_at > childTime) {
+                    container.insertBefore(el, child);
+                    inserted = true;
+                    break;
+                }
+            }
+            if (!inserted) container.appendChild(el);
+            el.dataset.createdAt = msg.created_at;
+            el.dataset.dateKey = dateKey;
+            el.dataset.pubkey = msg.pubkey;
+
+            // Aplicar avatar (funciona para cache hits y nuevos mensajes)
+            _injectAvatarImg(el, 'chat-msg-avatar', name, profile.picture);
+            // Rebuild date separators after each insert
+            _rebuildDateSeparators(container);
+
+            // Auto-scroll to top for new relay messages (newest are at top)
+            if (msg._source !== 'cache') {
+                const mc = document.getElementById('communityMessages');
+                if (mc) mc.scrollTop = 0;
+            }
+        });
+    }
+
+    function _rebuildDateSeparators(container) {
+        // Remove all existing separators
+        container.querySelectorAll('.chat-date-separator').forEach(s => s.remove());
+        // Scan messages in DOM order and insert separator where date changes
+        let lastDateKey = null;
+        const messages = container.querySelectorAll('.chat-message');
+        messages.forEach(msg => {
+            const dateKey = msg.dataset.dateKey;
+            if (dateKey && dateKey !== lastDateKey) {
+                const ts = parseInt(msg.dataset.createdAt || '0', 10);
+                if (ts > 0) {
+                    const d = new Date(ts * 1000);
+                    const dateStr = d.toLocaleDateString('es', { day: 'numeric', month: 'long', year: 'numeric' });
+                    const sep = document.createElement('div');
+                    sep.className = 'chat-date-separator';
+                    sep.dataset.dateSep = dateKey;
+                    sep.innerHTML = `<span>${dateStr}</span>`;
+                    container.insertBefore(sep, msg);
+                }
+                lastDateKey = dateKey;
+            } else {
+                lastDateKey = dateKey;
+            }
+        });
+    }
+
+    function replyToMessage(eventId, authorName) {
+        _replyToEventId = eventId;
+        // Obtener pubkey del autor desde el dataset del elemento del mensaje
+        _replyToAuthorPubkey = document.getElementById(`msg-${eventId}`)?.dataset.pubkey || null;
+        const preview = document.getElementById('replyPreview');
+        const authorEl = document.getElementById('replyToAuthor');
+        if (preview) preview.style.display = 'flex';
+        if (authorEl) authorEl.textContent = authorName;
+        document.getElementById('newPostContent')?.focus();
+    }
+
+    function cancelReply() {
+        _replyToEventId = null;
+        _replyToAuthorPubkey = null;
+        const preview = document.getElementById('replyPreview');
+        if (preview) preview.style.display = 'none';
+    }
+
+    async function publishCommunityPost() {
+        const ta = document.getElementById('newPostContent');
+        if (!ta) return;
+        const content = ta.value.trim();
+        if (!content) return;
+        const btn = document.getElementById('publishPostBtn');
+        if (btn) btn.disabled = true;
+        try {
+            await LBW_Nostr.publishCommunityMessage(content, _replyToEventId, _replyToAuthorPubkey);
+            ta.value = '';
+            cancelReply();
+        } catch (e) {
+            alert('❌ ' + e.message);
+        } finally {
+            if (btn) btn.disabled = false;
+        }
+    }
+
+    // ── Direct Messages ──────────────────────────────────────
+    // Procesa un DM (incoming del relay o outgoing optimistic). Centraliza
+    // la dedup + push + render + sidebar para que mi optimistic UI y el
+    // callback del sub apunten al mismo punto y la dedup por msg.id sea
+    // efectiva, sin duplicación en panel ni sidebar.
+    function _handleDMArrived(msg) {
+        if (!msg || !msg.id) return;
+        const other = msg.direction === 'incoming' ? msg.from : msg.to;
+        if (!other) return;
+        if (!_dmConversations[other]) _dmConversations[other] = [];
+        if (_dmConversations[other].some(m => m.id === msg.id)) return;   // dedup por msg.id
+        _dmConversations[other].push(msg);
+        _dmConversations[other].sort((a, b) => a.created_at - b.created_at);
+        _updateDMSidebar();
+        if (_activeDMPubkey === other) _renderDMMessage(msg);
+        _updateDMBadge();
+    }
+
+    async function startDirectMessages() {
+        if (_dmFeedId) LBW_Sync.unsyncFeed(_dmFeedId);
+
+        _dmFeedId = await LBW_Sync.syncDirectMessages(_handleDMArrived);
+
+        console.log('[Bridge] 📬 DMs suscritos, conversaciones:', Object.keys(_dmConversations).length);
+        // Update DM encryption badge
+        _updateDMEncryptionBadge();
+    }
+
+    function _updateDMEncryptionBadge() {
+        const badge = document.getElementById('dmEncryptionBadge');
+        if (!badge) return;
+        if (!window.LBW_DM) return;
+        const info = LBW_DM.getEncryptionInfo();
+        if (info.preferred === 'nip44') {
+            badge.textContent = '🔐 NIP-44 activo';
+            badge.className = 'badge badge-success badge-xs gap-1';
+        } else {
+            badge.textContent = '🔒 NIP-04 (NIP-44 no disponible)';
+            badge.className = 'badge badge-secondary badge-xs gap-1';
+        }
+    }
+
+    function stopDirectMessages() {
+        if (_dmFeedId) { LBW_Sync.unsyncFeed(_dmFeedId); _dmFeedId = null; }
+    }
+
+    function _updateDMSidebar() {
+        // Actualizar badge de privados con DMs NO LEÍDOS (no total de conversaciones)
+        const unread = getUnreadDMCount();
+        const badge = document.getElementById('badgePrivate');
+        if (badge) {
+            if (unread > 0) { badge.style.display = 'flex'; badge.textContent = unread; }
+            else { badge.style.display = 'none'; }
+        }
+
+        // Delegar el RENDER del sidebar a chat.js (única fuente de verdad).
+        // loadChatSidebar() decide qué mostrar según currentChatTab (community/debates/private).
+        if (typeof loadChatSidebar === 'function') {
+            try { loadChatSidebar(); } catch (e) {
+                console.warn('[Bridge] loadChatSidebar failed:', e);
+            }
+        }
+    }
+
+    function openDMConversation(pk) {
+        _activeDMPubkey = pk;
+        const ph = document.getElementById('privatePlaceholder');
+        const ac = document.getElementById('privateActiveChat');
+        if (ph) ph.style.display = 'none';
+        if (ac) {
+            ac.style.display = 'flex';
+            ac.dataset.activePubkey = pk; // DOM backup
+        }
+        // Update sidebar active state
+        const sidebar = document.getElementById('chatSidebarList');
+        if (sidebar) {
+            sidebar.querySelectorAll('.sidebar-conversation').forEach(el => {
+                el.classList.toggle('active', el.dataset.pubkey === pk);
+            });
+        }
+        _resolveName(pk).then(name => {
+            const n = document.getElementById('privateChatName');
+            const i = document.getElementById('privateChatId');
+            if (n) n.textContent = name;
+            if (i) i.textContent = LBW_Nostr.pubkeyToNpub(pk).substring(0, 24) + '...';
+        });
+        const c = document.getElementById('privateChatMessages');
+        if (c) c.innerHTML = '';
+        (_dmConversations[pk] || []).forEach(m => _renderDMMessage(m));
+        console.log('[Bridge] openDMConversation:', pk.substring(0, 12));
+    }
+
+    function _renderDMMessage(msg) {
+        const c = document.getElementById('privateChatMessages');
+        if (!c) return;
+        // Dedup in DOM
+        if (msg.id && c.querySelector(`[data-msg-id="${msg.id}"]`)) return;
+
+        const mine = msg.from === LBW_Nostr.getPubkey();
+        const t = new Date(msg.created_at * 1000).toLocaleTimeString('es', { hour: '2-digit', minute: '2-digit' });
+        const isNip44 = msg.encryption === 'nip44' || msg.nip44 === true;
+        const nipBadge = isNip44 ? 'badge-success' : 'badge-secondary';
+        const nipLabel = isNip44 ? '44' : '04';
+
+        // Date separator
+        const msgDate = new Date(msg.created_at * 1000);
+        const dateKey = msgDate.toDateString();
+        const dateStr = msgDate.toLocaleDateString('es', { day: 'numeric', month: 'long', year: 'numeric' });
+        if (!c.querySelector(`[data-date-sep="${dateKey}"]`)) {
+            const sep = document.createElement('div');
+            sep.className = 'chat-date-separator';
+            sep.dataset.dateSep = dateKey;
+            sep.innerHTML = `<span>${dateStr}</span>`;
+            c.appendChild(sep);
+        }
+
+        const el = document.createElement('div');
+        el.className = `chat ${mine ? 'chat-end' : 'chat-start'}`;
+        if (msg.id) el.dataset.msgId = msg.id;
+        el.innerHTML = `
+            <div class="chat-bubble ${mine ? 'chat-bubble-warning' : 'chat-bubble-info'}" style="min-width:60px;">
+                <div class="text-sm" style="word-break:break-word;">${typeof LBW_ChatAttach !== 'undefined' ? LBW_ChatAttach.renderContent(msg.content) : _esc(msg.content)}</div>
+            </div>
+            <div class="chat-footer opacity-50 text-xs flex items-center gap-1 mt-0.5">
+                <span class="badge ${nipBadge} gap-0.5" style="font-size:0.55rem; height:14px; min-height:14px; padding:0 4px;" title="NIP-${nipLabel} cifrado">🔐${nipLabel}</span>
+                <span>${t}</span>
+                ${mine ? '<span>✓</span>' : ''}
+            </div>`;
+        c.appendChild(el);
+        c.scrollTop = c.scrollHeight;
+    }
+
+    async function sendDM() {
+        // Recover pubkey: closure var → DOM backup → visible header npub
+        if (!_activeDMPubkey) {
+            const ac = document.getElementById('privateActiveChat');
+            if (ac && ac.dataset.activePubkey) {
+                _activeDMPubkey = ac.dataset.activePubkey;
+            }
+        }
+        if (!_activeDMPubkey) {
+            // Last resort: extract npub from visible chat header
+            const idEl = document.getElementById('privateChatId');
+            if (idEl) {
+                const text = idEl.textContent.trim();
+                if (text.startsWith('npub1')) {
+                    try {
+                        // The displayed npub might be truncated, try to use it
+                        // If it's truncated (has ...), we can't use it directly
+                        if (!text.includes('...')) {
+                            _activeDMPubkey = LBW_Nostr.npubToHex(text);
+                        }
+                    } catch (e) {}
+                }
+            }
+            // Also check the full npub stored as data attribute
+            const nameEl = document.getElementById('privateChatName');
+            if (!_activeDMPubkey && nameEl && nameEl.dataset.pubkey) {
+                _activeDMPubkey = nameEl.dataset.pubkey;
+            }
+        }
+        if (!_activeDMPubkey) {
+            console.warn('[Bridge] sendDM: no _activeDMPubkey');
+            alert('⚠️ No hay conversación Nostr activa.\n\nUsa el buscador (🔍) → pega un npub1... → pulsa 💬 para abrir un DM cifrado.');
+            return;
+        }
+        const ta = document.getElementById('dmContent');
+        if (!ta) return;
+        const content = ta.value.trim();
+        if (!content) return;
+
+        // [routing-warning] Pre-validar al destinatario: si su NIP-65 apunta SOLO
+        // a relays privados de LiberBit, advertir antes de enviar. El relay
+        // privado responde OK true al publish pero no persiste DMs cuyos
+        // destinatarios no están en su whitelist; resultado: el usuario ve la
+        // notificación verde + render local, pero el destinatario nunca
+        // recibe el mensaje. Diagnosticado el 2026-05-08.
+        try {
+            const theirRelays = LBW_Nostr.fetchOtherRelayList
+                ? await LBW_Nostr.fetchOtherRelayList(_activeDMPubkey)
+                : null;
+            if (theirRelays && theirRelays.length > 0) {
+                const theirRead = theirRelays
+                    .filter(r => r.mode === 'read' || r.mode === 'both')
+                    .map(r => r.url);
+                const privates = LBW_Nostr.SYSTEM_PRIVATE_RELAYS || [];
+                const onlyLiberbit = theirRead.length > 0 &&
+                    theirRead.every(u => privates.includes(u));
+                if (onlyLiberbit) {
+                    const ok = confirm(
+                        '⚠️ AVISO DE ENTREGA\n\n' +
+                        'Este destinatario solo escucha en relays privados de LiberBit. ' +
+                        'Si NO es miembro autorizado del relay privado, el mensaje no le ' +
+                        'llegará — aunque tú lo verás en tu panel.\n\n' +
+                        'Pídele que añada un relay público a su NIP-65 (relay.damus.io, ' +
+                        'nos.lol, etc.) para garantizar la entrega.\n\n' +
+                        '¿Enviar de todos modos?'
+                    );
+                    if (!ok) {
+                        console.warn('[Bridge] sendDM cancelado por aviso de routing');
+                        return;
+                    }
+                }
+            }
+        } catch (e) {
+            // Si el fetch de NIP-65 falla, seguimos con el envío normal —
+            // mejor mandar y arriesgar que bloquear por un fallo de lookup.
+            console.warn('[Bridge] No se pudo verificar NIP-65 del destinatario:', e.message);
+        }
+
+        try {
+            console.log('[Bridge] sendDM →', _activeDMPubkey.substring(0, 12), content.substring(0, 20));
+            const res = await LBW_DM.send(_activeDMPubkey, content);
+
+            // Diagnóstico: cuántos relays aceptaron el evento. Antes de este log
+            // un envío a 0/N relays "completaba" sin error y sin notificación,
+            // dando ilusión de que el DM se había enviado.
+            const okCount = (res && res.results) ? res.results.filter(r => r.success).length : 0;
+            const totalCount = (res && res.results) ? res.results.length : 0;
+            console.warn('[Bridge] sendDM resultado: ' + okCount + '/' + totalCount + ' relays OK');
+
+            // [hotfix dm-trace] Detalle por relay para diagnóstico — antes el log
+            // solo decía "X/Y" sin distinguir cuáles aceptaron y cuáles rechazaron.
+            if (res && res.results) {
+                res.results.forEach(r => {
+                    if (r.success) {
+                        console.warn('  ✓ ' + r.relay);
+                    } else {
+                        console.warn('  ✗ ' + r.relay + ' — ' + (r.error || 'unknown'));
+                    }
+                });
+            }
+
+            if (okCount === 0) {
+                console.error('[Bridge] sendDM: ningún relay aceptó el DM. NO se ha enviado.');
+                if (typeof showNotification === 'function') {
+                    showNotification('❌ No se pudo enviar — ningún relay aceptó el mensaje. Intenta de nuevo en unos segundos.', 'error');
+                } else {
+                    alert('❌ No se pudo enviar — ningún relay aceptó el mensaje.');
+                }
+                return;   // No vaciamos el textarea: el usuario puede reintentar
+            }
+
+            // Optimistic UI: procesar el DM enviado como si hubiera llegado
+            // ya por el callback del sub. _handleDMArrived hace la dedup
+            // centralizada, así que cuando el relay rebote el evento (con
+            // el mismo id) la segunda vez será no-op. Sin esto, el usuario
+            // veía "Mensaje cifrado enviado" pero el mensaje no aparecía
+            // hasta que el relay lo rebotara (a veces varios segundos,
+            // a veces nunca si el relay no rebota a su autor).
+            try {
+                if (res && res.event && res.event.id) {
+                    const myPk = LBW_Nostr.getPubkey();
+                    const isNip44 = !!(res.event.tags && res.event.tags.some(t => t[0] === 'v' && t[1] === '2'));
+                    _handleDMArrived({
+                        id: res.event.id,
+                        from: myPk,
+                        fromNpub: typeof LBW_Nostr.pubkeyToNpub === 'function' ? LBW_Nostr.pubkeyToNpub(myPk) : '',
+                        to: _activeDMPubkey,
+                        content: content,                  // texto plano original
+                        created_at: res.event.created_at,
+                        direction: 'outgoing',
+                        encryption: isNip44 ? 'nip44' : 'nip04',
+                        nip44: isNip44,
+                        transport: 'kind4'
+                    });
+                }
+            } catch (renderErr) {
+                console.warn('[Bridge] sendDM: optimistic render falló (no crítico):', renderErr);
+            }
+
+            ta.value = '';
+            if (typeof showNotification === 'function') {
+                showNotification('✅ Mensaje cifrado enviado (' + okCount + ' relay' + (okCount > 1 ? 's' : '') + ')', 'success');
+            }
+        } catch (e) {
+            console.error('[Bridge] sendDM error:', e);
+            if (typeof showNotification === 'function') {
+                showNotification('❌ ' + (e.message || 'Error al enviar mensaje'), 'error');
+            } else {
+                alert('❌ ' + e.message);
+            }
+        }
+    }
+
+    function startDMWith(npubOrHex) {
+        const pk = npubOrHex.startsWith('npub1') ? LBW_Nostr.npubToHex(npubOrHex) : npubOrHex;
+        if (typeof showSection === 'function') showSection('chatSection');
+        if (typeof switchChatTab === 'function') switchChatTab('private');
+        openDMConversation(pk);
+    }
+
+    function _updateDMBadge() {
+        // badge-chat lo gestiona ui.js::updateChatBadge() (unifica posts comunidad + DMs no leídos).
+        // notifCountMessages lo gestiona notifications.js::updateNotificationBadges().
+        _scheduleNotifRefresh();
+    }
+
+    // ── Refresco debounced del centro de notificaciones ───────
+    // Al llegar un DM/zap/reply en tiempo real, programamos una llamada
+    // a loadAllNotifications() tras 500ms de silencio. Evita hammer durante
+    // el burst inicial de eventos históricos al login.
+    let _notifRefreshTimer = null;
+    function _scheduleNotifRefresh() {
+        if (_notifRefreshTimer) clearTimeout(_notifRefreshTimer);
+        _notifRefreshTimer = setTimeout(() => {
+            _notifRefreshTimer = null;
+            if (typeof loadAllNotifications === 'function') {
+                try { loadAllNotifications(); } catch (e) {
+                    console.warn('[Bridge] loadAllNotifications failed:', e);
+                }
+            }
+            if (typeof updateChatBadge === 'function') {
+                try { updateChatBadge(); } catch (e) {
+                    console.warn('[Bridge] updateChatBadge failed:', e);
+                }
+            }
+        }, 500);
+    }
+
+    // ── Marketplace (Synced + MediaService) ──────────────────
+    async function startMarketplace() {
+        if (_marketFeedId) LBW_Sync.unsyncFeed(_marketFeedId);
+        _seenMarketIds.clear();
+        _marketplaceListings = [];
+
+        _marketFeedId = await LBW_Sync.syncMarketplace(
+            (listing) => {
+                // Dedup by d-tag or id
+                const idx = _marketplaceListings.findIndex(l =>
+                    (l.dTag && l.dTag === listing.dTag) || l.id === listing.id
+                );
+                if (idx >= 0) _marketplaceListings[idx] = listing;
+                else _marketplaceListings.push(listing);
+                _renderMarketplaceGrid();
+            },
+            (cached) => {
+                console.log(`[Bridge] 🏪 Marketplace: ${cached.length} listings desde cache`);
+            }
+        );
+
+        // Listen for kind 5 (DELETE) events → remove ghost listings
+        LBW_Nostr.onEventKind(5, (event) => {
+            const eTags = (event.tags || []).filter(t => t[0] === 'e').map(t => t[1]);
+            let changed = false;
+            eTags.forEach(deletedId => {
+                const idx = _marketplaceListings.findIndex(l => l.id === deletedId && l.pubkey === event.pubkey);
+                if (idx >= 0) {
+                    _marketplaceListings.splice(idx, 1);
+                    changed = true;
+                    console.log(`[Bridge] 🗑️ Listing ${deletedId.substring(0, 8)} eliminado por kind 5`);
+                }
+            });
+            if (changed) _renderMarketplaceGrid();
+        });
+
+        // [Phase 3] Arrancar módulo de Stalls NIP-15
+        if (typeof LBW_Stalls !== 'undefined') {
+            LBW_Stalls.start();
+            console.log('[Bridge] 🏪 LBW_Stalls (NIP-15) iniciado');
+        }
+    }
+
+    function stopMarketplace() {
+        if (_marketFeedId) { LBW_Sync.unsyncFeed(_marketFeedId); _marketFeedId = null; }
+        if (typeof LBW_Stalls !== 'undefined') LBW_Stalls.stop();
+    }
+
+    // ── Helpers de precio y estado ────────────────────────────
+    function _formatPrice(listing) {
+        const price = listing.price;
+        if (!price || price === 'A negociar' || price === '0' || price === 0) return 'A negociar';
+
+        const freqTag = (listing.tags || []).find(t => t[0] === 'price-freq');
+        const freq = listing.priceFreq || (freqTag ? freqTag[1] : '');
+
+        const currency = listing.currency || 'sats';
+        const currDisplay = currency === 'sats' ? '⚡' : currency === 'BTC' ? '₿' : currency;
+
+        return `${price} ${currDisplay}${freq ? ' ' + freq : ''}`;
+    }
+
+    function _statusBadge(status) {
+        const map = {
+            'active':   { label: 'Activo',    color: '#4CAF50', bg: 'rgba(76,175,80,0.15)' },
+            'reserved': { label: 'Reservado', color: '#FF9800', bg: 'rgba(255,152,0,0.15)' },
+            'sold':     { label: 'Vendido',   color: '#9E9E9E', bg: 'rgba(158,158,158,0.15)' },
+            'closed':   { label: 'Cerrado',   color: '#9E9E9E', bg: 'rgba(158,158,158,0.15)' }
+        };
+        const s = map[status] || map['active'];
+        return `<span style="font-size:0.65rem;background:${s.bg};color:${s.color};padding:0.15rem 0.5rem;border-radius:20px;border:1px solid ${s.color};font-weight:600;">${s.label}</span>`;
+    }
+
+    function _renderMarketplaceGrid() {
+        const grid = document.getElementById('offersGrid');
+        if (!grid) return;
+        grid.innerHTML = '';
+
+        const active = _marketplaceListings.filter(l => l.status !== 'deleted').sort((a, b) => b.created_at - a.created_at);
+
+        if (active.length === 0) {
+            grid.innerHTML = '<div class="placeholder"><h3>🏪 Marketplace Vacío</h3><p>Sé el primero en publicar una oferta</p></div>';
+            return;
+        }
+
+        const icons = { servicios: '💼', productos: '🛍️', trabajos: '💻', alquileres: '🏠' };
+
+        active.forEach(listing => {
+            _resolveName(listing.pubkey).then(name => {
+                const card = document.createElement('div');
+                card.className = 'offer-card';
+                card.dataset.category = listing.category || '';
+                card.dataset.title    = listing.title || '';
+                card.dataset.desc     = listing.description || '';
+                // Collect t-tags for search
+                const tTags = (listing.tags || []).filter(t => t[0] === 't').map(t => t[1]).join(' ');
+                card.dataset.tags = tTags;
+                // Profesión del vendedor (taxonomía cerrada) para el filtro.
+                // Se rellena async tras resolver el perfil del seller; mientras
+                // tanto el card pasa por el filtro como "sin profesión" (oculto
+                // si hay un filtro activo). En cuanto llega el perfil, se
+                // actualiza el dataset y se re-aplica el filtro.
+                card.dataset.profession = '';
+                _registerListing(listing);
+
+                card.style.cssText = 'background:var(--color-bg-card);border:2px solid var(--color-border);border-radius:16px;overflow:hidden;transition:all 0.3s;';
+
+                // IMAGE: use fallback chain from MediaService
+                const media = LBW_Media.extractMediaFromTags(listing.tags);
+                let imgHtml = '';
+                if (media.urls.length > 0) {
+                    const imgId = `img-${listing.id.substring(0, 8)}`;
+                    // Multi-image indicator badge
+                    const countBadge = media.urls.length > 1
+                        ? `<div style="position:absolute;top:0.4rem;right:0.4rem;background:rgba(0,0,0,0.65);color:#fff;padding:0.15rem 0.45rem;border-radius:20px;font-size:0.65rem;pointer-events:none;">📷 ${media.urls.length}</div>`
+                        : '';
+                    imgHtml = `<div id="${imgId}" style="position:relative;width:100%;height:150px;overflow:hidden;">${countBadge}</div>`;
+                    setTimeout(() => {
+                        const container = document.getElementById(imgId);
+                        if (container) {
+                            const img = LBW_Media.createFallbackImage(media.urls, {
+                                style: 'width:100%;height:150px;object-fit:cover;',
+                                alt: listing.title
+                            });
+                            if (img) container.insertBefore(img, container.firstChild);
+                        }
+                    }, 0);
+                }
+
+                const isMine = listing.pubkey === LBW_Nostr.getPubkey();
+                const integrity = media.sha256 ? `<span title="SHA-256: ${media.sha256}" style="font-size:0.6rem;color:#4CAF50;cursor:help;">🔒</span>` : '';
+                const priceDisplay = _formatPrice(listing);
+                const statusBadge  = _statusBadge(listing.status);
+
+                card.innerHTML = `
+                    ${imgHtml}
+                    <div style="padding:1rem;">
+                        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.5rem;">
+                            <span style="font-size:1.5rem;">${listing.emoji || icons[listing.category] || '🏪'}</span>
+                            <div style="display:flex;gap:0.3rem;align-items:center;flex-wrap:wrap;justify-content:flex-end;">
+                                ${integrity}
+                                ${statusBadge}
+                                <span style="font-size:0.7rem;background:rgba(229,185,92,0.15);color:var(--color-gold);padding:0.2rem 0.6rem;border-radius:20px;border:1px solid rgba(229,185,92,0.3);">${listing.category}</span>
+                            </div>
+                        </div>
+                        <h4 style="color:var(--color-text-primary);font-size:1rem;margin-bottom:0.4rem;">${_esc(listing.title)}</h4>
+                        <p style="color:var(--color-text-secondary);font-size:0.8rem;margin-bottom:0.75rem;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;">${_esc(listing.description)}</p>
+                        <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:0.3rem;">
+                            <span style="font-weight:700;color:var(--color-gold);font-size:0.9rem;">${_esc(priceDisplay)}</span>
+                            <div style="display:flex;flex-direction:column;align-items:flex-end;gap:0.15rem;min-width:0;">
+                                <span style="font-size:0.7rem;color:var(--color-text-secondary);" id="seller-name-${listing.id.substring(0,8)}">${_esc(name)}</span>
+                                <span id="seller-prof-${listing.id.substring(0,8)}" style="display:none;font-size:0.65rem;color:#90CAF9;opacity:0.85;"></span>
+                            </div>
+                        </div>
+                        <div style="margin-top:0.75rem;display:flex;gap:0.5rem;flex-wrap:wrap;" class="card-actions">
+                            ${(!isMine && listing.price && listing.price !== 'A negociar' && !isNaN(parseInt(listing.price)) && listing.status === 'active')
+                                ? `<button data-lbw-action="bridgeBuyListing" data-id="${_esc(listing.id)}" style="flex:1;min-width:80px;padding:0.4rem;background:rgba(229,185,92,0.15);border:1px solid var(--color-gold);border-radius:8px;color:var(--color-gold);cursor:pointer;font-size:0.75rem;font-weight:600;">⚡ Comprar</button>`
+                                : ''}
+                            <button data-lbw-action="bridgeStartDM" data-pubkey="${_esc(listing.pubkey)}" style="flex:1;min-width:80px;padding:0.4rem;background:rgba(44,95,111,0.2);border:1px solid var(--color-teal-light);border-radius:8px;color:var(--color-teal-light);cursor:pointer;font-size:0.75rem;">💬 Contactar</button>
+                            ${isMine ? `<button data-lbw-action="bridgeDeleteListing" data-id="${_esc(listing.id)}" style="padding:0.4rem 0.6rem;background:rgba(255,68,68,0.15);border:1px solid #ff4444;border-radius:8px;color:#ff4444;cursor:pointer;font-size:0.75rem;">🗑️</button>` : ''}
+                        </div>
+                    </div>`;
+
+                // Open detail on card click (but not on button clicks)
+                card.addEventListener('click', function(e) {
+                    if (e.target.tagName === 'BUTTON' || e.target.closest('.card-actions')) return;
+                    _showListingDetail(listing, name);
+                });
+
+                grid.appendChild(card);
+
+                // [profession-1] Resuelve el perfil del seller para mostrar
+                // su categoría profesional + setear data-profession en la card
+                // (para el filtro). Async y best-effort — si falla queda en
+                // blanco y la card pasa el filtro como "sin profesión".
+                if (typeof LBW_Sync !== 'undefined' && LBW_Sync.resolveProfile && typeof LBW_Professions !== 'undefined') {
+                    LBW_Sync.resolveProfile(listing.pubkey).then(p => {
+                        if (!p) return;
+                        const profCode = p.lbw_profession || '';
+                        const profSpec = p.lbw_profession_specialty || '';
+                        if (profCode || profSpec) {
+                            const label = LBW_Professions.getLabel(profCode);
+                            const profEl = document.getElementById('seller-prof-' + listing.id.substring(0,8));
+                            if (profEl) {
+                                const txt = [label, profSpec].filter(Boolean).join(' · ');
+                                if (txt) {
+                                    profEl.textContent = txt;
+                                    profEl.style.display = 'block';
+                                }
+                            }
+                            if (profCode) {
+                                card.dataset.profession = profCode;
+                                // Re-aplicar filtros por si hay uno activo
+                                const sel = document.getElementById('marketProfessionFilter');
+                                if (sel && sel.value && sel.value !== profCode) {
+                                    card.style.display = 'none';
+                                }
+                            }
+                        }
+                    }).catch(() => {});
+                }
+
+                // [Phase 2] Inject citizenship + reputation badges next to seller name (async, non-blocking)
+                if (typeof LBW_Reviews !== 'undefined') {
+                    const citizenBadge = LBW_Reviews.getCitizenshipBadgeHtml
+                        ? LBW_Reviews.getCitizenshipBadgeHtml(listing.pubkey)
+                        : '';
+                    const scoreBadgePromise = LBW_Reviews.getScoreBadgeHtml
+                        ? LBW_Reviews.getScoreBadgeHtml(listing.pubkey)
+                        : Promise.resolve('');
+                    scoreBadgePromise.then(scoreBadge => {
+                        const badges = [citizenBadge, scoreBadge].filter(Boolean).join(' ');
+                        if (!badges) return;
+                        const nameEl = card.querySelector(`#seller-name-${listing.id.substring(0,8)}`);
+                        if (nameEl) {
+                            nameEl.innerHTML = `<span style="display:flex;align-items:center;gap:0.3rem;flex-wrap:wrap;justify-content:flex-end;">${_esc(name)} ${badges}</span>`;
+                        }
+                    }).catch(() => {});
+                }
+            });
+        });
+    }
+
+    // Publish offer using MediaService for images (Phase 1: multiple images)
+    async function publishOffer(offerData) {
+        let mediaTags = [];
+
+        // Soportar múltiples imágenes (imageFiles) y retrocompat con imageFile singular
+        const imageFiles = offerData.imageFiles && offerData.imageFiles.length > 0
+            ? offerData.imageFiles
+            : (offerData.imageFile ? [offerData.imageFile] : []);
+
+        for (const file of imageFiles.slice(0, 5)) {
+            try {
+                const media = await LBW_Media.uploadImage(file, {
+                    maxProviders: 2,
+                    onProgress: (msg) => console.log(`[Bridge] 📸 ${msg}`)
+                });
+                const tags = LBW_Media.buildImageTags(media);
+                mediaTags = mediaTags.concat(tags);
+            } catch(e) {
+                console.warn('[Bridge] ⚠️ Error subiendo imagen:', e.message);
+            }
+        }
+
+        const result = await LBW_Nostr.publishMarketplaceListing({
+            title:       offerData.title,
+            description: offerData.description,
+            category:    offerData.category,
+            subcategory: offerData.subcategory || '',
+            price:       offerData.price,
+            priceAmount: offerData.priceAmount || '',
+            currency:    offerData.currency || 'sats',
+            priceFreq:   offerData.priceFreq || '',
+            emoji:       offerData.emoji,
+            location:    offerData.location || '',
+            status:      offerData.status || 'active',
+            expiration:  offerData.expiration || 0,
+            mediaTags
+        });
+
+        // Inyectar localmente para que aparezca de inmediato
+        if (result && result.event) {
+            const ev = result.event;
+            const listing = {
+                id:          ev.id,
+                pubkey:      ev.pubkey,
+                npub:        LBW_Nostr.pubkeyToNpub(ev.pubkey),
+                title:       offerData.title || 'Sin título',
+                description: offerData.description || '',
+                category:    offerData.category || 'servicios',
+                subcategory: offerData.subcategory || '',
+                price:       offerData.price || 'A negociar',
+                priceAmount: offerData.priceAmount || '',
+                currency:    offerData.currency || 'sats',
+                priceFreq:   offerData.priceFreq || '',
+                emoji:       offerData.emoji || '🏪',
+                image:       '',
+                images:      [],
+                location:    offerData.location || '',
+                status:      offerData.status || 'active',
+                expiration:  offerData.expiration || 0,
+                created_at:  ev.created_at,
+                tags:        ev.tags || [],
+                dTag:        (ev.tags.find(t => t[0] === 'd') || [])[1] || '',
+                _source:     'local'
+            };
+            const idx = _marketplaceListings.findIndex(l =>
+                (l.dTag && l.dTag === listing.dTag) || l.id === listing.id
+            );
+            if (idx >= 0) _marketplaceListings[idx] = listing;
+            else _marketplaceListings.push(listing);
+            _renderMarketplaceGrid();
+        }
+
+        return result;
+    }
+
+    async function deleteListing(eventId) {
+        if (!confirm('¿Eliminar esta oferta?')) return;
+        try {
+            await LBW_Nostr.deleteMarketplaceListing(eventId);
+            _marketplaceListings = _marketplaceListings.filter(l => l.id !== eventId);
+            _renderMarketplaceGrid();
+        } catch (e) { alert('❌ ' + e.message); }
+    }
+
+    // Map de listings activos para acceso rápido desde botones (evita serializar en HTML)
+    const _listingMap = new Map();
+
+    function _registerListing(listing) {
+        _listingMap.set(listing.id, listing);
+    }
+
+    function filterMarketplace(cat) {
+        document.querySelectorAll('.offer-card:not(.mission-card)').forEach(c => {
+            c.style.display = (cat === 'todos' || c.dataset.category === cat) ? '' : 'none';
+        });
+    }
+
+    async function buyListing(listingId) {
+        const listing = _listingMap.get(listingId);
+        if (!listing) { showNotification('Oferta no encontrada', 'error'); return; }
+        const sellerName = await _resolveName(listing.pubkey);
+        if (typeof LBW_MarketPay !== 'undefined') {
+            await LBW_MarketPay.resolveAndPay(listing, sellerName);
+        } else {
+            showNotification('Módulo de pago no cargado', 'error');
+        }
+    }
+
+    function _showListingDetail(listing, authorName) {
+        var media = LBW_Media.extractMediaFromTags(listing.tags);
+        var priceDisplay = _formatPrice(listing);
+        var statusBadge  = _statusBadge(listing.status);
+        var isMine = listing.pubkey === LBW_Nostr.getPubkey();
+
+        // Carrusel de imágenes
+        var imageHtml = '';
+        if (media.urls.length === 1) {
+            imageHtml = '<img src="' + _esc(media.urls[0]) + '" alt="' + _esc(listing.title) + '" style="width:100%;height:250px;object-fit:cover;margin-bottom:1rem;border-radius:12px;" onerror="this.style.display=\'none\'">';
+        } else if (media.urls.length > 1) {
+            var thumbs = media.urls.map(function(url, i) {
+                var borderColor = i === 0 ? 'var(--color-gold)' : 'var(--color-border)';
+                return '<img src="' + _esc(url) + '" style="width:60px;height:60px;object-fit:cover;border-radius:8px;cursor:pointer;border:2px solid ' + borderColor + ';" onclick="document.getElementById(\'detail-main-img\').src=this.src;[].forEach.call(this.parentElement.querySelectorAll(\'img\'),function(el){el.style.borderColor=\'var(--color-border)\';});this.style.borderColor=\'var(--color-gold)\';" onerror="this.style.display=\'none\'">';
+            }).join('');
+            imageHtml =
+                '<img id="detail-main-img" src="' + _esc(media.urls[0]) + '" alt="' + _esc(listing.title) + '" style="width:100%;height:250px;object-fit:cover;margin-bottom:0.5rem;border-radius:12px;" onerror="this.style.display=\'none\'">' +
+                '<div style="display:flex;gap:0.4rem;margin-bottom:1rem;overflow-x:auto;padding-bottom:0.25rem;">' + thumbs + '</div>';
+        }
+
+        // Expiración
+        var expirationHtml = '';
+        var expTag = (listing.tags || []).find(function(t){ return t[0] === 'expiration'; });
+        var expTs  = listing.expiration || (expTag ? parseInt(expTag[1]) : 0);
+        if (expTs > 0) {
+            var expDate  = new Date(expTs * 1000);
+            var daysLeft = Math.ceil((expTs * 1000 - Date.now()) / 86400000);
+            expirationHtml = daysLeft > 0
+                ? '<div style="font-size:0.75rem;color:var(--color-text-secondary);margin-top:0.5rem;">⏱️ Expira: ' + expDate.toLocaleDateString('es-ES') + ' (' + daysLeft + ' días)</div>'
+                : '<div style="font-size:0.75rem;color:#ff4444;margin-top:0.5rem;">⚠️ Oferta expirada</div>';
+        }
+
+        var modal = document.createElement('div');
+        modal.className = 'modal active';
+        modal.innerHTML =
+            '<div class="modal-content" style="position:relative;">' +
+                '<button class="modal-close" onclick="this.closest(\'.modal\').remove()">×</button>' +
+                '<div class="modal-header">' +
+                    imageHtml +
+                    '<div style="display:flex;gap:0.4rem;align-items:center;flex-wrap:wrap;margin-top:0.5rem;">' +
+                        statusBadge +
+                        '<div style="display:inline-block;font-size:0.7rem;background:rgba(229,185,92,0.15);color:var(--color-gold);padding:0.2rem 0.6rem;border-radius:20px;border:1px solid rgba(229,185,92,0.3);">' + _esc(listing.category) + '</div>' +
+                    '</div>' +
+                '</div>' +
+                '<div class="modal-body">' +
+                    '<h2 style="color:var(--color-gold);margin-bottom:1rem;">' + _esc(listing.title) + '</h2>' +
+                    '<p style="color:var(--color-text-secondary);margin-bottom:1.5rem;line-height:1.6;">' + _esc(listing.description) + '</p>' +
+                    '<div style="background:var(--color-bg-dark);padding:1.5rem;border-radius:12px;margin-bottom:1.5rem;">' +
+                        '<div style="display:flex;justify-content:space-between;align-items:center;">' +
+                            '<div>' +
+                                '<div style="font-size:0.8rem;color:var(--color-text-secondary);margin-bottom:0.25rem;">Precio</div>' +
+                                '<div style="font-size:1.5rem;font-weight:700;color:var(--color-gold);">' + _esc(priceDisplay) + '</div>' +
+                            '</div>' +
+                            '<div style="text-align:right;">' +
+                                '<div style="font-size:0.8rem;color:var(--color-text-secondary);margin-bottom:0.25rem;">Publicado por</div>' +
+                                '<div style="font-size:1rem;font-weight:600;color:var(--color-text-primary);">' + _esc(authorName) + '</div>' +
+                            '</div>' +
+                        '</div>' +
+                        expirationHtml +
+                    '</div>' +
+                    (!isMine ?
+                        '<div style="margin-top:1.5rem;text-align:center;">' +
+                            '<button class="btn btn-primary" onclick="this.closest(\'.modal\').remove(); LBW_NostrBridge.startDMWith(\'' + listing.pubkey + '\')">💬 Enviar Mensaje Privado</button>' +
+                        '</div>'
+                    : '') +
+                    // Bloque de reseñas (se carga async tras render)
+                    '<div style="margin-top:1.5rem;">' +
+                        '<h4 style="color:var(--color-gold);font-size:0.9rem;margin-bottom:0.6rem;">⭐ Reseñas del vendedor</h4>' +
+                        '<div id="lbwDetailReviews-' + listing.id.substring(0, 8) + '"></div>' +
+                    '</div>' +
+                '</div>' +
+            '</div>';
+
+        document.body.appendChild(modal);
+        modal.addEventListener('click', function(e) {
+            if (e.target === modal) modal.remove();
+        });
+
+        // Cargar reseñas async una vez el modal está en el DOM
+        var reviewContainerId = 'lbwDetailReviews-' + listing.id.substring(0, 8);
+        if (typeof LBW_Reviews !== 'undefined') {
+            LBW_Reviews.renderReviewsBlock(listing.pubkey, reviewContainerId);
+        } else {
+            var rc = document.getElementById(reviewContainerId);
+            if (rc) rc.style.display = 'none';
+        }
+    }
+
+    // ── Profile Resolution (cache-first via SyncEngine) ──────
+    let _profileCache = {};
+    let _profilePending = {};
+
+    async function _resolveProfileData(pubkey) {
+        if (_profileCache[pubkey]) {
+            // Cache hit: still update DOM in case this element was just rendered
+            const cached = _profileCache[pubkey];
+            if (cached.picture) setTimeout(() => _updateRenderedProfiles(pubkey, cached), 0);
+            return cached;
+        }
+        if (_profilePending[pubkey]) return _profilePending[pubkey];
+
+        _profilePending[pubkey] = (async () => {
+            let name = null, picture = null;
+
+            if (pubkey === LBW_Nostr.getPubkey()) {
+                const p = LBW_Nostr.getProfile();
+                name = p.name || p.display_name || null;
+                picture = p.picture || null;
+            }
+            if (!name || !picture) {
+                try {
+                    const cached = await LBW_Store.getProfile(pubkey);
+                    if (cached) {
+                        if (!name) name = cached.name || cached.display_name || null;
+                        if (!picture) picture = cached.picture || cached.image || null;
+                    }
+                } catch(e) {}
+            }
+            if ((!name || !picture) && typeof supabaseClient !== 'undefined') {
+                try {
+                    const npub = LBW_Nostr.pubkeyToNpub(pubkey);
+                    const { data } = await supabaseClient
+                        .from('users').select('name, avatar_url')
+                        .eq('public_key', npub).maybeSingle();
+                    if (data) {
+                        if (!name) name = data.name || null;
+                        if (!picture) picture = data.avatar_url || null;
+                    }
+                } catch(e) {}
+            }
+            if (!name) {
+                // [hotfix dm-sidebar] Timeout obligatorio: fetchUserProfile sin
+                // EOSE puede colgar indefinidamente y dejaba el lock de
+                // loadChatSidebar atorado, haciendo que la sidebar nunca se
+                // refresque tras llegar nuevos DMs.
+                try {
+                    const profile = await Promise.race([
+                        LBW_Nostr.fetchUserProfile(pubkey),
+                        new Promise(resolve => setTimeout(() => resolve(null), 4000))
+                    ]);
+                    if (profile) {
+                        name = profile.name || profile.display_name || null;
+                        picture = profile.picture || profile.image || null;
+                        if (name) LBW_Store.putProfile(pubkey, profile).catch(() => {});
+                    }
+                } catch(e) {}
+            }
+
+            delete _profilePending[pubkey];
+
+            const result = {
+                name: name || LBW_Nostr.pubkeyToNpub(pubkey).substring(0, 12) + '...',
+                picture: picture || null
+            };
+            if (name) {
+                _profileCache[pubkey] = result;
+                _nameCache[pubkey] = name;
+            }
+            return result;
+        })();
+
+        return _profilePending[pubkey];
+    }
+
+    async function _resolveName(pubkey) {
+        const data = await _resolveProfileData(pubkey);
+        return data.name;
+    }
+
+    // Siempre devuelve div con inicial — nunca mete src en innerHTML.
+    // _injectAvatarImg() aplica la foto DESPUÉS de insertar en el DOM.
+    function _avatarHtml(cssClass, name, picture) {
+        const clean = (name || '').replace(/[^\p{L}\p{N}]/gu, '');
+        const initial = clean.length > 0 ? clean.charAt(0).toUpperCase() : '?';
+        return `<div class="${cssClass}">${initial}</div>`;
+    }
+
+    // Reemplaza el div avatar por <img> via propiedad DOM (soporta base64 largo)
+    function _injectAvatarImg(parentEl, cssClass, name, picture) {
+        if (!picture) return;
+        const clean = (name || '').replace(/[^\p{L}\p{N}]/gu, '');
+        const initial = clean.length > 0 ? clean.charAt(0).toUpperCase() : '?';
+        const existing = parentEl.querySelector('.' + cssClass);
+        if (!existing || existing.tagName === 'IMG') return;
+        const img = document.createElement('img');
+        img.className = cssClass;
+        img.alt = initial;
+        img.onerror = function() {
+            const div = document.createElement('div');
+            div.className = cssClass;
+            div.textContent = initial;
+            if (this.parentNode) this.parentNode.replaceChild(div, this);
+        };
+        existing.parentNode.replaceChild(img, existing);
+        img.src = picture; // asignar src como propiedad DOM — nunca via innerHTML
+    }
+
+    // Actualiza nombre y avatar en mensajes ya renderizados
+    function _updateRenderedProfiles(pubkey, profile) {
+        try {
+            document.querySelectorAll('.chat-message[data-pubkey="' + pubkey + '"]').forEach(el => {
+                const nameEl = el.querySelector('.chat-msg-name');
+                if (nameEl) nameEl.textContent = profile.name;
+                _injectAvatarImg(el, 'chat-msg-avatar', profile.name, profile.picture);
+            });
+            document.querySelectorAll('.sidebar-conversation[data-pubkey="' + pubkey + '"]').forEach(el => {
+                const nameEl = el.querySelector('.sidebar-conv-name');
+                if (nameEl) nameEl.textContent = profile.name;
+                _injectAvatarImg(el, 'sidebar-conv-avatar', profile.name, profile.picture);
+            });
+        } catch(e) {}
+    }
+
+    // [M-10] LBW.escapeHtml siempre disponible (escape-utils.js carga primero
+    // en index.html). El polyfill anterior usaba textContent + innerHTML, que
+    // NO escapa `"` — bug latente para uso en atributos.
+    const _esc = LBW.escapeHtml;
+
+    // ── Debug ────────────────────────────────────────────────
+    async function getDebugStats() {
+        const syncStats = await LBW_Sync.getStats();
+        const relays = LBW_Nostr.getRelayStatus();
+        return {
+            ...syncStats,
+            relays,
+            dmConversations: Object.keys(_dmConversations).length,
+            marketListings: _marketplaceListings.length,
+            chatMessages: _seenChatIds.size
+        };
+    }
+
+    // ── Conversations API (para integración con chat.js) ─────
+    function getConversations() {
+        // Retorna lista de conversaciones ordenadas por timestamp
+        return Object.entries(_dmConversations)
+            .map(([pubkey, messages]) => {
+                const lastMsg = messages[messages.length - 1];
+                return {
+                    pubkey,
+                    name: _nameCache[pubkey] || lastMsg?._resolvedName || null,
+                    lastMessage: lastMsg?.content || '',
+                    lastMessageFrom: lastMsg?.from || null,
+                    timestamp: lastMsg?.created_at || 0,
+                    messageCount: messages.length,
+                    encrypted: true // Todos los DMs Nostr están cifrados
+                };
+            })
+            .sort((a, b) => b.timestamp - a.timestamp);
+    }
+
+    function getUnreadDMCount() {
+        // Contar mensajes recibidos después del último visto
+        const lastSeen = parseInt(localStorage.getItem('lastSeen_private') || '0') / 1000;
+        let count = 0;
+        const myPubkey = LBW_Nostr.getPubkey();
+        
+        Object.values(_dmConversations).forEach(messages => {
+            messages.forEach(msg => {
+                // Solo contar mensajes entrantes (no enviados por mí) después de lastSeen
+                if (msg.from !== myPubkey && msg.created_at > lastSeen) {
+                    count++;
+                }
+            });
+        });
+        
+        return count;
+    }
+
+    // Devuelve una entrada por cada conversación que tenga al menos un mensaje
+    // ENTRANTE posterior a `lastSeen_private`. Ignora mensajes enviados por mí.
+    // Usado por notifications.js para el centro de notificaciones.
+    function getUnreadDMs() {
+        const lastSeenSec = parseInt(localStorage.getItem('lastSeen_private') || '0') / 1000;
+        const myPubkey = LBW_Nostr.getPubkey();
+        if (!myPubkey) return [];
+
+        const result = [];
+        Object.entries(_dmConversations).forEach(([otherPubkey, messages]) => {
+            let latestUnread = null;
+            let unreadCount = 0;
+            for (const msg of messages) {
+                if (msg.from !== myPubkey && msg.created_at > lastSeenSec) {
+                    unreadCount++;
+                    if (!latestUnread || msg.created_at > latestUnread.created_at) {
+                        latestUnread = msg;
+                    }
+                }
+            }
+            if (latestUnread) {
+                result.push({
+                    pubkey: otherPubkey,
+                    lastMessage: latestUnread.content || '',
+                    lastMessageId: latestUnread.id,
+                    timestamp: latestUnread.created_at,
+                    unreadCount: unreadCount
+                });
+            }
+        });
+        return result.sort((a, b) => b.timestamp - a.timestamp);
+    }
+
+    // Re-render marketplace grid on navigation
+    function refreshMarketplace() {
+        _renderMarketplaceGrid();
+    }
+
+    // Count current user's marketplace listings
+    function getMyOffersCount() {
+        var myPubkey = LBW_Nostr.getPubkey();
+        if (!myPubkey) return 0;
+        return _marketplaceListings.filter(function(l) {
+            return l.pubkey === myPubkey && l.status !== 'deleted';
+        }).length;
+    }
+
+    function getMyChatCount() {
+        return _myChatCount;
+    }
+
+    // ── Actualizar badge ⚡ en el mensaje ─────────────────────────────────────
+    function _updateZapBadge(eventId) {
+        const zappers = _zapsByEvent[eventId];
+        const el = document.getElementById(`zaps-${eventId}`);
+        if (!el) return;
+        const count = zappers ? zappers.size : 0;
+        if (count === 0) { el.innerHTML = ''; return; }
+        const myPubkey = LBW_Nostr.isLoggedIn() ? LBW_Nostr.getPubkey() : null;
+        const iMine = myPubkey && zappers && zappers.has(myPubkey);
+        el.innerHTML = `<span class="chat-zap-badge ${iMine ? 'chat-zap-badge--mine' : ''}">⚡${count > 1 ? ' ' + count : ''}</span>`;
+    }
+
+    // ── Zap (⚡ reacción NIP-25 + notificación al autor) ─────────────────────────
+    async function zapMessage(eventId, pubkey, btnEl) {
+        if (!LBW_Nostr.isLoggedIn()) {
+            showNotification('Conéctate con Nostr para enviar un zap ⚡', 'error');
+            return;
+        }
+        if (btnEl) {
+            btnEl.disabled = true;
+            btnEl.textContent = '⏳';
+        }
+        try {
+            await LBW_Nostr.reactToEvent(eventId, pubkey, '⚡');
+
+            // Actualizar estado local
+            const myPubkey = LBW_Nostr.getPubkey();
+            if (!_zapsByEvent[eventId]) _zapsByEvent[eventId] = new Set();
+            _zapsByEvent[eventId].add(myPubkey);
+            _updateZapBadge(eventId);
+
+            if (btnEl) {
+                btnEl.textContent = '⚡';
+                btnEl.classList.add('chat-zap-btn--sent');
+                btnEl.disabled = true;
+                btnEl.title = 'Ya zapado ⚡';
+            }
+            showNotification('⚡ Zap enviado', 'success');
+        } catch (err) {
+            console.error('[Bridge] Error enviando zap:', err);
+            if (btnEl) { btnEl.disabled = false; btnEl.textContent = '⚡'; }
+            showNotification('Error al enviar el zap', 'error');
+        }
+    }
+
+    function getIncomingZaps() { return [..._incomingZaps]; }
+    function getIncomingReplies() { return [..._incomingReplies]; }
+    function clearIncomingZaps() { _incomingZaps = []; }
+    function clearIncomingReplies() { _incomingReplies = []; }
+
+    // ── Mute personal (cliente-side) ────────────────────────
+    // Llamado desde el botón 🔇 en cada mensaje del chat comunitario.
+    // No borra ni modifica eventos en relays — solo oculta visualmente
+    // los mensajes de esa pubkey en la app local. Persistencia en
+    // localStorage vía LBW_Mute.
+    function muteUser(pubkey, name) {
+        if (typeof LBW_Mute === 'undefined') return;
+        const displayName = (name || '').replace(/[<>'"]/g, '');
+        const ok = confirm('¿Silenciar a ' + (displayName || 'este usuario') +
+            '?\n\nSus mensajes no aparecerán en tu chat. Puedes reactivarlo desde el perfil → Usuarios silenciados.');
+        if (!ok) return;
+        if (!LBW_Mute.mute(pubkey)) {
+            console.warn('[Bridge] Mute rechazado para', pubkey);
+            return;
+        }
+        // Ocultar mensajes ya renderizados de esa pubkey (no los borramos
+        // del DOM por si el usuario reactiva luego)
+        try {
+            const selector = `.chat-message[data-pubkey="${CSS.escape(pubkey)}"]`;
+            document.querySelectorAll(selector).forEach(el => {
+                el.style.display = 'none';
+                el.dataset.muted = '1';
+            });
+        } catch (e) {}
+        if (typeof showNotification === 'function') {
+            showNotification('🔇 Usuario silenciado', 'info');
+        }
+        // Refrescar la lista de muted en perfil si está visible
+        if (typeof renderMutedUsersList === 'function') {
+            try { renderMutedUsersList(); } catch (e) {}
+        }
+    }
+
+    function unmuteUser(pubkey) {
+        if (typeof LBW_Mute === 'undefined') return;
+        if (!LBW_Mute.unmute(pubkey)) return;
+        try {
+            const selector = `.chat-message[data-pubkey="${CSS.escape(pubkey)}"]`;
+            document.querySelectorAll(selector).forEach(el => {
+                el.style.display = '';
+                delete el.dataset.muted;
+            });
+        } catch (e) {}
+        if (typeof showNotification === 'function') {
+            showNotification('🔉 Usuario reactivado', 'info');
+        }
+        if (typeof renderMutedUsersList === 'function') {
+            try { renderMutedUsersList(); } catch (e) {}
+        }
+    }
+
+    // ── Public API ───────────────────────────────────────────
+    return {
+        init,
+        handleNIP07Login, handlePrivateKeyLogin, handleBunkerLogin, handleCreateIdentity, handleLogout, restoreSession,
+        publishCommunityPost, replyToMessage, cancelReply, zapMessage, startCommunityChat, stopCommunityChat,
+        sendDM, startDMWith, openDMConversation, startDirectMessages, stopDirectMessages,
+        publishOffer, deleteListing, filterMarketplace, buyListing, startMarketplace, stopMarketplace, refreshMarketplace,
+        startGovernance, stopGovernance, startMerits, stopMerits,
+        togglePrivacyStrict,
+        muteUser, unmuteUser,
+        _resolveName, _resolveProfileData, _avatarHtml, _injectAvatarImg, getDebugStats, getMyOffersCount, getMyChatCount,
+        resolveName: _resolveName,
+        // Nuevos métodos para integración con chat.js
+        getConversations, getUnreadDMCount, getUnreadDMs,
+        getIncomingZaps, getIncomingReplies, clearIncomingZaps, clearIncomingReplies
+    };
+})();
+
+window.LBW_NostrBridge = LBW_NostrBridge;
+
+// [Bug 2 fix] Startup module audit: en DOMContentLoaded comprueba que todos
+// los providers LBW_X esperados estén cargados. Si falta alguno, lo loguea
+// como error claro en lugar de fallar silenciosamente más tarde.
+document.addEventListener('DOMContentLoaded', () => {
+    const expected = [
+        'LBW_Store', 'LBW_Media', 'LBW_ChatAttach', 'LBW_Nostr', 'LBW_DM',
+        'LBW_Sync', 'LBW_Governance', 'LBW_Merits', 'LBW_MeritsSync',
+        'LBW_Reviews', 'LBW_MarketPay', 'LBW_Stalls', 'LBW_NostrBridge',
+        'LBW_Debate', 'LBW_Missions', 'LBW_Delegations', 'LBW_NIP46'
+    ];
+    const missing = expected.filter(name => typeof window[name] === 'undefined');
+    if (missing.length) {
+        console.error('[Bridge] ❌ Módulos LBW faltantes en window:', missing);
+        console.error('[Bridge] Esto suele indicar un orden de carga incorrecto en index.html o un error de parse en el módulo.');
+    } else {
+        console.log('[Bridge] ✅ Audit OK — los 17 módulos LBW están cargados');
+    }
+
+    LBW_NostrBridge.init();
+    LBW_NostrBridge.restoreSession();
+});
+
+// ═══════════════════════════════════════════════════════════════════
+// SEC-11/12: Event delegation for marketplace listing actions.
+// ═══════════════════════════════════════════════════════════════════
+(function installBridgeEventDelegation() {
+    if (window.__lbwBridgeListenerInstalled) return;
+    window.__lbwBridgeListenerInstalled = true;
+
+    document.addEventListener('click', function (e) {
+        var el = e.target && e.target.closest ? e.target.closest('[data-lbw-action]') : null;
+        if (!el) return;
+        var action = el.dataset.lbwAction;
+        if (!action || action.indexOf('bridge') !== 0) return;
+        try {
+            switch (action) {
+                case 'bridgeBuyListing':
+                    LBW_NostrBridge.buyListing(el.dataset.id);
+                    break;
+                case 'bridgeStartDM':
+                    LBW_NostrBridge.startDMWith(el.dataset.pubkey);
+                    break;
+                case 'bridgeDeleteListing':
+                    LBW_NostrBridge.deleteListing(el.dataset.id);
+                    break;
+                case 'bridgeMuteUser':
+                    LBW_NostrBridge.muteUser(el.dataset.pubkey, el.dataset.name);
+                    break;
+                case 'bridgeUnmuteUser':
+                    LBW_NostrBridge.unmuteUser(el.dataset.pubkey);
+                    break;
+            }
+        } catch (err) {
+            console.error('[Bridge delegation] Error dispatching', action, err);
+        }
+    });
+})();
