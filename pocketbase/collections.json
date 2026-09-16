@@ -44,12 +44,24 @@
       {
         "id": "jdxppfanvf7cqg4",
         "name": "image_url",
-        "type": "url",
+        "type": "file",
         "system": false,
         "required": false,
         "presentable": false,
         "unique": false,
-        "options": {}
+        "options": {
+          "maxSelect": 1,
+          "maxSize": 5242880,
+          "mimeTypes": [
+            "image/jpeg",
+            "image/png",
+            "image/webp",
+            "image/gif"
+          ],
+          "thumbs": [
+            "400x0"
+          ]
+        }
       },
       {
         "id": "mzis51walapow43",
@@ -741,12 +753,24 @@
       {
         "id": "prhdqa9clydqyux",
         "name": "image_url",
-        "type": "url",
+        "type": "file",
         "system": false,
         "required": false,
         "presentable": false,
         "unique": false,
-        "options": {}
+        "options": {
+          "maxSelect": 1,
+          "maxSize": 5242880,
+          "mimeTypes": [
+            "image/jpeg",
+            "image/png",
+            "image/webp",
+            "image/gif"
+          ],
+          "thumbs": [
+            "400x0"
+          ]
+        }
       },
       {
         "id": "e3gu5traitf0rzg",
