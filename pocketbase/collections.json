@@ -1,61 +1,86 @@
 [
   {
+    "id": "c2pstamps000001",
     "name": "stamps",
     "type": "base",
-    "listRule": "",
-    "viewRule": "",
-    "createRule": null,
-    "updateRule": null,
-    "deleteRule": null,
+    "system": false,
     "schema": [
       {
+        "id": "uditfw4vmz1yrdm",
         "name": "name",
         "type": "text",
+        "system": false,
         "required": true,
+        "presentable": false,
+        "unique": false,
         "options": {
           "max": 100
         }
       },
       {
+        "id": "g0mio9vn6m9n3ys",
         "name": "description",
         "type": "text",
+        "system": false,
         "required": false,
+        "presentable": false,
+        "unique": false,
         "options": {
           "max": 500
         }
       },
       {
+        "id": "ag1uh59ca4vs6zr",
         "name": "icon",
         "type": "text",
+        "system": false,
         "required": false,
+        "presentable": false,
+        "unique": false,
         "options": {
           "max": 10
         }
       },
       {
+        "id": "jdxppfanvf7cqg4",
         "name": "image_url",
         "type": "url",
+        "system": false,
         "required": false,
+        "presentable": false,
+        "unique": false,
         "options": {}
       },
       {
+        "id": "mzis51walapow43",
         "name": "event_name",
         "type": "text",
+        "system": false,
         "required": false,
+        "presentable": false,
+        "unique": false,
         "options": {
           "max": 200
         }
       },
       {
+        "id": "i1p6hex01esbypp",
         "name": "event_date",
         "type": "date",
+        "system": false,
         "required": false,
+        "presentable": false,
+        "unique": false,
         "options": {}
       },
       {
+        "id": "w6hyp2jj844o76y",
         "name": "rarity",
         "type": "select",
+        "system": false,
         "required": true,
+        "presentable": false,
+        "unique": false,
         "options": {
           "maxSelect": 1,
           "values": [
@@ -67,9 +92,13 @@
         }
       },
       {
+        "id": "qeyu3rwn00kqart",
         "name": "category",
         "type": "select",
+        "system": false,
         "required": true,
+        "presentable": false,
+        "unique": false,
         "options": {
           "maxSelect": 1,
           "values": [
@@ -81,93 +110,137 @@
         }
       },
       {
+        "id": "or64ais7n3l2zth",
         "name": "active",
         "type": "bool",
+        "system": false,
         "required": false,
+        "presentable": false,
+        "unique": false,
         "options": {}
       }
-    ]
-  },
-  {
-    "name": "user_stamps",
-    "type": "base",
-    "listRule": "@request.auth.id != ''",
-    "viewRule": "@request.auth.id != ''",
-    "createRule": null,
-    "updateRule": null,
-    "deleteRule": null,
-    "schema": [
-      {
-        "name": "user_pubkey",
-        "type": "text",
-        "required": true,
-        "options": {
-          "max": 64
-        }
-      },
-      {
-        "name": "stamp_id",
-        "type": "relation",
-        "required": true,
-        "options": {
-          "collectionId": "stamps",
-          "cascadeDelete": false,
-          "maxSelect": 1
-        }
-      },
-      {
-        "name": "obtained_at",
-        "type": "date",
-        "required": true,
-        "options": {}
-      },
-      {
-        "name": "event_id",
-        "type": "text",
-        "required": false,
-        "options": {
-          "max": 64
-        }
-      }
-    ]
-  },
-  {
-    "name": "badges",
-    "type": "base",
+    ],
+    "indexes": [],
     "listRule": "",
     "viewRule": "",
     "createRule": null,
     "updateRule": null,
     "deleteRule": null,
+    "options": {}
+  },
+  {
+    "id": "c2pusrstmps0001",
+    "name": "user_stamps",
+    "type": "base",
+    "system": false,
     "schema": [
       {
+        "id": "b4u20a8yjyv5863",
+        "name": "user_pubkey",
+        "type": "text",
+        "system": false,
+        "required": true,
+        "presentable": false,
+        "unique": false,
+        "options": {
+          "max": 64
+        }
+      },
+      {
+        "id": "qztzpkw5lxb7s2z",
+        "name": "stamp_id",
+        "type": "relation",
+        "system": false,
+        "required": true,
+        "presentable": false,
+        "unique": false,
+        "options": {
+          "collectionId": "c2pstamps000001",
+          "cascadeDelete": false,
+          "maxSelect": 1
+        }
+      },
+      {
+        "id": "89zhar90crhj3ey",
+        "name": "obtained_at",
+        "type": "date",
+        "system": false,
+        "required": true,
+        "presentable": false,
+        "unique": false,
+        "options": {}
+      },
+      {
+        "id": "1bilja1koazs2iu",
+        "name": "event_id",
+        "type": "text",
+        "system": false,
+        "required": false,
+        "presentable": false,
+        "unique": false,
+        "options": {
+          "max": 64
+        }
+      }
+    ],
+    "indexes": [],
+    "listRule": "@request.auth.id != ''",
+    "viewRule": "@request.auth.id != ''",
+    "createRule": null,
+    "updateRule": null,
+    "deleteRule": null,
+    "options": {}
+  },
+  {
+    "id": "c2pbadges000001",
+    "name": "badges",
+    "type": "base",
+    "system": false,
+    "schema": [
+      {
+        "id": "w1aafam7a9w5fhv",
         "name": "name",
         "type": "text",
+        "system": false,
         "required": true,
+        "presentable": false,
+        "unique": false,
         "options": {
           "max": 100
         }
       },
       {
+        "id": "lh8dqfqnimzghrv",
         "name": "description",
         "type": "text",
+        "system": false,
         "required": false,
+        "presentable": false,
+        "unique": false,
         "options": {
           "max": 500
         }
       },
       {
+        "id": "7a5rwczjqdfo8a5",
         "name": "icon",
         "type": "text",
+        "system": false,
         "required": false,
+        "presentable": false,
+        "unique": false,
         "options": {
           "max": 10
         }
       },
       {
+        "id": "98wmmpjoe2sp1le",
         "name": "skill_area",
         "type": "select",
+        "system": false,
         "required": true,
+        "presentable": false,
+        "unique": false,
         "options": {
           "maxSelect": 1,
           "values": [
@@ -183,9 +256,13 @@
         }
       },
       {
+        "id": "0au6yf9dk0tc0tr",
         "name": "level",
         "type": "select",
+        "system": false,
         "required": true,
+        "presentable": false,
+        "unique": false,
         "options": {
           "maxSelect": 1,
           "values": [
@@ -196,77 +273,113 @@
         }
       },
       {
+        "id": "4xa0l3fhe3ptsgi",
         "name": "active",
         "type": "bool",
+        "system": false,
         "required": false,
+        "presentable": false,
+        "unique": false,
         "options": {}
       }
-    ]
-  },
-  {
-    "name": "user_badges",
-    "type": "base",
-    "listRule": "@request.auth.id != ''",
-    "viewRule": "@request.auth.id != ''",
+    ],
+    "indexes": [],
+    "listRule": "",
+    "viewRule": "",
     "createRule": null,
     "updateRule": null,
     "deleteRule": null,
+    "options": {}
+  },
+  {
+    "id": "c2pusrbdgs00001",
+    "name": "user_badges",
+    "type": "base",
+    "system": false,
     "schema": [
       {
+        "id": "2nzylsf1iy66oq8",
         "name": "user_pubkey",
         "type": "text",
+        "system": false,
         "required": true,
+        "presentable": false,
+        "unique": false,
         "options": {
           "max": 64
         }
       },
       {
+        "id": "csbrsseck853lel",
         "name": "badge_id",
         "type": "relation",
+        "system": false,
         "required": true,
+        "presentable": false,
+        "unique": false,
         "options": {
-          "collectionId": "badges",
+          "collectionId": "c2pbadges000001",
           "cascadeDelete": false,
           "maxSelect": 1
         }
       },
       {
+        "id": "8hlijsj459f1izu",
         "name": "obtained_at",
         "type": "date",
+        "system": false,
         "required": true,
+        "presentable": false,
+        "unique": false,
         "options": {}
       }
-    ]
-  },
-  {
-    "name": "missions",
-    "type": "base",
-    "listRule": "",
-    "viewRule": "",
-    "createRule": "@request.auth.id != ''",
+    ],
+    "indexes": [],
+    "listRule": "@request.auth.id != ''",
+    "viewRule": "@request.auth.id != ''",
+    "createRule": null,
     "updateRule": null,
     "deleteRule": null,
+    "options": {}
+  },
+  {
+    "id": "c2pmissions0001",
+    "name": "missions",
+    "type": "base",
+    "system": false,
     "schema": [
       {
+        "id": "psyg94hgcj3sn39",
         "name": "title",
         "type": "text",
+        "system": false,
         "required": true,
+        "presentable": false,
+        "unique": false,
         "options": {
           "max": 80
         }
       },
       {
+        "id": "7mbn5buaa500su6",
         "name": "description",
         "type": "text",
+        "system": false,
         "required": true,
+        "presentable": false,
+        "unique": false,
         "options": {
           "max": 600
         }
       },
       {
+        "id": "i29733htf3ujisn",
         "name": "merit_category",
         "type": "select",
+        "system": false,
         "required": true,
+        "presentable": false,
+        "unique": false,
         "options": {
           "maxSelect": 1,
           "values": [
@@ -278,40 +391,60 @@
         }
       },
       {
+        "id": "xmonto7noco985v",
         "name": "merit_amount",
         "type": "number",
+        "system": false,
         "required": true,
+        "presentable": false,
+        "unique": false,
         "options": {
           "min": 10,
           "max": 5000
         }
       },
       {
+        "id": "3jgjweyjgved4b4",
         "name": "min_citizenship",
         "type": "text",
+        "system": false,
         "required": false,
+        "presentable": false,
+        "unique": false,
         "options": {
           "max": 50
         }
       },
       {
+        "id": "foxmt1sbhceve3c",
         "name": "deadline",
         "type": "date",
+        "system": false,
         "required": false,
+        "presentable": false,
+        "unique": false,
         "options": {}
       },
       {
+        "id": "ga07pifvblcbfoh",
         "name": "delivery_instructions",
         "type": "text",
+        "system": false,
         "required": false,
+        "presentable": false,
+        "unique": false,
         "options": {
           "max": 300
         }
       },
       {
+        "id": "ycifp9cxx4t7ovg",
         "name": "status",
         "type": "select",
+        "system": false,
         "required": true,
+        "presentable": false,
+        "unique": false,
         "options": {
           "maxSelect": 1,
           "values": [
@@ -325,100 +458,152 @@
         }
       },
       {
+        "id": "i4mey1itkabksoy",
         "name": "creator_pubkey",
         "type": "text",
+        "system": false,
         "required": true,
+        "presentable": false,
+        "unique": false,
         "options": {
           "max": 64
         }
       },
       {
+        "id": "0alpfl1qkjddpvh",
         "name": "creator_name",
         "type": "text",
+        "system": false,
         "required": false,
+        "presentable": false,
+        "unique": false,
         "options": {
           "max": 100
         }
       },
       {
+        "id": "dh2awfhn63vpy4v",
         "name": "claimed_by_pubkey",
         "type": "text",
+        "system": false,
         "required": false,
+        "presentable": false,
+        "unique": false,
         "options": {
           "max": 64
         }
       },
       {
+        "id": "twxt832lponrywr",
         "name": "claimed_by_name",
         "type": "text",
+        "system": false,
         "required": false,
+        "presentable": false,
+        "unique": false,
         "options": {
           "max": 100
         }
       },
       {
+        "id": "uilvydpc3712lt9",
         "name": "claimed_at",
         "type": "date",
+        "system": false,
         "required": false,
+        "presentable": false,
+        "unique": false,
         "options": {}
       },
       {
+        "id": "sxyhrpeof9b2xrx",
         "name": "delivery_url",
         "type": "url",
+        "system": false,
         "required": false,
+        "presentable": false,
+        "unique": false,
         "options": {}
       },
       {
+        "id": "3yrh2wq6rhqckpi",
         "name": "approved_by_pubkey",
         "type": "text",
+        "system": false,
         "required": false,
+        "presentable": false,
+        "unique": false,
         "options": {
           "max": 64
         }
       },
       {
+        "id": "6g8ukkpurykp111",
         "name": "completed_at",
         "type": "date",
+        "system": false,
         "required": false,
+        "presentable": false,
+        "unique": false,
         "options": {}
       },
       {
+        "id": "z3h5707wpk78wga",
         "name": "updated_at",
         "type": "date",
+        "system": false,
         "required": false,
+        "presentable": false,
+        "unique": false,
         "options": {}
       }
-    ]
-  },
-  {
-    "name": "merit_contributions",
-    "type": "base",
-    "listRule": null,
-    "viewRule": null,
-    "createRule": null,
+    ],
+    "indexes": [],
+    "listRule": "",
+    "viewRule": "",
+    "createRule": "@request.auth.id != ''",
     "updateRule": null,
     "deleteRule": null,
+    "options": {}
+  },
+  {
+    "id": "c2pmeritcont001",
+    "name": "merit_contributions",
+    "type": "base",
+    "system": false,
     "schema": [
       {
+        "id": "3bzrqd8ylud6tiw",
         "name": "pubkey",
         "type": "text",
+        "system": false,
         "required": true,
+        "presentable": false,
+        "unique": false,
         "options": {
           "max": 64
         }
       },
       {
+        "id": "9pubel0itmcr2lq",
         "name": "value",
         "type": "number",
+        "system": false,
         "required": true,
+        "presentable": false,
+        "unique": false,
         "options": {
           "min": 1
         }
       },
       {
+        "id": "3bc8phj2ggrir1r",
         "name": "category",
         "type": "select",
+        "system": false,
         "required": true,
+        "presentable": false,
+        "unique": false,
         "options": {
           "maxSelect": 1,
           "values": [
@@ -430,25 +615,37 @@
         }
       },
       {
+        "id": "l41zomm3kmk13j8",
         "name": "description",
         "type": "text",
+        "system": false,
         "required": false,
+        "presentable": false,
+        "unique": false,
         "options": {
           "max": 500
         }
       },
       {
+        "id": "fj2amxmr7odf3t2",
         "name": "payment_method",
         "type": "text",
+        "system": false,
         "required": false,
+        "presentable": false,
+        "unique": false,
         "options": {
           "max": 50
         }
       },
       {
+        "id": "8zfj4gfuhlevckl",
         "name": "status",
         "type": "select",
+        "system": false,
         "required": true,
+        "presentable": false,
+        "unique": false,
         "options": {
           "maxSelect": 1,
           "values": [
@@ -459,126 +656,194 @@
         }
       },
       {
+        "id": "mwezzwc6185sfu9",
         "name": "approved_by",
         "type": "text",
+        "system": false,
         "required": false,
+        "presentable": false,
+        "unique": false,
         "options": {
           "max": 64
         }
       },
       {
+        "id": "ixwyqgre8eq8n2x",
         "name": "approved_at",
         "type": "date",
+        "system": false,
         "required": false,
+        "presentable": false,
+        "unique": false,
         "options": {}
       },
       {
+        "id": "by2lrebnyk1hqa3",
         "name": "evidence_url",
         "type": "url",
+        "system": false,
         "required": false,
+        "presentable": false,
+        "unique": false,
         "options": {}
       }
-    ]
-  },
-  {
-    "name": "events",
-    "type": "base",
-    "listRule": "",
-    "viewRule": "",
+    ],
+    "indexes": [],
+    "listRule": null,
+    "viewRule": null,
     "createRule": null,
     "updateRule": null,
     "deleteRule": null,
+    "options": {}
+  },
+  {
+    "id": "c2pevents000001",
+    "name": "events",
+    "type": "base",
+    "system": false,
     "schema": [
       {
+        "id": "u9ol57dkf4otafd",
         "name": "title",
         "type": "text",
+        "system": false,
         "required": true,
+        "presentable": false,
+        "unique": false,
         "options": {
           "max": 120
         }
       },
       {
+        "id": "sn91ckkuk1iuah5",
         "name": "description",
         "type": "text",
+        "system": false,
         "required": false,
+        "presentable": false,
+        "unique": false,
         "options": {
           "max": 1000
         }
       },
       {
+        "id": "3q9jin4dlqflow3",
         "name": "location",
         "type": "text",
+        "system": false,
         "required": false,
+        "presentable": false,
+        "unique": false,
         "options": {
           "max": 200
         }
       },
       {
+        "id": "prhdqa9clydqyux",
         "name": "image_url",
         "type": "url",
+        "system": false,
         "required": false,
+        "presentable": false,
+        "unique": false,
         "options": {}
       },
       {
+        "id": "e3gu5traitf0rzg",
         "name": "event_date",
         "type": "date",
+        "system": false,
         "required": true,
+        "presentable": false,
+        "unique": false,
         "options": {}
       },
       {
+        "id": "jm2qpksq0y5wloj",
         "name": "event_end",
         "type": "date",
+        "system": false,
         "required": false,
+        "presentable": false,
+        "unique": false,
         "options": {}
       },
       {
+        "id": "tqdc82qg8zvdi1z",
         "name": "organizer_pubkey",
         "type": "text",
+        "system": false,
         "required": false,
+        "presentable": false,
+        "unique": false,
         "options": {
           "max": 64
         }
       },
       {
+        "id": "rc3m7a7dfeg6k6u",
         "name": "organizer_name",
         "type": "text",
+        "system": false,
         "required": false,
+        "presentable": false,
+        "unique": false,
         "options": {
           "max": 100
         }
       },
       {
+        "id": "nz9spw5mlpszhka",
         "name": "max_attendees",
         "type": "number",
+        "system": false,
         "required": false,
+        "presentable": false,
+        "unique": false,
         "options": {
           "min": 1
         }
       },
       {
+        "id": "6c57qaeu24i1yhp",
         "name": "checkin_token",
         "type": "text",
+        "system": false,
         "required": true,
+        "presentable": false,
+        "unique": false,
         "options": {
           "max": 64
         }
       },
       {
+        "id": "26628xl4zvbdiv9",
         "name": "checkin_open_from",
         "type": "date",
+        "system": false,
         "required": false,
+        "presentable": false,
+        "unique": false,
         "options": {}
       },
       {
+        "id": "n1ynd4o3f16u9tg",
         "name": "checkin_open_until",
         "type": "date",
+        "system": false,
         "required": false,
+        "presentable": false,
+        "unique": false,
         "options": {}
       },
       {
+        "id": "tdy7h71p139jfkj",
         "name": "status",
         "type": "select",
+        "system": false,
         "required": true,
+        "presentable": false,
+        "unique": false,
         "options": {
           "maxSelect": 1,
           "values": [
@@ -590,69 +855,101 @@
         }
       },
       {
+        "id": "ijkfwyeipkpc4bt",
         "name": "xp_reward",
         "type": "number",
+        "system": false,
         "required": false,
+        "presentable": false,
+        "unique": false,
         "options": {
           "min": 0,
           "max": 500
         }
       },
       {
+        "id": "m7qen5z3jfpy3av",
         "name": "stamp_id",
         "type": "text",
+        "system": false,
         "required": false,
+        "presentable": false,
+        "unique": false,
         "options": {
           "max": 50
         }
       }
-    ]
-  },
-  {
-    "name": "event_checkins",
-    "type": "base",
-    "listRule": null,
-    "viewRule": null,
-    "createRule": "",
+    ],
+    "indexes": [],
+    "listRule": "",
+    "viewRule": "",
+    "createRule": null,
     "updateRule": null,
     "deleteRule": null,
+    "options": {}
+  },
+  {
+    "id": "c2pcheckins0001",
+    "name": "event_checkins",
+    "type": "base",
+    "system": false,
     "schema": [
       {
+        "id": "ff2z97hp671z9jk",
         "name": "event_id",
         "type": "text",
+        "system": false,
         "required": true,
+        "presentable": false,
+        "unique": false,
         "options": {
           "max": 50
         }
       },
       {
+        "id": "08k0kx5a2va4c6o",
         "name": "user_pubkey",
         "type": "text",
+        "system": false,
         "required": true,
+        "presentable": false,
+        "unique": false,
         "options": {
           "max": 64
         }
       },
       {
+        "id": "iwrsx8j8649e9gr",
         "name": "user_name",
         "type": "text",
+        "system": false,
         "required": false,
+        "presentable": false,
+        "unique": false,
         "options": {
           "max": 100
         }
       },
       {
+        "id": "03v6v2byhgltvdq",
         "name": "checkin_token",
         "type": "text",
+        "system": false,
         "required": false,
+        "presentable": false,
+        "unique": false,
         "options": {
           "max": 64
         }
       },
       {
+        "id": "b1jnz5h8t594qys",
         "name": "check_method",
         "type": "select",
+        "system": false,
         "required": false,
+        "presentable": false,
+        "unique": false,
         "options": {
           "maxSelect": 1,
           "values": [
@@ -662,50 +959,74 @@
         }
       },
       {
+        "id": "s3lpv0tfnhyk8q5",
         "name": "checked_in_at",
         "type": "date",
+        "system": false,
         "required": true,
+        "presentable": false,
+        "unique": false,
         "options": {}
       }
-    ]
-  },
-  {
-    "name": "xp_transactions",
-    "type": "base",
+    ],
+    "indexes": [],
     "listRule": null,
     "viewRule": null,
-    "createRule": null,
+    "createRule": "",
     "updateRule": null,
     "deleteRule": null,
+    "options": {}
+  },
+  {
+    "id": "c2pxptrans00001",
+    "name": "xp_transactions",
+    "type": "base",
+    "system": false,
     "schema": [
       {
+        "id": "zvzrlei2ntly616",
         "name": "user_pubkey",
         "type": "text",
+        "system": false,
         "required": true,
+        "presentable": false,
+        "unique": false,
         "options": {
           "max": 64
         }
       },
       {
+        "id": "sa7lxnboch64rle",
         "name": "amount",
         "type": "number",
+        "system": false,
         "required": true,
+        "presentable": false,
+        "unique": false,
         "options": {
           "min": 1
         }
       },
       {
+        "id": "nb3xxolrvsgabsq",
         "name": "reason",
         "type": "text",
+        "system": false,
         "required": true,
+        "presentable": false,
+        "unique": false,
         "options": {
           "max": 200
         }
       },
       {
+        "id": "7vkw1nk2zegcy4g",
         "name": "source",
         "type": "select",
+        "system": false,
         "required": true,
+        "presentable": false,
+        "unique": false,
         "options": {
           "maxSelect": 1,
           "values": [
@@ -718,112 +1039,195 @@
         }
       },
       {
+        "id": "dpfvfouut4crjow",
         "name": "ref_id",
         "type": "text",
+        "system": false,
         "required": false,
+        "presentable": false,
+        "unique": false,
         "options": {
           "max": 50
         }
       }
-    ]
+    ],
+    "indexes": [],
+    "listRule": null,
+    "viewRule": null,
+    "createRule": null,
+    "updateRule": null,
+    "deleteRule": null,
+    "options": {}
   },
   {
+    "id": "c2pnip05ident01",
     "name": "nip05_identities",
     "type": "base",
+    "system": false,
+    "schema": [
+      {
+        "id": "yrr3njvl4iwhbai",
+        "name": "username",
+        "type": "text",
+        "system": false,
+        "required": true,
+        "presentable": false,
+        "unique": false,
+        "options": {
+          "max": 64
+        }
+      },
+      {
+        "id": "7l6nr3hycuduj81",
+        "name": "pubkey",
+        "type": "text",
+        "system": false,
+        "required": true,
+        "presentable": false,
+        "unique": false,
+        "options": {
+          "max": 64
+        }
+      },
+      {
+        "id": "hf8p62uim1h7r9r",
+        "name": "nostr_name",
+        "type": "text",
+        "system": false,
+        "required": false,
+        "presentable": false,
+        "unique": false,
+        "options": {
+          "max": 100
+        }
+      },
+      {
+        "id": "pne4bbzqsrwaq4v",
+        "name": "active",
+        "type": "bool",
+        "system": false,
+        "required": false,
+        "presentable": false,
+        "unique": false,
+        "options": {}
+      }
+    ],
+    "indexes": [],
     "listRule": "",
     "viewRule": "",
     "createRule": null,
     "updateRule": null,
     "deleteRule": null,
-    "schema": [
-      {
-        "name": "username",
-        "type": "text",
-        "required": true,
-        "options": { "max": 64 }
-      },
-      {
-        "name": "pubkey",
-        "type": "text",
-        "required": true,
-        "options": { "max": 64 }
-      },
-      {
-        "name": "nostr_name",
-        "type": "text",
-        "required": false,
-        "options": { "max": 100 }
-      },
-      {
-        "name": "active",
-        "type": "bool",
-        "required": false,
-        "options": {}
-      }
-    ]
+    "options": {}
   },
   {
+    "id": "c2puserstreak01",
     "name": "user_streaks",
     "type": "base",
+    "system": false,
+    "schema": [
+      {
+        "id": "lv9bgn3zi2ftrul",
+        "name": "user_pubkey",
+        "type": "text",
+        "system": false,
+        "required": true,
+        "presentable": false,
+        "unique": false,
+        "options": {
+          "max": 64
+        }
+      },
+      {
+        "id": "lha2mlndyx6hofx",
+        "name": "current_streak",
+        "type": "number",
+        "system": false,
+        "required": true,
+        "presentable": false,
+        "unique": false,
+        "options": {
+          "min": 0
+        }
+      },
+      {
+        "id": "vm389h0nd31u45c",
+        "name": "max_streak",
+        "type": "number",
+        "system": false,
+        "required": true,
+        "presentable": false,
+        "unique": false,
+        "options": {
+          "min": 0
+        }
+      },
+      {
+        "id": "sgfihl91hozp7xd",
+        "name": "last_activity_date",
+        "type": "date",
+        "system": false,
+        "required": false,
+        "presentable": false,
+        "unique": false,
+        "options": {}
+      }
+    ],
+    "indexes": [],
     "listRule": "@request.auth.id != ''",
     "viewRule": "@request.auth.id != ''",
     "createRule": "",
     "updateRule": "",
     "deleteRule": null,
-    "schema": [
-      {
-        "name": "user_pubkey",
-        "type": "text",
-        "required": true,
-        "options": { "max": 64 }
-      },
-      {
-        "name": "current_streak",
-        "type": "number",
-        "required": true,
-        "options": { "min": 0 }
-      },
-      {
-        "name": "max_streak",
-        "type": "number",
-        "required": true,
-        "options": { "min": 0 }
-      },
-      {
-        "name": "last_activity_date",
-        "type": "date",
-        "required": false,
-        "options": {}
-      }
-    ]
+    "options": {}
   },
   {
+    "id": "c2preferrals001",
     "name": "referrals",
     "type": "base",
+    "system": false,
+    "schema": [
+      {
+        "id": "74p5gxo12rzkjoj",
+        "name": "referrer_pubkey_short",
+        "type": "text",
+        "system": false,
+        "required": true,
+        "presentable": false,
+        "unique": false,
+        "options": {
+          "max": 16
+        }
+      },
+      {
+        "id": "upzypfhj7wk5b23",
+        "name": "referred_pubkey",
+        "type": "text",
+        "system": false,
+        "required": true,
+        "presentable": false,
+        "unique": false,
+        "options": {
+          "max": 64
+        }
+      },
+      {
+        "id": "1vmfgfkmaj4lof2",
+        "name": "xp_granted",
+        "type": "bool",
+        "system": false,
+        "required": false,
+        "presentable": false,
+        "unique": false,
+        "options": {}
+      }
+    ],
+    "indexes": [],
     "listRule": null,
     "viewRule": null,
     "createRule": "",
     "updateRule": null,
     "deleteRule": null,
-    "schema": [
-      {
-        "name": "referrer_pubkey_short",
-        "type": "text",
-        "required": true,
-        "options": { "max": 16 }
-      },
-      {
-        "name": "referred_pubkey",
-        "type": "text",
-        "required": true,
-        "options": { "max": 64 }
-      },
-      {
-        "name": "xp_granted",
-        "type": "bool",
-        "required": false,
-        "options": {}
-      }
-    ]
+    "options": {}
   }
 ]
