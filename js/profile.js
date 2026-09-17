@@ -7,11 +7,11 @@
 // ============================================
 const C2P_XP_LEVELS = [
     { level: 0, min: 0,    name: 'Fiatelo',    icon: '😴', color: '#8a8178' },
-    { level: 1, min: 20,   name: 'Plebeyo',    icon: '👤', color: '#4CAF50' },
-    { level: 2, min: 50,   name: 'Hodler',     icon: '🫙', color: '#8BC34A' },
-    { level: 3, min: 100,  name: 'Noder',      icon: '⚡', color: '#F7931A' },
-    { level: 4, min: 200,  name: 'Bitcoiner',  icon: '₿',  color: '#FF9800' },
-    { level: 5, min: 500,  name: 'Maximalist', icon: '🔥', color: '#FF5722' },
+    { level: 1, min: 50,   name: 'Plebeyo',    icon: '👤', color: '#4CAF50' },
+    { level: 2, min: 100,  name: 'Hodler',     icon: '🫙', color: '#8BC34A' },
+    { level: 3, min: 200,  name: 'Noder',      icon: '⚡', color: '#F7931A' },
+    { level: 4, min: 400,  name: 'Bitcoiner',  icon: '₿',  color: '#FF9800' },
+    { level: 5, min: 800,  name: 'Maximalist', icon: '🔥', color: '#FF5722' },
     { level: 6, min: 1000, name: 'Satoshi',    icon: '👑', color: '#9C27B0' },
 ];
 
