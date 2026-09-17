@@ -587,7 +587,7 @@ function _renderStampCard(stamp, obtained_at) {
         : '';
 
     const inner = imgUrl
-        ? `<img src="${imgUrl}" alt="${LBW.escapeHtml(stamp.name)}" style="width:56px;height:56px;object-fit:cover;border-radius:50%;">`
+        ? `<img src="${imgUrl}" alt="${LBW.escapeHtml(stamp.name)}" style="width:56px;height:56px;object-fit:cover;border-radius:50%;display:block;margin:0 auto 0.3rem;">`
         : `<div class="stamp-icon">${stamp.icon || '🏅'}</div>`;
 
     return `<div class="c2p-stamp-card" data-rarity="${rarity}" title="${title}">
@@ -626,7 +626,7 @@ function _renderBadgeCard(badge, obtained_at) {
         : '';
 
     const inner = imgUrl
-        ? `<img src="${imgUrl}" alt="${LBW.escapeHtml(badge.name)}" style="width:56px;height:56px;object-fit:cover;border-radius:8px;">`
+        ? `<img src="${imgUrl}" alt="${LBW.escapeHtml(badge.name)}" style="width:56px;height:56px;object-fit:cover;border-radius:8px;display:block;margin:0 auto 0.3rem;">`
         : `<div class="badge-icon">${skill.icon}</div>`;
 
     return `<div class="c2p-badge-card" data-skill="${badge.skill_area || ''}" style="--badge-color:${skill.color};" title="${title}">
