@@ -22,7 +22,6 @@ function getXPLevel(xp) {
     return C2P_XP_LEVELS[0];
 }
 
-// Proxy local hasta que PocketBase esté conectado (FASE 5)
 function calculateLocalXP(meritData) {
     const act = meritData && meritData.activity ? meritData.activity : {};
     const xp = (act.posts || 0) * 2
@@ -33,24 +32,24 @@ function calculateLocalXP(meritData) {
     return xp;
 }
 
-function updateXPDisplay(meritData) {
-    const xp = calculateLocalXP(meritData);
+function _renderXPDisplay(xp) {
     const cur = getXPLevel(xp);
     const nextIdx = Math.min(cur.level + 1, C2P_XP_LEVELS.length - 1);
     const next = C2P_XP_LEVELS[nextIdx];
 
-    const iconEl = document.getElementById('c2pXpIcon');
-    const nameEl = document.getElementById('c2pXpLevelName');
+    const iconEl  = document.getElementById('c2pXpIcon');
+    const nameEl  = document.getElementById('c2pXpLevelName');
     const countEl = document.getElementById('c2pXpCount');
-    const barEl = document.getElementById('c2pXpBar');
+    const barEl   = document.getElementById('c2pXpBar');
     const labelEl = document.getElementById('c2pXpProgressLabel');
-    const pctEl = document.getElementById('c2pXpProgressPct');
+    const pctEl   = document.getElementById('c2pXpProgressPct');
+    const noteEl  = document.getElementById('c2pXpNote');
     if (!iconEl) return;
 
     iconEl.textContent = cur.icon;
     nameEl.textContent = cur.name;
     nameEl.style.color = cur.color;
-    countEl.textContent = xp + ' XP';
+    countEl.textContent = xp.toLocaleString('es-CO') + ' XP';
     barEl.style.background = cur.color;
 
     if (cur.level === C2P_XP_LEVELS.length - 1) {
@@ -63,6 +62,31 @@ function updateXPDisplay(meritData) {
         labelEl.textContent = `Próximo: ${next.icon} ${next.name} (${next.min} XP)`;
         pctEl.textContent = pct + '%';
     }
+    if (noteEl) noteEl.style.display = 'none';
+}
+
+async function updateXPDisplay(meritData) {
+    // Intentar cargar XP real desde PocketBase
+    try {
+        const pb = (typeof C2P_PB !== 'undefined') ? C2P_PB.getClient() : null;
+        const pubkey = (typeof LBW_Nostr !== 'undefined' && LBW_Nostr.isLoggedIn())
+            ? LBW_Nostr.getPubkey()
+            : (typeof currentUser !== 'undefined' && currentUser?.pubkey) ? currentUser.pubkey : '';
+
+        if (pb && pubkey) {
+            const records = await pb.collection('xp_transactions').getFullList({
+                filter: `user_pubkey = "${pubkey}"`,
+            });
+            const xp = records.reduce((sum, r) => sum + (r.amount || 0), 0);
+            _renderXPDisplay(xp);
+            return;
+        }
+    } catch (e) {
+        // fallback silencioso
+    }
+
+    // Fallback: cálculo local desde actividad Nostr
+    _renderXPDisplay(calculateLocalXP(meritData));
 }
 
 // ============================================
