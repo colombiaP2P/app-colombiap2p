@@ -196,7 +196,7 @@ console.log('✅ Supabase proxy client initialized');
 
 // Function to display active nodes — valor fijo: 3 nodos conocidos
 function updateActiveNodesCounter() {
-    const ACTIVE_NODES = 3;
+    const ACTIVE_NODES = 1;
     const counter = document.getElementById('activeNodesCount');
     if (counter) {
         const currentValue = parseInt(counter.textContent) || 0;
@@ -220,32 +220,24 @@ function animateCounter(element, start, end, duration) {
     }, 16);
 }
 
-const IDENTITIES_BASE_OFFSET = 35;
+const IDENTITIES_BASE_OFFSET = 10;
 
 async function updateIdentitiesCounter() {
+    const counter = document.getElementById('identitiesCount');
+    if (!counter) return;
+
     try {
-        const { data, error } = await supabaseClient
-            .from('users')
-            .select('id');
-        
-        let realCount = 0;
-        if (!error && data) {
-            realCount = data.length;
-        } else {
-            const savedKeys = localStorage.getItem('liberbit_keys');
-            if (savedKeys) realCount = 1;
-        }
-        
+        const pb = (typeof C2P_PB !== 'undefined') ? C2P_PB.getClient() : null;
+        if (!pb) throw new Error('PocketBase no disponible');
+
+        // user_streaks tiene un registro por usuario activo
+        const result = await pb.collection('user_streaks').getList(1, 1);
+        const realCount = result.totalItems;
         const displayCount = realCount + IDENTITIES_BASE_OFFSET;
-        
-        const counter = document.getElementById('identitiesCount');
-        if (counter) {
-            const currentValue = parseInt(counter.textContent) || 0;
-            animateCounter(counter, currentValue, displayCount, 1500);
-        }
+        const currentValue = parseInt(counter.textContent) || 0;
+        animateCounter(counter, currentValue, displayCount, 1500);
     } catch (err) {
-        const counter = document.getElementById('identitiesCount');
-        if (counter && counter.textContent === '0') {
+        if (counter.textContent === '0') {
             counter.textContent = IDENTITIES_BASE_OFFSET;
         }
     }
