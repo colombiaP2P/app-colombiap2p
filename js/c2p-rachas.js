@@ -7,7 +7,7 @@ const C2P_Rachas = (function () {
     const STORAGE_KEY_MAX = 'c2p_max_streak';
     const STORAGE_KEY_REF_BY = 'c2p_referred_by';
 
-    const XP_PER_STREAK_DAY = 5;
+    const XP_PER_STREAK_DAY = 1;
     const XP_REFERRAL_REWARD = 50;
 
     function _getPB() {
@@ -74,8 +74,9 @@ const C2P_Rachas = (function () {
         _writeLocal(today, current, max);
 
         // XP por racha (cada 7 días extra)
+        const XP_WEEKLY_BONUS = 5;
         if (current % 7 === 0) {
-            xpEarned = XP_PER_STREAK_DAY * 7;
+            xpEarned = XP_WEEKLY_BONUS;
             await _grantStreakXP(current, xpEarned);
         } else {
             xpEarned = XP_PER_STREAK_DAY;
