@@ -156,7 +156,7 @@ const C2P_Eventos = (function () {
     }
 
     // ── Detail modal ──────────────────────────────────────────
-    function showEventDetail(eventId) {
+    async function showEventDetail(eventId) {
         const ev = _events.find(e => e.id === eventId);
         if (!ev) return;
 
