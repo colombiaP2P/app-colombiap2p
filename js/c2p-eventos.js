@@ -155,10 +155,15 @@ const C2P_Eventos = (function () {
         if (!ev) return;
 
         const open = _isCheckinOpen(ev);
+        const pb = (typeof C2P_PB !== 'undefined') ? C2P_PB.getClient() : null;
+        const imgUrl = ev.image_url
+            ? (pb ? pb.files.getUrl(ev, ev.image_url, { thumb: '800x0' }) : ev.image_url)
+            : '';
         const modal = _getOrCreateModal('c2pEventDetailModal');
         modal.innerHTML = `
             <div class="modal-content" style="max-width:580px;padding:2rem;position:relative;">
                 <button class="modal-close" onclick="document.getElementById('c2pEventDetailModal').remove()">✕</button>
+                ${imgUrl ? `<img src="${imgUrl}" alt="Imagen del evento" style="width:100%;border-radius:10px;margin-bottom:1rem;max-height:260px;object-fit:cover;">` : ''}
                 <h2 style="color:var(--color-bitcoin);font-size:1.2rem;margin-bottom:0.3rem;">📅 ${_esc(ev.title)}</h2>
                 <p style="font-size:0.8rem;color:var(--color-text-secondary);margin-bottom:1rem;">
                     ${_formatDate(ev.event_date)}
