@@ -623,7 +623,9 @@ async function loadUserStamps() {
     const loadEl   = document.getElementById('c2pSellosLoading');
     if (!listEl) return;
 
-    const pubkey = currentUser && (currentUser.pubkey || currentUser.publicKey);
+    const pubkey = (typeof LBW_Nostr !== 'undefined' && LBW_Nostr.isLoggedIn())
+        ? LBW_Nostr.getPubkey()
+        : (currentUser?.pubkey || currentUser?.publicKey || '');
     const stamps = (typeof C2P_PB !== 'undefined') ? await C2P_PB.getStamps(pubkey) : [];
 
     if (loadEl) loadEl.style.display = 'none';
@@ -644,7 +646,9 @@ async function loadUserBadges() {
     const loadEl  = document.getElementById('c2pBadgesLoading');
     if (!listEl) return;
 
-    const pubkey = currentUser && (currentUser.pubkey || currentUser.publicKey);
+    const pubkey = (typeof LBW_Nostr !== 'undefined' && LBW_Nostr.isLoggedIn())
+        ? LBW_Nostr.getPubkey()
+        : (currentUser?.pubkey || currentUser?.publicKey || '');
     const badges = (typeof C2P_PB !== 'undefined') ? await C2P_PB.getBadges(pubkey) : [];
 
     if (loadEl) loadEl.style.display = 'none';
