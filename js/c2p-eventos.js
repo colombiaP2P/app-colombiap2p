@@ -27,7 +27,7 @@ const C2P_Eventos = (function () {
     function _formatDate(iso) {
         if (!iso) return '';
         const d = new Date(iso);
-        return d.toLocaleDateString('es-CO', { weekday: 'short', day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+        return d.toLocaleDateString('es-CO', { weekday: 'short', day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit', timeZone: 'America/Bogota' });
     }
 
     function _isPast(iso) {
