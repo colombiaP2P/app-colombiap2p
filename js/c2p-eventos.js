@@ -77,8 +77,9 @@ const C2P_Eventos = (function () {
             checked_in_at: new Date().toISOString(),
         });
 
-        // Registrar XP si el evento tiene recompensa
         const ev = _events.find(e => e.id === eventId);
+
+        // Registrar XP si el evento tiene recompensa
         if (ev && ev.xp_reward > 0) {
             try {
                 await _getPB().collection('xp_transactions').create({
@@ -90,6 +91,24 @@ const C2P_Eventos = (function () {
                 });
             } catch (xpErr) {
                 console.warn('[C2P Eventos] XP no registrado:', xpErr.message);
+            }
+        }
+
+        // Asignar sello si el evento tiene uno (verificar duplicado primero)
+        if (ev && ev.stamp_id) {
+            try {
+                const existingStamp = await _getPB().collection('user_stamps').getList(1, 1, {
+                    filter: `user_pubkey = "${pubkey}" && stamp_id = "${ev.stamp_id}"`,
+                });
+                if (existingStamp.totalItems === 0) {
+                    await _getPB().collection('user_stamps').create({
+                        user_pubkey: pubkey,
+                        stamp_id:    ev.stamp_id,
+                        obtained_at: new Date().toISOString(),
+                    });
+                }
+            } catch (stampErr) {
+                console.warn('[C2P Eventos] Sello no asignado:', stampErr.message);
             }
         }
     }
