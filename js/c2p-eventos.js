@@ -62,6 +62,12 @@ const C2P_Eventos = (function () {
         const pubkey = _myPubkey();
         if (!pubkey) throw new Error('Debes iniciar sesión primero.');
 
+        // Verificar si ya hizo check-in
+        const existing = await _getPB().collection('event_checkins').getList(1, 1, {
+            filter: `event_id = "${eventId}" && user_pubkey = "${pubkey}"`,
+        });
+        if (existing.totalItems > 0) throw new Error('Ya estás registrado en este evento.');
+
         await _getPB().collection('event_checkins').create({
             event_id:      eventId,
             user_pubkey:   pubkey,
@@ -159,6 +165,18 @@ const C2P_Eventos = (function () {
         const imgUrl = ev.image_url
             ? (pb ? pb.files.getUrl(ev, ev.image_url, { thumb: '800x0' }) : ev.image_url)
             : '';
+
+        // Verificar si ya hizo check-in
+        const pubkey = _myPubkey();
+        let alreadyCheckedIn = false;
+        if (pb && pubkey) {
+            try {
+                const existing = await pb.collection('event_checkins').getList(1, 1, {
+                    filter: `event_id = "${ev.id}" && user_pubkey = "${pubkey}"`,
+                });
+                alreadyCheckedIn = existing.totalItems > 0;
+            } catch (_) {}
+        }
         const modal = _getOrCreateModal('c2pEventDetailModal');
         modal.innerHTML = `
             <div class="modal-content" style="max-width:580px;padding:2rem;position:relative;">
@@ -177,7 +195,9 @@ const C2P_Eventos = (function () {
                     ${ev.max_attendees ? `<span style="font-size:0.78rem;background:rgba(255,255,255,0.06);color:var(--color-text-secondary);padding:0.3rem 0.75rem;border-radius:12px;">👥 máx. ${ev.max_attendees}</span>` : ''}
                 </div>
                 <div style="display:flex;gap:0.75rem;flex-wrap:wrap;">
-                    ${open ? `<button onclick="document.getElementById('c2pEventDetailModal').remove(); C2P_Eventos.showCheckinModal('${_esc(ev.id)}')" style="flex:1;padding:0.65rem;background:var(--color-bitcoin);color:#0e0e0d;border:none;border-radius:10px;cursor:pointer;font-weight:700;font-size:0.9rem;">📲 Hacer Check-in</button>` : ''}
+                    ${alreadyCheckedIn
+                        ? `<div style="flex:1;padding:0.65rem;background:rgba(76,175,80,0.15);color:#4CAF50;border:1px solid #4CAF50;border-radius:10px;text-align:center;font-weight:700;font-size:0.9rem;">✅ Ya estás registrado</div>`
+                        : open ? `<button onclick="document.getElementById('c2pEventDetailModal').remove(); C2P_Eventos.showCheckinModal('${_esc(ev.id)}')" style="flex:1;padding:0.65rem;background:var(--color-bitcoin);color:#0e0e0d;border:none;border-radius:10px;cursor:pointer;font-weight:700;font-size:0.9rem;">📲 Hacer Check-in</button>` : ''}
                     <button onclick="document.getElementById('c2pEventDetailModal').remove()" class="btn btn-secondary" style="flex:1;">Cerrar</button>
                 </div>
             </div>`;
