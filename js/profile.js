@@ -578,12 +578,21 @@ function _renderStampCard(stamp, obtained_at) {
     const date = obtained_at
         ? new Date(obtained_at).toLocaleDateString('es-CO', { month: 'short', year: 'numeric' })
         : '';
-    const icon = stamp.icon || '🏅';
     const rarity = stamp.rarity || 'common';
     const title = [stamp.name, stamp.event_name, _RARITY_LABEL[rarity]].filter(Boolean).join('\n');
+
+    const pb = (typeof C2P_PB !== 'undefined') ? C2P_PB.getClient() : null;
+    const imgUrl = stamp.image_url && pb
+        ? pb.files.getUrl(stamp, stamp.image_url, { thumb: '200x200' })
+        : '';
+
+    const inner = imgUrl
+        ? `<img src="${imgUrl}" alt="${LBW.escapeHtml(stamp.name)}" style="width:56px;height:56px;object-fit:cover;border-radius:50%;">`
+        : `<div class="stamp-icon">${stamp.icon || '🏅'}</div>`;
+
     return `<div class="c2p-stamp-card" data-rarity="${rarity}" title="${title}">
-        <div class="stamp-icon">${icon}</div>
-        <div class="stamp-name">${stamp.name}</div>
+        ${inner}
+        <div class="stamp-name">${LBW.escapeHtml(stamp.name)}</div>
         ${date ? `<div class="stamp-date">${date}</div>` : ''}
     </div>`;
 }
@@ -610,9 +619,19 @@ function _renderBadgeCard(badge, obtained_at) {
         ? new Date(obtained_at).toLocaleDateString('es-CO', { month: 'short', year: 'numeric' })
         : '';
     const title = `${badge.name}\n${skill.label} · ${_LEVEL_LABEL[level] || level}${date ? '\n' + date : ''}`;
+
+    const pb = (typeof C2P_PB !== 'undefined') ? C2P_PB.getClient() : null;
+    const imgUrl = badge.image_url && pb
+        ? pb.files.getUrl(badge, badge.image_url, { thumb: '200x200' })
+        : '';
+
+    const inner = imgUrl
+        ? `<img src="${imgUrl}" alt="${LBW.escapeHtml(badge.name)}" style="width:56px;height:56px;object-fit:cover;border-radius:8px;">`
+        : `<div class="badge-icon">${skill.icon}</div>`;
+
     return `<div class="c2p-badge-card" data-skill="${badge.skill_area || ''}" style="--badge-color:${skill.color};" title="${title}">
-        <div class="badge-icon">${skill.icon}</div>
-        <div class="badge-name">${badge.name}</div>
+        ${inner}
+        <div class="badge-name">${LBW.escapeHtml(badge.name)}</div>
         <div class="badge-level" style="color:${skill.color};">${dots}</div>
     </div>`;
 }
