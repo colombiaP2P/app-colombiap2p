@@ -111,6 +111,24 @@ const C2P_Eventos = (function () {
                 console.warn('[C2P Eventos] Sello no asignado:', stampErr.message);
             }
         }
+
+        // Asignar badge si el evento tiene uno (verificar duplicado primero)
+        if (ev && ev.badge_id) {
+            try {
+                const existingBadge = await _getPB().collection('user_badges').getList(1, 1, {
+                    filter: `user_pubkey = "${pubkey}" && badge_id = "${ev.badge_id}"`,
+                });
+                if (existingBadge.totalItems === 0) {
+                    await _getPB().collection('user_badges').create({
+                        user_pubkey: pubkey,
+                        badge_id:    ev.badge_id,
+                        obtained_at: new Date().toISOString(),
+                    });
+                }
+            } catch (badgeErr) {
+                console.warn('[C2P Eventos] Badge no asignado:', badgeErr.message);
+            }
+        }
     }
 
     // ── Renderizado ────────────────────────────────────────────
