@@ -20,7 +20,7 @@ const LBW_Missions = (function () {
         financiada:      { emoji: '⏳', label: 'Financiada',      color: '#FFB74D', weight: '×0.6' }
     };
 
-    const MIN_CITIZENSHIP_TO_CREATE = 'Ciudadano Senior'; // Ciudadano Senior, Custodio, Génesis
+    const MIN_CITIZENSHIP_TO_CREATE = 'Amigo';
 
     // ── PocketBase ────────────────────────────────────────────
     function _getPB() {
@@ -28,7 +28,7 @@ const LBW_Missions = (function () {
         if (!pb) throw new Error('PocketBase no disponible. Configura la instancia en c2p-pocketbase.js.');
         return pb;
     }
-    const MIN_MERITS_TO_CREATE = 1000;
+    const MIN_MERITS_TO_CREATE = 0;
 
     // ── Helpers ──────────────────────────────────────────────
     // SEC-27: Unified with LBW.escapeHtml (canonical in escape-utils.js)
