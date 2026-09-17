@@ -16,11 +16,9 @@ function showMainMenu() {
     updateHomeAvatar();
     
     // Show and update active nodes counter
-    document.getElementById('activeNodesCounterHeader').classList.remove('hidden');
-    document.getElementById('identitiesCounterHeader').classList.remove('hidden');
-    document.getElementById('relaysCounterHeader').classList.remove('hidden');
-    document.getElementById('citiesCounterHeader').classList.remove('hidden');
-    document.getElementById('activeCitiesCounterHeader').classList.remove('hidden');
+    ['activeNodesCounterHeader','identitiesCounterHeader','relaysCounterHeader','citiesCounterHeader'].forEach(id => {
+        document.getElementById(id)?.classList.remove('hidden');
+    });
     updateActiveNodesCounter();
     updateIdentitiesCounter();
     // Start interval to update counter every 30 seconds
