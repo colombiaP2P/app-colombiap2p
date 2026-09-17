@@ -106,8 +106,7 @@ const LBW_NostrBridge = (() => {
             <span style="font-size:0.65rem;color:var(--color-text-secondary);font-family:var(--font-mono);">${cPriv}🔒${cUser > 0 ? ` ${cUser}👤` : ''} ${strict ? '🚫pub' : `${cPub}🌐`}</span>
         `;
 
-        const relaysEl = document.getElementById('relaysCount');
-        if (relaysEl) relaysEl.textContent = cPriv;
+        // relaysCount muestra el total de relays en la red (valor estático en HTML), no los conectados
         const chatDot = document.getElementById('chatRelayDot');
         if (chatDot) chatDot.style.background = (cPriv + cPub) > 0 ? '#4CAF50' : '#ff4444';
     }
