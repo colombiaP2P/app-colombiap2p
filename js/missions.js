@@ -22,6 +22,11 @@ const LBW_Missions = (function () {
 
     const MIN_CITIZENSHIP_TO_CREATE = 'Amigo';
 
+    // Pubkeys con permiso de aprobar/cancelar misiones independiente de méritos
+    const ADMIN_PUBKEYS = [
+        '2479ef8e78d635cb40054f1e1a3895b13d67b36b2326b2a1d68df7b989b4cac0', // colbitcoin
+    ];
+
     // ── PocketBase ────────────────────────────────────────────
     function _getPB() {
         const pb = (typeof C2P_PB !== 'undefined') ? C2P_PB.getClient() : null;
@@ -45,8 +50,13 @@ const LBW_Missions = (function () {
         return parseInt(el?.textContent) || 0;
     }
 
+    function _isAdmin() {
+        const pubkey = _myPubkey();
+        return pubkey && ADMIN_PUBKEYS.includes(pubkey);
+    }
+
     function _isGenesis() {
-        return _myMerits() >= 3000;
+        return _isAdmin() || _myMerits() >= 3000;
     }
 
     function _canCreateMission() {
@@ -609,7 +619,7 @@ const LBW_Missions = (function () {
                     <textarea id="missionDeliveryInstructions" maxlength="300" rows="2" placeholder="Ej: Subir a GitHub y enviar el link, o contactar por DM..." style="width:100%;padding:0.7rem;background:var(--color-bg-dark);border:2px solid var(--color-border);border-radius:8px;color:var(--color-text-primary);resize:vertical;"></textarea>
                 </div>
 
-                ${!_isGenesis() ? `<div style="padding:0.75rem;background:rgba(255,152,0,0.1);border:1px solid rgba(255,152,0,0.3);border-radius:8px;margin-bottom:1.25rem;font-size:0.8rem;color:#FFB74D;">⚠️ Tu misión quedará <strong>pendiente de aprobación</strong> por un Génesis antes de publicarse.</div>` : ''}
+                ${!_isGenesis() ? `<div style="padding:0.75rem;background:rgba(255,152,0,0.1);border:1px solid rgba(255,152,0,0.3);border-radius:8px;margin-bottom:1.25rem;font-size:0.8rem;color:#FFB74D;">⚠️ Tu misión quedará <strong>pendiente de aprobación</strong> por un administrador antes de publicarse.</div>` : ''}
 
                 <div style="display:flex;gap:0.75rem;justify-content:flex-end;">
                     <button onclick="document.getElementById('missionCreateModal').remove()" class="btn btn-secondary">Cancelar</button>
@@ -638,7 +648,7 @@ const LBW_Missions = (function () {
         try {
             await createMission({ title, description, merit_category: category, merit_amount: amount, min_citizenship: minCitizenship, deadline: deadline || null, delivery_instructions: deliveryInstructions });
             document.getElementById('missionCreateModal')?.remove();
-            showNotification(_isGenesis() ? '🎯 ¡Misión publicada!' : '📤 Misión enviada, pendiente de aprobación por un Génesis.', 'success');
+            showNotification(_isGenesis() ? '🎯 ¡Misión publicada!' : '📤 Misión enviada, pendiente de aprobación por un administrador.', 'success');
             renderMissionsTab();
             // Refresh networking if visible
             if (document.getElementById('networkingSection')?.classList.contains('active')) {
