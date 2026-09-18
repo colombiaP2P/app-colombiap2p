@@ -89,7 +89,7 @@ const LBW_Missions = (function () {
     // ── Supabase CRUD ─────────────────────────────────────────
     async function loadMissions() {
         try {
-            _missions = await _getPB().collection('missions').getFullList({ sort: '-created_at' });
+            _missions = await _getPB().collection('missions').getFullList({ sort: '-created' });
             _isLoaded = true;
             return _missions;
         } catch (e) {
