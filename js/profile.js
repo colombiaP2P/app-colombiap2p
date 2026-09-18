@@ -3,7 +3,7 @@
 (function() {
 
 // ============================================
-// ColombiaP2P XP System (FASE 2)
+// ColombiaP2P — Sistema de Méritos (niveles)
 // ============================================
 const C2P_XP_LEVELS = [
     { level: 0, min: 0,    name: 'Fiatelo',    icon: '😴', color: '#8a8178' },
@@ -22,18 +22,8 @@ function getXPLevel(xp) {
     return C2P_XP_LEVELS[0];
 }
 
-function calculateLocalXP(meritData) {
-    const act = meritData && meritData.activity ? meritData.activity : {};
-    const xp = (act.posts || 0) * 2
-             + (act.offers || 0) * 3
-             + (act.votes || 0) * 3
-             + (act.proposals || 0) * 10
-             + Math.min((meritData.activityCount || 0), 50) * 1;
-    return xp;
-}
-
-function _renderXPDisplay(xp) {
-    const cur = getXPLevel(xp);
+function _renderXPDisplay(merits) {
+    const cur = getXPLevel(merits);
     const nextIdx = Math.min(cur.level + 1, C2P_XP_LEVELS.length - 1);
     const next = C2P_XP_LEVELS[nextIdx];
 
@@ -49,7 +39,7 @@ function _renderXPDisplay(xp) {
     iconEl.textContent = cur.icon;
     nameEl.textContent = cur.name;
     nameEl.style.color = cur.color;
-    countEl.textContent = xp.toLocaleString('es-CO') + ' XP';
+    countEl.textContent = merits.toLocaleString('es-CO') + ' Méritos';
     barEl.style.background = cur.color;
 
     if (cur.level === C2P_XP_LEVELS.length - 1) {
@@ -57,36 +47,41 @@ function _renderXPDisplay(xp) {
         labelEl.textContent = '¡Nivel máximo: Satoshi!';
         pctEl.textContent = '100%';
     } else {
-        const pct = Math.min(100, Math.round(((xp - cur.min) / (next.min - cur.min)) * 100));
+        const pct = Math.min(100, Math.round(((merits - cur.min) / (next.min - cur.min)) * 100));
         barEl.style.width = pct + '%';
-        labelEl.textContent = `Próximo: ${next.icon} ${next.name} (${next.min} XP)`;
+        labelEl.textContent = `Próximo: ${next.icon} ${next.name} (${next.min} Méritos)`;
         pctEl.textContent = pct + '%';
     }
     if (noteEl) noteEl.style.display = 'none';
 }
 
 async function updateXPDisplay(meritData) {
-    // Intentar cargar XP real desde PocketBase
     try {
         const pb = (typeof C2P_PB !== 'undefined') ? C2P_PB.getClient() : null;
         const pubkey = (typeof LBW_Nostr !== 'undefined' && LBW_Nostr.isLoggedIn())
             ? LBW_Nostr.getPubkey()
             : (typeof currentUser !== 'undefined' && currentUser?.pubkey) ? currentUser.pubkey : '';
 
+        // Méritos de participación desde PocketBase
+        let pbMerits = 0;
         if (pb && pubkey) {
             const records = await pb.collection('xp_transactions').getFullList({
                 filter: `user_pubkey = "${pubkey}"`,
             });
-            const xp = records.reduce((sum, r) => sum + (r.amount || 0), 0);
-            _renderXPDisplay(xp);
-            return;
+            pbMerits = records.reduce((sum, r) => sum + (r.amount || 0), 0);
         }
+
+        // Méritos de contribución desde Nostr C2PM
+        const nostrMerits = (meritData && meritData.nostrMerits) ? meritData.nostrMerits : 0;
+
+        _renderXPDisplay(pbMerits + nostrMerits);
+        return;
     } catch (e) {
         // fallback silencioso
     }
 
-    // Fallback: cálculo local desde actividad Nostr
-    _renderXPDisplay(calculateLocalXP(meritData));
+    // Fallback: solo méritos Nostr
+    _renderXPDisplay((meritData && meritData.nostrMerits) ? meritData.nostrMerits : 0);
 }
 
 // ============================================

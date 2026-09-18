@@ -104,7 +104,7 @@ const C2P_Stats = (function () {
             ${_card('📅', data.totalEvents.toLocaleString('es-CO'), 'Eventos totales',
                 data.upcomingEvents > 0 ? `${data.upcomingEvents} próximos` : 'sin próximos')}
             ${_card('✅', data.totalCheckins.toLocaleString('es-CO'), 'Check-ins', 'asistencias presenciales')}
-            ${_card('🎮', xpFmt, 'XP entregado', `${data.totalXpTx.toLocaleString('es-CO')} transacciones`)}
+            ${_card('🎮', xpFmt, 'Méritos entregados', `${data.totalXpTx.toLocaleString('es-CO')} transacciones`)}
             ${_card('🔥', data.maxStreak.toLocaleString('es-CO'), 'Racha récord', 'días consecutivos')}
             ${_card('👥', data.totalReferrals.toLocaleString('es-CO'), 'Referidos', 'nuevos miembros')}
             ${_card('🆔', data.totalNip05.toLocaleString('es-CO'), 'NIP-05 activos', 'user@colombiap2p.com')}

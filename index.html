@@ -1506,7 +1506,7 @@
                     </button>
                     <button data-tx-tab="xp" onclick="C2P_Treasury.showXP()"
                         style="flex:1;padding:0.7rem;background:transparent;border:1px solid var(--color-border);border-bottom:none;border-radius:8px 8px 0 0;color:var(--color-text-secondary);cursor:pointer;font-size:0.85rem;">
-                        🎮 XP
+                        🎮 Méritos
                     </button>
                 </div>
 
@@ -1515,7 +1515,7 @@
                 <div id="transparencyWalletPanel" style="display:none;"></div>
                 <div id="transparencyXpPanel" style="display:none;">
                     <div id="c2pXpTransactions">
-                        <p class="c2p-empty-state" style="padding:2rem;">Cargando historial XP...</p>
+                        <p class="c2p-empty-state" style="padding:2rem;">Cargando historial de méritos...</p>
                     </div>
                 </div>
             </div>
@@ -2892,13 +2892,13 @@
 
                 <!-- [C2P FASE 2] XP Section -->
                 <div class="profile-section" id="c2pXpSection">
-                    <h3 class="profile-section-title">🎮 XP — Experiencia Bitcoiner</h3>
+                    <h3 class="profile-section-title">🎮 Méritos</h3>
                     <div style="display:flex;align-items:center;gap:1rem;margin-bottom:0.75rem;">
                         <div id="c2pXpIcon" style="font-size:2.5rem;line-height:1;">😴</div>
                         <div style="flex:1;">
                             <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:0.35rem;">
                                 <span id="c2pXpLevelName" style="font-size:1.1rem;font-weight:700;color:var(--color-bitcoin);">Fiatelo</span>
-                                <span id="c2pXpCount" style="font-family:var(--font-mono);font-size:0.85rem;color:var(--color-text-secondary);">0 XP</span>
+                                <span id="c2pXpCount" style="font-family:var(--font-mono);font-size:0.85rem;color:var(--color-text-secondary);">0 Méritos</span>
                             </div>
                             <div style="background:rgba(255,255,255,0.08);border-radius:8px;height:10px;overflow:hidden;">
                                 <div id="c2pXpBar" style="height:100%;width:0%;border-radius:8px;background:var(--color-bitcoin);transition:width 0.6s ease;"></div>
@@ -2910,7 +2910,7 @@
                         </div>
                     </div>
                     <div id="c2pXpNote" style="font-size:0.72rem;color:var(--color-text-secondary);font-family:var(--font-mono);padding:0.4rem 0.6rem;background:rgba(247,147,26,0.05);border-radius:6px;border-left:2px solid var(--color-bitcoin-dim);">
-                        XP calculado desde actividad local · PocketBase en FASE 5
+                        Méritos de participación (automáticos) + méritos de contribución (Nostr C2PM)
                     </div>
                 </div>
 
@@ -2924,8 +2924,8 @@
                             <div style="font-size:0.75rem;color:var(--color-text-secondary);" id="c2pStreakMax">Máx: 0</div>
                         </div>
                         <div style="text-align:right;font-size:0.72rem;color:var(--color-text-secondary);line-height:1.5;">
-                            ⚡ +1 XP / día<br>
-                            🔥 +5 XP / semana
+                            ⚡ +1 Mérito / día<br>
+                            🔥 +5 Méritos / semana
                         </div>
                     </div>
 
@@ -3250,9 +3250,9 @@
     <!-- PocketBase SDK + cliente C2P (Sellos, Badges) -->
     <script src="https://cdn.jsdelivr.net/npm/pocketbase@0.21.0/dist/pocketbase.umd.js"></script>
     <script src="js/c2p-pocketbase.js?v=1"></script>
-    <script src="js/c2p-eventos.js?v=8"></script>
+    <script src="js/c2p-eventos.js?v=9"></script>
     <script src="js/c2p-rachas.js?v=3"></script>
-    <script src="js/profile.js?v=c2p-11"></script>
+    <script src="js/profile.js?v=c2p-12"></script>
     <script src="js/nwc.js?v=secA1-1"></script>
     <script src="js/wallet.js?v=secA1-1"></script>
 
@@ -3270,8 +3270,8 @@
     <script src="js/nostr-merits.js?v=transparency-3"></script>
     <!-- Sección Transparencia: méritos + treasury -->
     <script src="js/transparency.js?v=c2p-11"></script>
-    <script src="js/c2p-treasury.js?v=2"></script>
-    <script src="js/c2p-stats.js?v=1"></script>
+    <script src="js/c2p-treasury.js?v=3"></script>
+    <script src="js/c2p-stats.js?v=2"></script>
     <!-- merits.js cargado DESPUÉS de nostr-merits.js ya que depende de LBW_Merits -->
     <script src="js/merits.js?v=c2p-8"></script>
     <!-- supabase-merits-sync: sincroniza merit events Nostr → Supabase -->

@@ -79,7 +79,7 @@ const C2P_Eventos = (function () {
 
         const ev = _events.find(e => e.id === eventId);
 
-        // Registrar XP si el evento tiene recompensa
+        // Registrar méritos de participación si el evento tiene recompensa
         if (ev && ev.xp_reward > 0) {
             try {
                 await _getPB().collection('xp_transactions').create({
@@ -167,7 +167,7 @@ const C2P_Eventos = (function () {
     function _eventCard(ev) {
         const past   = _isPast(ev.event_end || ev.event_date);
         const open   = _isCheckinOpen(ev);
-        const xpBadge = ev.xp_reward ? `<span style="font-size:0.7rem;background:rgba(247,147,26,0.15);color:var(--color-bitcoin);padding:0.2rem 0.6rem;border-radius:10px;font-weight:700;border:1px solid rgba(247,147,26,0.3);">+${ev.xp_reward} XP</span>` : '';
+        const xpBadge = ev.xp_reward ? `<span style="font-size:0.7rem;background:rgba(247,147,26,0.15);color:var(--color-bitcoin);padding:0.2rem 0.6rem;border-radius:10px;font-weight:700;border:1px solid rgba(247,147,26,0.3);">+${ev.xp_reward} Méritos</span>` : '';
         const statusBadge = past
             ? `<span style="font-size:0.7rem;color:var(--color-text-secondary);">✔ Finalizado</span>`
             : open
@@ -232,7 +232,7 @@ const C2P_Eventos = (function () {
                 </p>
                 ${ev.description ? `<p style="font-size:0.88rem;color:var(--color-text-primary);line-height:1.7;margin-bottom:1.25rem;">${_esc(ev.description)}</p>` : ''}
                 <div style="display:flex;gap:0.6rem;flex-wrap:wrap;margin-bottom:1.25rem;">
-                    ${ev.xp_reward ? `<span style="font-size:0.78rem;background:rgba(247,147,26,0.12);color:var(--color-bitcoin);padding:0.3rem 0.75rem;border-radius:12px;font-weight:700;">+${ev.xp_reward} XP por asistir</span>` : ''}
+                    ${ev.xp_reward ? `<span style="font-size:0.78rem;background:rgba(247,147,26,0.12);color:var(--color-bitcoin);padding:0.3rem 0.75rem;border-radius:12px;font-weight:700;">+${ev.xp_reward} Méritos por asistir</span>` : ''}
                     ${ev.stamp_id ? `<span style="font-size:0.78rem;background:rgba(255,255,255,0.06);color:var(--color-text-secondary);padding:0.3rem 0.75rem;border-radius:12px;">🏅 Sello especial</span>` : ''}
                     ${ev.max_attendees ? `<span style="font-size:0.78rem;background:rgba(255,255,255,0.06);color:var(--color-text-secondary);padding:0.3rem 0.75rem;border-radius:12px;">👥 máx. ${ev.max_attendees}</span>` : ''}
                 </div>

@@ -1,5 +1,5 @@
 // ColombiaP2P — Módulo Tesorería (FASE 11)
-// Maneja el tab XP en Transparencia y helpers de tesorería.
+// Maneja el tab Méritos en Transparencia y helpers de tesorería.
 
 const C2P_Treasury = (function () {
 
@@ -50,7 +50,7 @@ const C2P_Treasury = (function () {
             return;
         }
         if (!pubkey) {
-            container.innerHTML = `<div class="c2p-empty-state" style="padding:2rem;">Inicia sesión para ver tu historial XP</div>`;
+            container.innerHTML = `<div class="c2p-empty-state" style="padding:2rem;">Inicia sesión para ver tu historial de méritos</div>`;
             return;
         }
 
@@ -63,7 +63,7 @@ const C2P_Treasury = (function () {
             });
 
             if (records.length === 0) {
-                container.innerHTML = `<div class="c2p-empty-state" style="padding:2rem;">Aún no tienes transacciones XP · Participa en eventos y misiones para ganar XP</div>`;
+                container.innerHTML = `<div class="c2p-empty-state" style="padding:2rem;">Aún no tienes méritos de participación · Asiste a eventos y mantén tu racha diaria</div>`;
                 return;
             }
 
@@ -72,7 +72,7 @@ const C2P_Treasury = (function () {
             container.innerHTML = `
                 <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:1rem;flex-wrap:wrap;gap:0.5rem;">
                     <div style="font-size:0.85rem;color:var(--color-text-secondary);">${records.length} transacciones</div>
-                    <div style="font-size:1rem;font-weight:700;color:var(--color-bitcoin);">Total: ${total.toLocaleString('es-CO')} XP</div>
+                    <div style="font-size:1rem;font-weight:700;color:var(--color-bitcoin);">Total: ${total.toLocaleString('es-CO')} Méritos</div>
                 </div>
                 <div style="display:flex;flex-direction:column;gap:0.5rem;">
                     ${records.map(r => _renderXpRow(r)).join('')}
@@ -92,7 +92,7 @@ const C2P_Treasury = (function () {
                 <div style="font-size:0.85rem;font-weight:600;color:var(--color-text-primary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${LBW.escapeHtml(r.reason || meta.label)}</div>
                 <div style="font-size:0.72rem;color:var(--color-text-secondary);">${meta.label} · ${_formatDate(r.created)}</div>
             </div>
-            <div style="font-size:1rem;font-weight:700;color:var(--color-bitcoin);white-space:nowrap;">+${(r.amount||0).toLocaleString('es-CO')} XP</div>
+            <div style="font-size:1rem;font-weight:700;color:var(--color-bitcoin);white-space:nowrap;">+${(r.amount||0).toLocaleString('es-CO')} Méritos</div>
         </div>`;
     }
 
