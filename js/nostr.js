@@ -28,7 +28,7 @@ const LBW_Nostr = (() => {
     // PRIVATE: ColombiaP2P infrastructure (governance, DMs, merits)
     // [C2P FASE 10] relay.colombiap2p.com preparado — activar cuando esté listo
     const SYSTEM_PRIVATE_RELAYS = [
-        // 'wss://relay.colombiap2p.com',   // ← descomentar cuando el relay esté activo
+        'wss://relay.colombiap2p.com',
         'wss://relay.damus.io',              // fallback público mientras tanto
         'wss://nos.lol'
     ];
