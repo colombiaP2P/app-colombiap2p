@@ -177,8 +177,6 @@ const C2P_Rachas = (function () {
                 xp_granted:            false,
             });
 
-            // XP al referidor (server hook lo hará en el futuro; por ahora nota en consola)
-            console.info('[C2P Referidos] Referencia registrada, referidor:', refBy);
             localStorage.removeItem(STORAGE_KEY_REF_BY);
         } catch (e) {
             console.warn('[C2P Referidos]', e.message);
@@ -190,10 +188,9 @@ const C2P_Rachas = (function () {
         const pb = _getPB();
         const pubkey = _myPubkey();
         if (!pb || !pubkey) return 0;
-        const shortPubkey = pubkey.slice(0, 16);
         try {
             const list = await pb.collection('referrals').getList(1, 1, {
-                filter: `referrer_pubkey_short = "${shortPubkey}"`,
+                filter: `referrer_pubkey_short = "${pubkey}"`,
             });
             return list.totalItems;
         } catch (_) { return 0; }
@@ -203,8 +200,39 @@ const C2P_Rachas = (function () {
     function getReferralLink() {
         const pubkey = _myPubkey();
         if (!pubkey) return '';
-        const short = pubkey.slice(0, 16);
-        return `https://colombiap2p.com/?ref=${short}`;
+        return `https://colombiap2p.com/?ref=${pubkey}`;
+    }
+
+    // Otorgar XP al referidor cuando el referido asiste a su primer evento
+    async function grantReferralXPOnFirstCheckin(referredPubkey) {
+        const pb = _getPB();
+        if (!pb || !referredPubkey) return;
+        try {
+            // Solo actuar si es el primer check-in del referido
+            const checkins = await pb.collection('event_checkins').getList(1, 1, {
+                filter: `user_pubkey = "${referredPubkey}"`,
+            });
+            if (checkins.totalItems !== 1) return;
+
+            // Buscar referral pendiente
+            const referral = await pb.collection('referrals')
+                .getFirstListItem(`referred_pubkey = "${referredPubkey}" && xp_granted = false`)
+                .catch(() => null);
+            if (!referral) return;
+
+            const referrerPubkey = referral.referrer_pubkey_short;
+            if (!/^[0-9a-f]{64}$/.test(referrerPubkey)) return;
+
+            await pb.collection('xp_transactions').create({
+                user_pubkey: referrerPubkey,
+                amount:      XP_REFERRAL_REWARD,
+                reason:      `Referido asistió a su primer evento`,
+                source:      'referido',
+                ref_id:      referredPubkey,
+            });
+
+            await pb.collection('referrals').update(referral.id, { xp_granted: true });
+        } catch (_) {}
     }
 
     // ── URL handler ───────────────────────────────────────────
@@ -274,6 +302,7 @@ const C2P_Rachas = (function () {
         getReferralLink,
         getReferralCount,
         registerReferral,
+        grantReferralXPOnFirstCheckin,
         handleRefFromURL,
         updateStreakDisplay,
         captureReferrer,

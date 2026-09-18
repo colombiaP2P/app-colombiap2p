@@ -129,6 +129,11 @@ const C2P_Eventos = (function () {
                 console.warn('[C2P Eventos] Badge no asignado:', badgeErr.message);
             }
         }
+
+        // XP al referidor si este es el primer check-in del usuario
+        if (typeof C2P_Rachas !== 'undefined') {
+            C2P_Rachas.grantReferralXPOnFirstCheckin(pubkey).catch(() => {});
+        }
     }
 
     // ── Renderizado ────────────────────────────────────────────
