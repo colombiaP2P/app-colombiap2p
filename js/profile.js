@@ -75,14 +75,25 @@ async function updateXPDisplay(meritData) {
         // Méritos de contribución desde Nostr C2PM
         const nostrMerits = (meritData && meritData.nostrMerits) ? meritData.nostrMerits : 0;
 
-        _renderXPDisplay(pbMerits + nostrMerits);
+        const total = pbMerits + nostrMerits;
+        _renderXPDisplay(total);
+
+        // Actualizar nivel de ciudadanía con el total real (PB + Nostr)
+        if (typeof updateCitizenshipGauge === 'function') updateCitizenshipGauge(total);
+        const citizenship = getCitizenshipLevel(total);
+        const citizenshipBadge = document.getElementById('profileCitizenship');
+        if (citizenshipBadge && citizenship) {
+            citizenshipBadge.textContent = `${citizenship.icon} ${citizenship.title}`;
+        }
         return;
     } catch (e) {
         // fallback silencioso
     }
 
     // Fallback: solo méritos Nostr
-    _renderXPDisplay((meritData && meritData.nostrMerits) ? meritData.nostrMerits : 0);
+    const fallback = (meritData && meritData.nostrMerits) ? meritData.nostrMerits : 0;
+    _renderXPDisplay(fallback);
+    if (typeof updateCitizenshipGauge === 'function') updateCitizenshipGauge(fallback);
 }
 
 // ============================================
