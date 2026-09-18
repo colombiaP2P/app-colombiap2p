@@ -67,6 +67,7 @@ async function updateXPDisplay(meritData) {
         if (pb && pubkey) {
             const records = await pb.collection('xp_transactions').getFullList({
                 filter: `user_pubkey = "${pubkey}"`,
+                requestKey: null,
             });
             pbMerits = records.reduce((sum, r) => sum + (r.amount || 0), 0);
         }
