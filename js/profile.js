@@ -102,19 +102,14 @@ async function updateXPDisplay(meritData) {
 // getCitizenshipLevel — delegada a LBW_Merits (fuente única de verdad)
 // Si LBW_Merits no está disponible, fallback local con estructura compatible
 function getCitizenshipLevel(merits) {
-    if (typeof LBW_Merits !== 'undefined' && LBW_Merits.getCitizenshipLevel) {
-        const l = LBW_Merits.getCitizenshipLevel(merits);
-        // Normalise: LBW_Merits returns { name, emoji, color, bloc } — profile.js expects { level, title, icon, bloc }
-        const nameToLevel = { 'Amigo': 1, 'E-Residency': 2, 'Colaborador': 3, 'Ciudadano Senior': 4, 'Custodio': 5, 'Génesis': 6 };
-        return { level: nameToLevel[l.name] || 1, title: l.name, icon: l.emoji, bloc: l.bloc };
-    }
-    // Fallback (carga diferida — nostr-merits.js aún no disponible)
-    if (merits >= 3000) return { level: 6, title: 'Génesis',          icon: '👑', bloc: 'Gobernanza' };
-    if (merits >= 2000) return { level: 5, title: 'Custodio',         icon: '🌍', bloc: 'Ciudadanía' };
-    if (merits >= 1000) return { level: 4, title: 'Ciudadano Senior', icon: '🛂', bloc: 'Ciudadanía' };
-    if (merits >= 500)  return { level: 3, title: 'Colaborador',      icon: '🤝', bloc: 'Comunidad' };
-    if (merits >= 100)  return { level: 2, title: 'E-Residency',      icon: '🪪', bloc: 'Comunidad' };
-    return             { level: 1, title: 'Amigo',             icon: '👋', bloc: 'Comunidad' };
+    if (merits >= 3000) return { level: 7, title: 'Génesis',     icon: '👑', bloc: 'Gobernanza' };
+    if (merits >= 1000) return { level: 6, title: 'Satoshi',     icon: '🟠', bloc: 'Gobernanza' };
+    if (merits >= 800)  return { level: 5, title: 'Maximalist',  icon: '🔥', bloc: 'Comunidad' };
+    if (merits >= 400)  return { level: 4, title: 'Bitcoiner',   icon: '₿',  bloc: 'Comunidad' };
+    if (merits >= 200)  return { level: 3, title: 'Noder',       icon: '⚡', bloc: 'Comunidad' };
+    if (merits >= 100)  return { level: 2, title: 'Hodler',      icon: '🫙', bloc: 'Comunidad' };
+    if (merits >= 50)   return { level: 1, title: 'Plebeyo',     icon: '👤', bloc: 'Comunidad' };
+    return              { level: 0, title: 'Fiatelo',     icon: '😴', bloc: 'Comunidad' };
 }
 
 // getUnifiedMerits movida a nostr-merits.js (Fase 2 limpieza)
@@ -123,15 +118,16 @@ function getCitizenshipLevel(merits) {
 // Citizenship Gauge Visualization (Canvas)
 // ============================================
 const GAUGE_SEGS = [
-    { label:'Amigo',            shortLabel:'Amigo',    icon:'👋', color:'#4CAF50', bloc:'Comunidad',  min:0 },
-    { label:'E-Residency',      shortLabel:'E-Res.',   icon:'🪪', color:'#8BC34A', bloc:'Comunidad',  min:100 },
-    { label:'Colaborador',      shortLabel:'Colabor.',  icon:'🤝', color:'#CDDC39', bloc:'Comunidad',  min:500 },
-    { label:'Ciudadano Senior', shortLabel:'C.Senior', icon:'🛂', color:'#FF9800', bloc:'Ciudadanía', min:1000 },
-    { label:'Custodio',         shortLabel:'Custod.',  icon:'🌍', color:'#FF5722', bloc:'Ciudadanía', min:2000 },
-    { label:'Génesis',          shortLabel:'Génesis',  icon:'👑', color:'#9C27B0', bloc:'Gobernanza', min:3000 },
+    { label:'Fiatelo',    shortLabel:'Fiatelo',  icon:'😴', color:'#78909C', bloc:'Comunidad',  min:0    },
+    { label:'Plebeyo',    shortLabel:'Plebeyo',  icon:'👤', color:'#4CAF50', bloc:'Comunidad',  min:50   },
+    { label:'Hodler',     shortLabel:'Hodler',   icon:'🫙', color:'#8BC34A', bloc:'Comunidad',  min:100  },
+    { label:'Noder',      shortLabel:'Noder',    icon:'⚡', color:'#CDDC39', bloc:'Comunidad',  min:200  },
+    { label:'Bitcoiner',  shortLabel:'Btcoiner', icon:'₿',  color:'#FF9800', bloc:'Comunidad',  min:400  },
+    { label:'Maximalist', shortLabel:'Maximal.', icon:'🔥', color:'#FF5722', bloc:'Comunidad',  min:800  },
+    { label:'Satoshi',    shortLabel:'Satoshi',  icon:'🟠', color:'#9C27B0', bloc:'Gobernanza', min:1000 },
 ];
 const GAUGE_THRESH = GAUGE_SEGS.map(s=>s.min);
-const GAUGE_RANGES = [100,400,500,1000,1000,500];
+const GAUGE_RANGES = [50,50,100,200,400,200,2000];
 const GAUGE_N = GAUGE_SEGS.length;
 const GAUGE_SEG_ANG = Math.PI / GAUGE_N;
 const GAUGE_GAP = 0.02;
@@ -146,11 +142,12 @@ function gaugeGetLevel(m) {
 }
 
 function gaugeMeritsToAngle(m) {
-    if (m >= 3000) {
-        const extra = Math.min(m-3000, GAUGE_RANGES[5]);
-        return Math.PI - 5*GAUGE_SEG_ANG - (extra/GAUGE_RANGES[5])*GAUGE_SEG_ANG;
+    const last = GAUGE_N - 1;
+    if (m >= GAUGE_SEGS[last].min) {
+        const extra = Math.min(m - GAUGE_SEGS[last].min, GAUGE_RANGES[last]);
+        return Math.PI - last*GAUGE_SEG_ANG - (extra/GAUGE_RANGES[last])*GAUGE_SEG_ANG;
     }
-    for (let i=0; i<5; i++) {
+    for (let i=0; i<last; i++) {
         if (m < GAUGE_THRESH[i+1]) {
             const p = (m - GAUGE_THRESH[i]) / GAUGE_RANGES[i];
             return Math.PI - i*GAUGE_SEG_ANG - p*GAUGE_SEG_ANG;
@@ -261,7 +258,7 @@ function updateCitizenshipGauge(merits) {
     const nNum = document.getElementById('gaugeNextNumber');
     const nRemainText = document.getElementById('gaugeNextRemainText');
     const nRemaining = document.getElementById('gaugeNextRemaining');
-    if (level.idx >= 5) {
+    if (level.idx >= GAUGE_N - 1) {
         if (pBar) { pBar.style.width='100%'; pBar.style.background='linear-gradient(90deg,'+level.color+','+level.color+'aa)'; }
         if (pPct) pPct.textContent = '✅ MAX';
         if (pLbl) pLbl.textContent = 'Nivel máximo alcanzado';
