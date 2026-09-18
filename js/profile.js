@@ -122,7 +122,7 @@ const GAUGE_SEGS = [
     { label:'Plebeyo',    shortLabel:'Plebeyo',  icon:'👤', color:'#4CAF50', bloc:'Comunidad',  min:50   },
     { label:'Hodler',     shortLabel:'Hodler',   icon:'🫙', color:'#8BC34A', bloc:'Comunidad',  min:100  },
     { label:'Noder',      shortLabel:'Noder',    icon:'⚡', color:'#CDDC39', bloc:'Comunidad',  min:200  },
-    { label:'Bitcoiner',  shortLabel:'Btcoiner', icon:'₿',  color:'#FF9800', bloc:'Comunidad',  min:400  },
+    { label:'Bitcoiner',  shortLabel:'Bitcoiner', icon:'₿',  color:'#FF9800', bloc:'Comunidad',  min:400  },
     { label:'Maximalist', shortLabel:'Maximal.', icon:'🔥', color:'#FF5722', bloc:'Comunidad',  min:800  },
     { label:'Satoshi',    shortLabel:'Satoshi',  icon:'🟠', color:'#9C27B0', bloc:'Gobernanza', min:1000 },
 ];
@@ -164,6 +164,7 @@ function drawGaugeCanvas(merits, needleAng) {
     const CX = W/2, CY = H - 30, R = 220, BAND = 40;
     const level = gaugeGetLevel(merits);
     ctx.clearRect(0, 0, W, H);
+    // Pass 1: arcs
     for (let i=0; i<GAUGE_N; i++) {
         const aStart = Math.PI - i*GAUGE_SEG_ANG - GAUGE_GAP;
         const aEnd = Math.PI - (i+1)*GAUGE_SEG_ANG + GAUGE_GAP;
@@ -178,19 +179,9 @@ function drawGaugeCanvas(merits, needleAng) {
             ctx.globalAlpha = 0.15; ctx.stroke();
         }
         ctx.globalAlpha = 1;
-        const midAng = (aStart + aEnd) / 2;
-        const lx = CX + (R + BAND/2 + 18) * Math.cos(midAng);
-        const ly = CY - (R + BAND/2 + 18) * Math.sin(midAng);
-        ctx.save(); ctx.translate(lx, ly);
-        let rot = -midAng + Math.PI/2;
-        if (rot > Math.PI/2) rot -= Math.PI;
-        if (rot < -Math.PI/2) rot += Math.PI;
-        ctx.rotate(rot); ctx.font = '600 14px Poppins';
-        ctx.fillStyle = GAUGE_SEGS[i].color;
-        ctx.globalAlpha = isActive ? 0.9 : 0.5;
-        ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-        ctx.fillText(GAUGE_SEGS[i].shortLabel, 0, 0);
-        ctx.restore(); ctx.globalAlpha = 1;
+    }
+    // Pass 2: tick lines + threshold numbers
+    for (let i=0; i<GAUGE_N; i++) {
         if (i > 0) {
             const tickAng = Math.PI - i*GAUGE_SEG_ANG;
             ctx.beginPath();
@@ -203,6 +194,25 @@ function drawGaugeCanvas(merits, needleAng) {
         ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
         ctx.fillText(GAUGE_THRESH[i] >= 1000 ? (GAUGE_THRESH[i]/1000)+'K' : GAUGE_THRESH[i].toString(),
             CX+(R-BAND/2-20)*Math.cos(numAng), CY-(R-BAND/2-20)*Math.sin(numAng));
+    }
+    // Pass 3: labels (on top of tick lines)
+    for (let i=0; i<GAUGE_N; i++) {
+        const aStart = Math.PI - i*GAUGE_SEG_ANG - GAUGE_GAP;
+        const aEnd = Math.PI - (i+1)*GAUGE_SEG_ANG + GAUGE_GAP;
+        const isActive = i <= level.idx;
+        const midAng = (aStart + aEnd) / 2;
+        const lx = CX + (R + BAND/2 + 18) * Math.cos(midAng);
+        const ly = CY - (R + BAND/2 + 18) * Math.sin(midAng);
+        ctx.save(); ctx.translate(lx, ly);
+        let rot = -midAng + Math.PI/2;
+        if (rot > Math.PI/2) rot -= Math.PI;
+        if (rot < -Math.PI/2) rot += Math.PI;
+        ctx.rotate(rot); ctx.font = '600 13px Poppins';
+        ctx.fillStyle = GAUGE_SEGS[i].color;
+        ctx.globalAlpha = isActive ? 0.9 : 0.5;
+        ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+        ctx.fillText(GAUGE_SEGS[i].shortLabel, 0, 0);
+        ctx.restore(); ctx.globalAlpha = 1;
     }
     ctx.font='400 11px JetBrains Mono'; ctx.fillStyle='rgba(255,255,255,0.3)'; ctx.textAlign='center';
     ctx.fillText('3K+', CX+(R-BAND/2-20), CY);
