@@ -55,6 +55,16 @@ function _renderXPDisplay(merits) {
     if (noteEl) noteEl.style.display = 'none';
 }
 
+// Devuelve siempre la pubkey en hex para usar como clave de localStorage,
+// independientemente del método de login (nsec → npub, NIP-07 → hex).
+function _profilePubkeyHex() {
+    const raw = (currentUser && (currentUser.pubkey || currentUser.publicKey)) || '';
+    if (typeof isNpubFormat === 'function' && isNpubFormat(raw) && typeof npubToHex === 'function') {
+        return npubToHex(raw) || raw;
+    }
+    return raw;
+}
+
 async function updateXPDisplay(meritData) {
     try {
         const pb = (typeof C2P_PB !== 'undefined') ? C2P_PB.getClient() : null;
@@ -305,70 +315,37 @@ function initializeUserProfile() {
             city: '',
             registrationDate: new Date().toISOString()
         };
-        localStorage.setItem('userProfile_' + (currentUser.pubkey || currentUser.publicKey), JSON.stringify(userProfile));
+        localStorage.setItem('userProfile_' + _profilePubkeyHex(), JSON.stringify(userProfile));
     }
 }
 
 async function loadUserProfile() {
     if (!currentUser) return;
-    
-    const pubKey = currentUser.pubkey || currentUser.publicKey;
-    
+
+    const rawKey = currentUser.pubkey || currentUser.publicKey;
+    // Normalizar siempre a hex para que la clave de localStorage sea consistente
+    // independientemente del método de login (nsec devuelve npub, NIP-07 devuelve hex)
+    const pubKey = (typeof isNpubFormat === 'function' && isNpubFormat(rawKey) && typeof npubToHex === 'function')
+        ? (npubToHex(rawKey) || rawKey)
+        : rawKey;
+
     // Reset avatar to default before loading
     const profileAvatarEl = document.getElementById('profileAvatar');
     if (profileAvatarEl) {
         profileAvatarEl.src = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120'%3E%3Crect fill='%232C5F6F' width='120' height='120'/%3E%3Ctext x='50%25' y='50%25' dominant-baseline='middle' text-anchor='middle' font-family='Arial' font-size='48' fill='%23E5B95C'%3E👤%3C/text%3E%3C/svg%3E";
     }
-    
-    try {
-        // Load from Supabase first
-        const { data, error } = await supabaseClient
-            .from('users')
-            .select('citizenship_type, city, registration_date, avatar_url, profession, profession_specialty')
-            .eq('public_key', pubKey)
-            .single();
 
-        if (data) {
-            userProfile = {
-                citizenshipType: data.citizenship_type || 'Amigo',
-                city: data.city || '',
-                registrationDate: data.registration_date || new Date().toISOString(),
-                avatarUrl: data.avatar_url || null,
-                profession: data.profession || '',
-                professionSpecialty: data.profession_specialty || ''
-            };
-            
-            // Update avatar if exists
-            if (data.avatar_url) {
-                document.getElementById('profileAvatar').src = data.avatar_url;
-            }
-            
-            // Save to localStorage as cache
-            localStorage.setItem('userProfile_' + pubKey, JSON.stringify(userProfile));
-        } else {
-            // Fallback to localStorage
-            const saved = localStorage.getItem('userProfile_' + pubKey);
-            if (saved) {
-                userProfile = JSON.parse(saved);
-                if (userProfile.avatarUrl) {
-                    document.getElementById('profileAvatar').src = userProfile.avatarUrl;
-                }
-            } else {
-                initializeUserProfile();
-            }
-        }
-    } catch (err) {
-        console.error('Error loading profile:', err);
-        // Fallback to localStorage
-        const saved = localStorage.getItem('userProfile_' + pubKey);
-        if (saved) {
+    // Cargar desde localStorage (clave normalizada a hex)
+    const saved = localStorage.getItem('userProfile_' + pubKey);
+    if (saved) {
+        try {
             userProfile = JSON.parse(saved);
             if (userProfile.avatarUrl) {
                 document.getElementById('profileAvatar').src = userProfile.avatarUrl;
             }
-        } else {
-            initializeUserProfile();
-        }
+        } catch (_) { initializeUserProfile(); }
+    } else {
+        initializeUserProfile();
     }
     
     updateProfileDisplay();
@@ -402,7 +379,7 @@ async function loadUserProfile() {
                     const avatarEl = document.getElementById('profileAvatar');
                     if (avatarEl) avatarEl.src = nostrProfile.picture;
                     userProfile.avatarUrl = nostrProfile.picture;
-                    localStorage.setItem('userProfile_' + pubKey, JSON.stringify(userProfile));
+                    localStorage.setItem('userProfile_' + _profilePubkeyHex(), JSON.stringify(userProfile));
                     // Also update home avatar
                     const homeAvatar = document.getElementById('homeAvatar');
                     if (homeAvatar) homeAvatar.src = nostrProfile.picture;
@@ -807,7 +784,7 @@ async function handleAvatarUpload(event) {
         // Save to localStorage as cache
         if (!userProfile) userProfile = {};
         userProfile.avatarUrl = base64Image;
-        localStorage.setItem('userProfile_' + pubKey, JSON.stringify(userProfile));
+        localStorage.setItem('userProfile_' + _profilePubkeyHex(), JSON.stringify(userProfile));
 
         // Publish picture to Nostr (kind 0) so chat and other modules can resolve it
         try {
@@ -966,7 +943,7 @@ async function saveCitizenship() {
         userProfile.professionSpecialty = professionSpecialty || '';
 
         // Also save to localStorage as backup
-        localStorage.setItem('userProfile_' + pubKey, JSON.stringify(userProfile));
+        localStorage.setItem('userProfile_' + _profilePubkeyHex(), JSON.stringify(userProfile));
         
         // Update display
         updateProfileDisplay();
