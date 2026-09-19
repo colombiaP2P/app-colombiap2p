@@ -796,60 +796,7 @@ async function handleAvatarUpload(event) {
         // Compress and convert to base64
         const base64Image = await compressAndConvertImage(file);
 
-        // Save to Supabase
         const pubKey = currentUser.pubkey || currentUser.publicKey;
-        const userName = currentUser.name && !currentUser.name.startsWith('npub1') && !currentUser.name.endsWith('...') 
-            ? currentUser.name 
-            : 'Usuario';
-        
-        // First check if user exists
-        const { data: existingUser } = await supabaseClient
-            .from('users')
-            .select('id')
-            .eq('public_key', pubKey)
-            .maybeSingle();
-
-        if (!existingUser) {
-            // Create user with avatar
-            const { data: newUser, error: insertError } = await supabaseClient
-                .from('users')
-                .insert([{
-                    id: generateUUID(),
-                    public_key: pubKey,
-                    name: userName,
-                    avatar_url: base64Image
-                }])
-                .select()
-                .single();
-
-            if (insertError) {
-                console.error('Error creating user:', insertError);
-                showNotification('Error al subir foto: ' + insertError.message, 'error');
-                return;
-            }
-
-            if (newUser) {
-                currentUser.id = newUser.id;
-                window.LBW_persistKeys && window.LBW_persistKeys(currentUser);
-            }
-        } else {
-            // Update existing user avatar (and name if we have a good one)
-            const updateData = { avatar_url: base64Image };
-            if (userName !== 'Usuario') {
-                updateData.name = userName;
-            }
-            
-            const { error } = await supabaseClient
-                .from('users')
-                .update(updateData)
-                .eq('public_key', pubKey);
-
-            if (error) {
-                console.error('Error updating avatar:', error);
-                showNotification('Error al subir foto: ' + error.message, 'error');
-                return;
-            }
-        }
 
         // Update UI
         document.getElementById('profileAvatar').src = base64Image;
@@ -869,7 +816,7 @@ async function handleAvatarUpload(event) {
                 console.log('[Profile] ✅ Foto publicada en Nostr (kind 0)');
             }
         } catch (nostrErr) {
-            console.warn('[Profile] Foto guardada en Supabase pero no publicada en Nostr:', nostrErr);
+            console.warn('[Profile] Foto no publicada en Nostr:', nostrErr);
         }
 
         showNotification('✅ Foto de perfil actualizada');
