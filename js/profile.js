@@ -954,66 +954,15 @@ async function saveCitizenship() {
     
     try {
         const pubKey = currentUser.pubkey || currentUser.publicKey;
-        
-        // First, check if user exists in Supabase
-        const { data: existingUser, error: checkError } = await supabaseClient
-            .from('users')
-            .select('id')
-            .eq('public_key', pubKey)
-            .maybeSingle();
-        
+
         // Recoger profesión + especialidad del modal (taxonomía cerrada)
         const profSelect = document.getElementById('profileProfessionSelect');
         const profSpecialtyInput = document.getElementById('profileProfessionSpecialty');
         let professionCode = profSelect ? (profSelect.value || '') : '';
-        // Sanitizar: si el code no está en la taxonomía actual, lo descartamos
         if (professionCode && typeof LBW_Professions !== 'undefined' && !LBW_Professions.isValidCode(professionCode)) {
             professionCode = '';
         }
         let professionSpecialty = profSpecialtyInput ? (profSpecialtyInput.value || '').trim().substring(0, 80) : '';
-
-        if (!existingUser) {
-            // User doesn't exist, create it first
-            const { data: newUser, error: insertError } = await supabaseClient
-                .from('users')
-                .insert([{
-                    id: generateUUID(),
-                    public_key: pubKey,
-                    name: currentUser.name,
-                    city: city,
-                    profession: professionCode || null,
-                    profession_specialty: professionSpecialty || null
-                }])
-                .select()
-                .single();
-
-            if (insertError) {
-                console.error('Error creating user:', insertError);
-                showNotification('Error al crear usuario: ' + insertError.message + ' (¿migración Supabase pendiente?)', 'error');
-                return;
-            }
-
-            currentUser.id = newUser.id;
-            window.LBW_persistKeys && window.LBW_persistKeys(currentUser);
-        } else {
-            // User exists, update it
-            const { data, error } = await supabaseClient
-                .from('users')
-                .update({
-                    city: city,
-                    profession: professionCode || null,
-                    profession_specialty: professionSpecialty || null
-                })
-                .eq('public_key', pubKey)
-                .select()
-                .single();
-
-            if (error) {
-                console.error('Error updating profile:', error);
-                showNotification('Error al actualizar perfil: ' + error.message + ' (¿migración Supabase pendiente?)', 'error');
-                return;
-            }
-        }
 
         // ── Phase 2: guardar Lightning address (lud16) ──────────
         const lud16Input = document.getElementById('profileLud16Input');
