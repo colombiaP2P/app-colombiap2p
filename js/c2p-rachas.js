@@ -2,10 +2,11 @@
 
 const C2P_Rachas = (function () {
 
-    const STORAGE_KEY_LAST  = 'c2p_last_activity_date';
+    const STORAGE_KEY_LAST   = 'c2p_last_activity_date';
     const STORAGE_KEY_STREAK = 'c2p_current_streak';
-    const STORAGE_KEY_MAX   = 'c2p_max_streak';
-    const STORAGE_KEY_FIRST = 'c2p_first_activity_date'; // fecha primer uso (nunca se borra)
+    const STORAGE_KEY_MAX    = 'c2p_max_streak';
+    const STORAGE_KEY_FIRST  = 'c2p_first_activity_date'; // fecha primer uso (nunca se borra)
+    const STORAGE_KEY_USER   = 'c2p_streak_user';         // pubkey dueño del caché local
     const STORAGE_KEY_REF_BY = 'c2p_referred_by';
 
     const XP_PER_STREAK_DAY = 1;
@@ -36,6 +37,12 @@ const C2P_Rachas = (function () {
     // ── Streak local (fallback sin PocketBase) ────────────────
     function _readLocal() {
         try {
+            const storedUser  = localStorage.getItem(STORAGE_KEY_USER) || '';
+            const currentUser = _myPubkey();
+            // Si los datos en localStorage son de otro usuario, devolver vacío
+            if (storedUser && currentUser && storedUser !== currentUser) {
+                return { last: '', current: 0, max: 0, firstDate: '' };
+            }
             return {
                 last:      localStorage.getItem(STORAGE_KEY_LAST)   || '',
                 current:   parseInt(localStorage.getItem(STORAGE_KEY_STREAK) || '0', 10),
@@ -47,6 +54,8 @@ const C2P_Rachas = (function () {
 
     function _writeLocal(last, current, max, firstDate) {
         try {
+            const pubkey = _myPubkey();
+            if (pubkey) localStorage.setItem(STORAGE_KEY_USER, pubkey);
             localStorage.setItem(STORAGE_KEY_LAST,   last);
             localStorage.setItem(STORAGE_KEY_STREAK, String(current));
             localStorage.setItem(STORAGE_KEY_MAX,    String(max));
