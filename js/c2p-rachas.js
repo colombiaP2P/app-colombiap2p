@@ -105,8 +105,8 @@ const C2P_Rachas = (function () {
             await _grantStreakXP(current, XP_PER_STREAK_DAY);
         }
 
-        // Sincronizar con PocketBase si disponible
-        _syncStreakToPB(current, max).catch(() => {});
+        // Sincronizar con PocketBase si disponible (incluye first_activity_date)
+        _syncStreakToPB(current, max, firstDate).catch(() => {});
 
         return { current, max, xpEarned };
     }
@@ -126,7 +126,7 @@ const C2P_Rachas = (function () {
         } catch (_) {}
     }
 
-    async function _syncStreakToPB(current, max) {
+    async function _syncStreakToPB(current, max, firstDate) {
         const pb = _getPB();
         const pubkey = _myPubkey();
         if (!pb || !pubkey) return;
@@ -139,6 +139,10 @@ const C2P_Rachas = (function () {
                 max_streak:         max,
                 last_activity_date: _today(),
             };
+            // Escribir first_activity_date solo si PB aún no lo tiene
+            if (firstDate && (!existing || !existing.first_activity_date)) {
+                payload.first_activity_date = firstDate;
+            }
             if (existing) {
                 await pb.collection('user_streaks').update(existing.id, payload);
             } else {
@@ -156,11 +160,14 @@ const C2P_Rachas = (function () {
         try {
             const rec = await pb.collection('user_streaks')
                 .getFirstListItem(`user_pubkey = "${pubkey}"`);
-            // PB tiene la verdad para la racha; la primera fecha de uso se guarda
-            // solo en localStorage porque rec.created es la fecha de creación del
-            // registro PB, no la fecha en que el usuario llegó a la app (el registro
-            // puede crearse días después de la primera actividad en localStorage).
-            const firstDate = local.firstDate;
+            // first_activity_date: PocketBase es la fuente duradera (sobrevive cambio de
+            // dispositivo/limpieza de navegador). localStorage es el caché local.
+            const pbFirstDate = rec.first_activity_date ? rec.first_activity_date.slice(0, 10) : '';
+            const firstDate = local.firstDate || pbFirstDate;
+            if (pbFirstDate && !local.firstDate) {
+                // Restaurar desde PB si localStorage fue limpiado o es dispositivo nuevo
+                try { localStorage.setItem(STORAGE_KEY_FIRST, pbFirstDate); } catch (_) {}
+            }
             _writeLocal(rec.last_activity_date?.slice(0, 10) || local.last,
                         rec.current_streak, rec.max_streak, firstDate);
             return { last: rec.last_activity_date?.slice(0, 10), current: rec.current_streak, max: rec.max_streak, firstDate };
