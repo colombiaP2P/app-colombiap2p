@@ -39,8 +39,9 @@ const C2P_Rachas = (function () {
         try {
             const storedUser  = localStorage.getItem(STORAGE_KEY_USER) || '';
             const currentUser = _myPubkey();
-            // Si los datos en localStorage son de otro usuario, devolver vacío
-            if (storedUser && currentUser && storedUser !== currentUser) {
+            // Si hay un usuario activo y los datos no le pertenecen (incluye storedUser vacío),
+            // descartar — pueden ser de una sesión anterior de otro usuario
+            if (currentUser && storedUser !== currentUser) {
                 return { last: '', current: 0, max: 0, firstDate: '' };
             }
             return {
