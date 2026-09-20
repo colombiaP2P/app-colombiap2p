@@ -345,9 +345,12 @@ const LBW_NostrBridge = (() => {
 
         try {
             const result = await LBW_Nostr.loginWithConnectedSigner();
+            console.log('[Bridge] NIP-46 pubkeys → bunker:', connectResult.bunkerPubkey, '| user hex:', result.pubkeyHex, '| user npub:', result.npub);
+
+            const resolvedName = result.profile?.name || result.profile?.display_name || '';
             const session = {
                 pubkey: result.pubkeyHex, npub: result.npub,
-                name: result.profile?.name || result.profile?.display_name || 'Nostr User',
+                name: resolvedName || (result.npub.substring(0, 16) + '...'),
                 picture: result.profile?.picture || '',
                 method: 'bunker', loginTime: Date.now()
             };
@@ -376,6 +379,35 @@ const LBW_NostrBridge = (() => {
             _applyAvatarFromCache(session);
             _updateLoginModeUI('bunker');
             await _startAllFeeds();
+
+            // Re-resolve perfil en background: los relays pueden no estar listos
+            // cuando loginWithConnectedSigner() llamó _fetchProfile() (6s timeout).
+            setTimeout(async () => {
+                try {
+                    const p = await Promise.race([
+                        LBW_Sync.resolveProfile(result.pubkeyHex),
+                        new Promise(r => setTimeout(() => r(null), 12000))
+                    ]);
+                    if (!p) return;
+                    const nameIsGood = n => n && !n.startsWith('npub1') && !n.endsWith('...');
+                    const name = p.name || p.display_name || '';
+                    if (name && nameIsGood(name)) {
+                        _updateDisplayName(name);
+                        session.name = name;
+                        localStorage.setItem('lbw_nostr_session', JSON.stringify(session));
+                        console.log('[Bridge] ✅ NIP-46 nombre resuelto desde relay:', name);
+                    }
+                    if (p.picture && !session.picture) {
+                        session.picture = p.picture;
+                        localStorage.setItem('lbw_nostr_session', JSON.stringify(session));
+                        ['profileAvatar', 'homeAvatar'].forEach(id => {
+                            const el = document.getElementById(id);
+                            if (el) el.src = p.picture;
+                        });
+                    }
+                } catch (_) {}
+            }, 3000);
+
             console.log('[Bridge] ✅ Login NIP-46 (' + connectResult.mode + '):', result.npub);
             return result;
         } catch (e) {
