@@ -156,14 +156,11 @@ const C2P_Rachas = (function () {
         try {
             const rec = await pb.collection('user_streaks')
                 .getFirstListItem(`user_pubkey = "${pubkey}"`);
-            // PB tiene la verdad; sincronizar local.
-            // rec.created es la fecha en que se creó el registro en PB
-            // → representa la primera vez que el usuario usó la app en este pubkey.
-            const pbFirstDate = rec.created ? rec.created.slice(0, 10) : '';
-            const firstDate = local.firstDate || pbFirstDate;
-            if (pbFirstDate && !local.firstDate) {
-                try { localStorage.setItem(STORAGE_KEY_FIRST, pbFirstDate); } catch (_) {}
-            }
+            // PB tiene la verdad para la racha; la primera fecha de uso se guarda
+            // solo en localStorage porque rec.created es la fecha de creación del
+            // registro PB, no la fecha en que el usuario llegó a la app (el registro
+            // puede crearse días después de la primera actividad en localStorage).
+            const firstDate = local.firstDate;
             _writeLocal(rec.last_activity_date?.slice(0, 10) || local.last,
                         rec.current_streak, rec.max_streak, firstDate);
             return { last: rec.last_activity_date?.slice(0, 10), current: rec.current_streak, max: rec.max_streak, firstDate };
