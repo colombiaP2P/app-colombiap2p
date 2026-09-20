@@ -60,8 +60,12 @@ const C2P_Rachas = (function () {
             localStorage.setItem(STORAGE_KEY_LAST,   last);
             localStorage.setItem(STORAGE_KEY_STREAK, String(current));
             localStorage.setItem(STORAGE_KEY_MAX,    String(max));
-            if (firstDate && !localStorage.getItem(STORAGE_KEY_FIRST)) {
-                localStorage.setItem(STORAGE_KEY_FIRST, firstDate);
+            if (firstDate) {
+                const stored = localStorage.getItem(STORAGE_KEY_FIRST);
+                // Guardar si no existe o si la nueva fecha es anterior (PB puede corregir datos)
+                if (!stored || firstDate < stored) {
+                    localStorage.setItem(STORAGE_KEY_FIRST, firstDate);
+                }
             }
         } catch (_) {}
     }
@@ -170,12 +174,12 @@ const C2P_Rachas = (function () {
         try {
             const rec = await pb.collection('user_streaks')
                 .getFirstListItem(`user_pubkey = "${pubkey}"`);
-            // first_activity_date: PocketBase es la fuente duradera (sobrevive cambio de
-            // dispositivo/limpieza de navegador). localStorage es el caché local.
+            // PocketBase es fuente autoritativa para first_activity_date.
+            // Si PB tiene la fecha, siempre gana sobre localStorage
+            // (permite que el admin corrija fechas erróneas).
             const pbFirstDate = rec.first_activity_date ? rec.first_activity_date.slice(0, 10) : '';
-            const firstDate = local.firstDate || pbFirstDate;
-            if (pbFirstDate && !local.firstDate) {
-                // Restaurar desde PB si localStorage fue limpiado o es dispositivo nuevo
+            const firstDate = pbFirstDate || local.firstDate;
+            if (pbFirstDate && pbFirstDate !== local.firstDate) {
                 try { localStorage.setItem(STORAGE_KEY_FIRST, pbFirstDate); } catch (_) {}
             }
             _writeLocal(rec.last_activity_date?.slice(0, 10) || local.last,
@@ -294,6 +298,9 @@ const C2P_Rachas = (function () {
     // ── Display ───────────────────────────────────────────────
     async function updateStreakDisplay() {
         const streak = await getStreak();
+        // Refrescar "Días activo" después de que PB respondió con first_activity_date real
+        const memberEl = document.getElementById('statMemberSince');
+        if (memberEl) memberEl.textContent = getMemberDays();
         const refCount = await getReferralCount();
 
         // Racha
