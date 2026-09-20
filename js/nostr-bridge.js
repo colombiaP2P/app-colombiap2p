@@ -373,6 +373,7 @@ const LBW_NostrBridge = (() => {
             }).catch(() => {});
 
             _applyLoginToUI(session);
+            _applyAvatarFromCache(session);
             _updateLoginModeUI('bunker');
             await _startAllFeeds();
             console.log('[Bridge] ✅ Login NIP-46 (' + connectResult.mode + '):', result.npub);
