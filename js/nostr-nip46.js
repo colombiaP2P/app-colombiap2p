@@ -140,7 +140,7 @@ const LBW_NIP46 = (() => {
             };
 
             const pool = _getPool();
-            const params = { onauth, onnotice };
+            const params = { onauth, onnotice, timeout: 120000 };
             if (pool) params.pool = pool;
 
             let signer;
@@ -676,13 +676,13 @@ const LBW_NIP46 = (() => {
                     if (!v) { err.textContent = 'Pega tu bunker URL.'; return; }
                     if (!v.startsWith('bunker://')) { err.textContent = 'Debe empezar por bunker://'; return; }
                     status.style.display = 'block';
-                    status.textContent = '⏳ Conectando al bunker… si tu signer pide aprobación, ábrelo y autoriza.';
+                    status.textContent = '⏳ Solicitud enviada — abre Amber en tu teléfono y aprueba la conexión.';
                     submit.disabled = true;
-                    submit.textContent = '⏳ Conectando…';
+                    submit.textContent = '⏳ Esperando aprobación…';
                     try {
                         const result = await connect(v, {
                             onauth: (url) => {
-                                status.textContent = '🔓 Tu bunker pide autorización. Si no se abrió, abre manualmente: ' + url;
+                                status.textContent = '🔓 Aprobación requerida en tu signer. Si no se abrió automáticamente: ' + url;
                             }
                         });
                         finish(result);
