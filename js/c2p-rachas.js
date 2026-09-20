@@ -88,7 +88,24 @@ const C2P_Rachas = (function () {
 
         let { last, current, max, firstDate } = data;
 
-        // Guardar primera fecha de uso (antigüedad) — solo se escribe una vez
+        // Si no hay primera fecha en localStorage, intentar leerla de PocketBase
+        // antes de asumir que es un usuario nuevo (evita sobreescribir con hoy)
+        if (!firstDate) {
+            const pb     = _getPB();
+            const pubkey = _myPubkey();
+            if (pb && pubkey) {
+                try {
+                    const rec = await pb.collection('user_streaks')
+                        .getFirstListItem(`user_pubkey = "${pubkey}"`).catch(() => null);
+                    if (rec?.first_activity_date) {
+                        firstDate = rec.first_activity_date.slice(0, 10);
+                        try { localStorage.setItem(STORAGE_KEY_FIRST, firstDate); } catch (_) {}
+                    }
+                } catch (_) {}
+            }
+        }
+
+        // Si sigue vacío, es realmente la primera vez — usar hoy
         if (!firstDate) {
             firstDate = today;
             try { localStorage.setItem(STORAGE_KEY_FIRST, firstDate); } catch (_) {}
