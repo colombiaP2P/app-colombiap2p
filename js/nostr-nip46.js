@@ -148,18 +148,29 @@ const LBW_NIP46 = (() => {
             catch (e) { throw new Error('No se pudo instanciar BunkerSigner: ' + (e.message || e)); }
 
             await signer.connect();
-            const userPubkey = await signer.getPublicKey();
+
+            // BunkerSigner.getPublicKey() en nostr-tools 2.7.2 devuelve bp.pubkey
+            // directamente (la clave de relé del bunker) en lugar de llamar a
+            // get_public_key por RPC. Amber usa claves distintas para el bunker y
+            // para el usuario, así que necesitamos la RPC real para obtener la clave
+            // de firma del usuario. Usamos nuestro custom RPC signer que implementa
+            // el mismo protocolo sin el check verifyEvent interno de BunkerSigner.
+            const rpcSigner = _createCustomSigner(clientSk, bp.pubkey, bp.relays);
+
+            let userPubkey;
+            try {
+                userPubkey = await rpcSigner.getPublicKey(); // RPC real → clave del usuario
+                console.log('[NIP-46] get_public_key RPC →', userPubkey);
+            } catch (e) {
+                console.warn('[NIP-46] RPC getPublicKey falló, intentando BunkerSigner:', e.message);
+                try { userPubkey = await signer.getPublicKey(); } catch (_) {}
+            }
             if (!userPubkey || !/^[0-9a-f]{64}$/.test(userPubkey)) {
                 try { await signer.close(); } catch (_) {}
+                try { await rpcSigner.close(); } catch (_) {}
                 throw new Error('El bunker no devolvió una pubkey válida');
             }
 
-            // BunkerSigner.signEvent() llama verifyEvent() internamente y falla
-            // con Amber porque serializa el evento distinto a nostr-tools (whitespace,
-            // orden JSON). Solución: usar nuestro custom RPC signer para las ops
-            // post-connect, que no tiene ese check. BunkerSigner solo sirve para
-            // el handshake inicial (connect + getPublicKey).
-            const rpcSigner = _createCustomSigner(clientSk, bp.pubkey, bp.relays);
             _signer = {
                 getPublicKey:  async () => userPubkey,
                 signEvent:     rpcSigner.signEvent.bind(rpcSigner),
@@ -295,7 +306,16 @@ const LBW_NIP46 = (() => {
         return {
             // Mimica la API de BunkerSigner
             connect: async () => 'ack',  // ya conectados; idempotente
-            getPublicKey: async () => signerPub,
+            // get_public_key vía RPC real: algunos bunkers (p. ej. Amber) usan
+            // una clave de relé distinta a la del usuario en el bunker:// URL.
+            // La RPC devuelve la clave de firma real del usuario.
+            getPublicKey: async () => {
+                try {
+                    const pk = await _request('get_public_key', [], { timeoutMs: 15000 });
+                    if (pk && /^[0-9a-f]{64}$/.test(pk)) return pk;
+                } catch (e) { console.warn('[NIP-46] get_public_key RPC falló:', e.message); }
+                return signerPub; // fallback: clave del bunker
+            },
             signEvent: async (template) => {
                 const result = await _request('sign_event', [JSON.stringify(template)]);
                 try { return JSON.parse(result); }
