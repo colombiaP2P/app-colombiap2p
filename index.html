@@ -3265,7 +3265,7 @@
     <script src="js/nostr-stalls.js?v=hardening-1"></script>
     <!-- Mute personal cliente-side: usado por nostr-bridge para ocultar mensajes -->
     <script src="js/lbw-mute.js?v=mute-1"></script>
-    <script src="js/nostr-bridge.js?v=c2p-14"></script>
+    <script src="js/nostr-bridge.js?v=c2p-15"></script>
     <script src="js/debate.js?v=nip72-1"></script>
     <script src="js/avatar-fix.js?v=2"></script>
     <!-- Missions system (Merit Bounties) -->
@@ -3398,155 +3398,51 @@
         async function continueAfterLogin() {
             if (typeof closeAuthModal === 'function') closeAuthModal();
             
-            // Bridge: Nostr login sets lbw_nostr_session but legacy UI needs currentUser + liberbit_keys
+            // Bridge: Nostr login sets lbw_nostr_session; sync to currentUser + liberbit_keys
             if (!currentUser) {
                 try {
                     const nostrSession = JSON.parse(localStorage.getItem('lbw_nostr_session') || 'null');
                     if (nostrSession && nostrSession.npub) {
                         const npubKey = nostrSession.npub;
-                        const hexKey  = nostrSession.pubkey; // pubkeyHex
-                        
-                        // Helper: check if a name is a real name (not truncated npub)
+                        const hexKey  = nostrSession.pubkey; // pubkeyHex (hex)
                         const nameIsGood = (n) => n && !n.startsWith('npub1') && !n.endsWith('...');
-                        
-                        // Use session name (may already be resolved by handlePrivateKeyLogin await)
-                        
-                        // Use session name (may already be resolved by handlePrivateKeyLogin await)
                         const sessionName = nostrSession.name || '';
-                        const displayName = sessionName || npubKey.substring(0, 16) + '...';
-                        
+                        const displayName = nameIsGood(sessionName) ? sessionName : (npubKey.substring(0, 16) + '...');
+
                         currentUser = {
                             pubkey: npubKey,
                             publicKey: npubKey,
                             name: displayName,
                             created_at: nostrSession.loginTime || Date.now()
                         };
-                        
-                        // Resolve Supabase user: try npub first, then hex
-                        try {
-                            let sbUser = null;
-                            const { data: d1 } = await supabaseClient.from('users').select('*').eq('public_key', npubKey).maybeSingle();
-                            if (d1) {
-                                sbUser = d1;
-                            } else if (hexKey) {
-                                const { data: d2 } = await supabaseClient.from('users').select('*').eq('public_key', hexKey).maybeSingle();
-                                if (d2) {
-                                    sbUser = d2;
-                                    // Migrate Supabase record from hex to npub
-                                    await supabaseClient.from('users').update({ public_key: npubKey }).eq('id', d2.id);
-                                    console.log('[Auth] Migrated Supabase user key hex → npub');
-                                }
-                            }
-                            
-                            if (sbUser) {
-                                currentUser.id = sbUser.id;
-                                // Take the best name from either source
-                                if (nameIsGood(sbUser.name)) {
-                                    currentUser.name = sbUser.name;
-                                } else if (nameIsGood(sessionName)) {
-                                    currentUser.name = sessionName;
-                                    await supabaseClient.from('users').update({ name: sessionName }).eq('id', sbUser.id);
-                                }
-                                // If no avatar, try to inherit from another profile with same name
-                                let avatarUrl = sbUser.avatar_url || null;
-                                if (!avatarUrl && nameIsGood(currentUser.name)) {
-                                    try {
-                                        const { data: donor } = await supabaseClient.from('users')
-                                            .select('avatar_url')
-                                            .eq('name', currentUser.name)
-                                            .not('avatar_url', 'is', null)
-                                            .limit(1)
-                                            .maybeSingle();
-                                        if (donor && donor.avatar_url) {
-                                            avatarUrl = donor.avatar_url;
-                                            await supabaseClient.from('users').update({ avatar_url: avatarUrl }).eq('id', sbUser.id);
-                                            console.log('[Auth] ✅ Avatar heredado de perfil existente');
-                                        }
-                                    } catch(e) {}
-                                }
-                                // Pre-cache profile with avatar for immediate display
-                                const profile = {
-                                    citizenshipType: sbUser.citizenship_type || 'Amigo',
-                                    city: sbUser.city || '',
-                                    registrationDate: sbUser.registration_date || new Date().toISOString(),
-                                    avatarUrl: avatarUrl
-                                };
-                                localStorage.setItem('userProfile_' + npubKey, JSON.stringify(profile));
-                            } else {
-                                // No record found by npub — create new user
-                                // But first, check if a profile with same name exists (to inherit avatar)
-                                let inheritedAvatar = null;
-                                if (nameIsGood(currentUser.name)) {
-                                    try {
-                                        const { data: donor } = await supabaseClient.from('users')
-                                            .select('avatar_url, citizenship_type, city, registration_date')
-                                            .eq('name', currentUser.name)
-                                            .not('avatar_url', 'is', null)
-                                            .limit(1)
-                                            .maybeSingle();
-                                        if (donor) {
-                                            inheritedAvatar = donor.avatar_url;
-                                            console.log('[Auth] ✅ Avatar encontrado en perfil existente con mismo nombre');
-                                        }
-                                    } catch(e) {}
-                                }
-                                try {
-                                    const newId = generateUUID();
-                                    const { data: newUser } = await supabaseClient.from('users')
-                                        .upsert([{
-                                            id: newId,
-                                            public_key: npubKey,
-                                            name: currentUser.name,
-                                            citizenship_type: 'Amigo',
-                                            avatar_url: inheritedAvatar
-                                        }], { onConflict: 'public_key', ignoreDuplicates: false })
-                                        .select()
-                                        .single();
-                                    if (newUser) {
-                                        currentUser.id = newUser.id;
-                                        console.log('[Auth] ✅ Created Supabase user:', currentUser.name);
-                                        // Cache profile
-                                        const profile = {
-                                            citizenshipType: 'Amigo',
-                                            city: '',
-                                            registrationDate: new Date().toISOString(),
-                                            avatarUrl: inheritedAvatar
-                                        };
-                                        localStorage.setItem('userProfile_' + npubKey, JSON.stringify(profile));
-                                    }
-                                } catch(createErr) { console.warn('[Auth] User creation:', createErr.message); }
-                            }
-                        } catch(sbErr) { console.warn('[Auth] Supabase lookup:', sbErr.message); }
-                        
+
                         window.LBW_persistKeys && window.LBW_persistKeys(currentUser);
-                        
-                        // Update UI with the best name we have
-                        if (typeof LBW_NostrBridge !== 'undefined') {
-                            ['homeUserName', 'userName', 'profileName'].forEach(id => {
-                                const el = document.getElementById(id);
-                                if (el) el.textContent = currentUser.name;
-                            });
+
+                        // Update UI con el mejor nombre disponible
+                        ['homeUserName', 'userName', 'profileName'].forEach(id => {
+                            const el = document.getElementById(id);
+                            if (el) el.textContent = currentUser.name;
+                        });
+
+                        // Aplicar avatar desde localStorage (clave hex — misma que usa profile.js)
+                        if (hexKey) {
+                            try {
+                                const cached = JSON.parse(localStorage.getItem('userProfile_' + hexKey) || 'null');
+                                if (cached && cached.avatarUrl) {
+                                    const homeAvatar = document.getElementById('homeAvatar');
+                                    const profileAvatar = document.getElementById('profileAvatar');
+                                    if (homeAvatar) homeAvatar.src = cached.avatarUrl;
+                                    if (profileAvatar) profileAvatar.src = cached.avatarUrl;
+                                }
+                            } catch(e) {}
                         }
-                        
-                        // Apply cached avatar to UI
-                        try {
-                            const cachedProfile = JSON.parse(localStorage.getItem('userProfile_' + npubKey) || 'null');
-                            if (cachedProfile && cachedProfile.avatarUrl) {
-                                const homeAvatar = document.getElementById('homeAvatar');
-                                const profileAvatar = document.getElementById('profileAvatar');
-                                if (homeAvatar) homeAvatar.src = cachedProfile.avatarUrl;
-                                if (profileAvatar) profileAvatar.src = cachedProfile.avatarUrl;
-                                console.log('[Auth] ✅ Avatar aplicado al UI');
-                            }
-                        } catch(e) {}
-                        
-                        // Background retry: if name is still truncated npub, check again after profile resolves
+
+                        // Retry name after relays resuelven (nostr-bridge actualiza lbw_nostr_session)
                         if (!nameIsGood(currentUser.name)) {
-                            setTimeout(async () => {
+                            setTimeout(() => {
                                 try {
-                                    // Re-read session in case nostr-bridge updated it
-                                    const freshSession = JSON.parse(localStorage.getItem('lbw_nostr_session') || 'null');
-                                    const freshName = freshSession?.name || '';
+                                    const fresh = JSON.parse(localStorage.getItem('lbw_nostr_session') || 'null');
+                                    const freshName = fresh && fresh.name || '';
                                     if (nameIsGood(freshName)) {
                                         currentUser.name = freshName;
                                         window.LBW_persistKeys && window.LBW_persistKeys(currentUser);
@@ -3554,19 +3450,14 @@
                                             const el = document.getElementById(id);
                                             if (el) el.textContent = freshName;
                                         });
-                                        // Update Supabase too
-                                        if (currentUser.id) {
-                                            await supabaseClient.from('users').update({ name: freshName }).eq('id', currentUser.id);
-                                        }
-                                        console.log('[Auth] ✅ Nombre actualizado (retry):', freshName);
                                     }
                                 } catch(e) {}
-                            }, 6000);
+                            }, 8000);
                         }
                     }
                 } catch(e) { console.warn('[Auth] Bridge error:', e); }
             }
-            
+
             if (typeof showMainMenu === 'function' && currentUser) showMainMenu();
 
             // Init Supabase merit sync after login (non-blocking)

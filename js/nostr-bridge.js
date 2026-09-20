@@ -484,215 +484,30 @@ const LBW_NostrBridge = (() => {
             id: null
         };
         
-        // Clear old profile cache for this key
-        try { localStorage.removeItem('userProfile_' + result.npub); } catch(e) {}
-
-        // ── Resolve name & avatar: Supabase with auto-migration ──
-        let foundInSupabase = false;
+        // ── Resolve name & avatar desde relays Nostr ──
+        // Buscar nombre y avatar en relays Nostr (fuente de verdad para ColombiaP2P)
         try {
-            if (typeof supabaseClient !== 'undefined') {
-                // Step 1: Try exact match by npub (correct format)
-                let { data } = await supabaseClient
-                    .from('users')
-                    .select('name, id, avatar_url, public_key')
-                    .eq('public_key', result.npub)
-                    .maybeSingle();
-                
-                // Step 2: If not found, try by hex format (old format)
-                if (!data) {
-                    const hexResult = await supabaseClient
-                        .from('users')
-                        .select('name, id, avatar_url, public_key')
-                        .eq('public_key', result.pubkeyHex)
-                        .maybeSingle();
-                    
-                    if (hexResult.data) {
-                        data = hexResult.data;
-                        const oldHexKey = data.public_key;
-                        // Auto-migrate hex to npub format
-                        console.log('[Bridge] 🔄 Migrando public_key de hex a npub...');
-                        await supabaseClient
-                            .from('users')
-                            .update({ public_key: result.npub })
-                            .eq('id', data.id);
-                        // Migrate related tables
-                        try {
-                            await supabaseClient.from('posts').update({ author_public_key: result.npub }).eq('author_public_key', oldHexKey);
-                            await supabaseClient.from('offers').update({ author_public_key: result.npub }).eq('author_public_key', oldHexKey);
-                            await supabaseClient.from('post_likes').update({ user_public_key: result.npub }).eq('user_public_key', oldHexKey);
-                        } catch (migErr) {
-                            console.warn('[Bridge] ⚠️ Migración tablas relacionadas (hex):', migErr.message);
-                        }
-                        console.log('[Bridge] ✅ public_key migrado a npub');
+            await new Promise(r => setTimeout(r, 1000)); // esperar conexión relay
+            const p = await Promise.race([
+                LBW_Sync.resolveProfile(result.pubkeyHex),
+                new Promise(r => setTimeout(() => r(null), 5000))
+            ]);
+            if (p) {
+                if (!session.name) {
+                    const resolvedName = p.name || p.display_name || '';
+                    if (resolvedName) {
+                        session.name = resolvedName;
+                        currentUser.name = resolvedName;
+                        console.log('[Bridge] ✅ Nombre desde relays:', resolvedName);
                     }
                 }
-                
-                // Step 3: If still not found, get name from Nostr relays first
-                if (!data) {
-                    console.log('[Bridge] 🔍 Usuario no encontrado por npub/hex, buscando en relays...');
-                    await new Promise(r => setTimeout(r, 1500));
-                    const nostrProfile = await Promise.race([
-                        LBW_Sync.resolveProfile(result.pubkeyHex),
-                        new Promise(r => setTimeout(() => r(null), 4000))
-                    ]);
-                    
-                    // If we got a name from Nostr, try to find user by name (legacy migration)
-                    if (nostrProfile && nostrProfile.name) {
-                        const nameToSearch = nostrProfile.name;
-                        console.log('[Bridge] 🔍 Buscando por nombre:', nameToSearch);
-                        
-                        const nameResult = await supabaseClient
-                            .from('users')
-                            .select('name, id, avatar_url, public_key')
-                            .eq('name', nameToSearch);
-                        
-                        // Only migrate if EXACTLY ONE user found with that name
-                        if (nameResult.data && nameResult.data.length === 1) {
-                            data = nameResult.data[0];
-                            const oldKey = data.public_key;
-                            
-                            // Update to correct npub
-                            console.log('[Bridge] 🔄 Migrando public_key legacy:', oldKey.substring(0,20), '→', result.npub.substring(0,20));
-                            await supabaseClient
-                                .from('users')
-                                .update({ public_key: result.npub })
-                                .eq('id', data.id);
-                            // Migrate related tables
-                            try {
-                                await supabaseClient.from('posts').update({ author_public_key: result.npub }).eq('author_public_key', oldKey);
-                                await supabaseClient.from('offers').update({ author_public_key: result.npub }).eq('author_public_key', oldKey);
-                                await supabaseClient.from('post_likes').update({ user_public_key: result.npub }).eq('user_public_key', oldKey);
-                            } catch (migErr) {
-                                console.warn('[Bridge] ⚠️ Migración tablas relacionadas (legacy):', migErr.message);
-                            }
-                            console.log('[Bridge] ✅ public_key legacy migrado correctamente');
-                        } else if (nameResult.data && nameResult.data.length > 1) {
-                            console.warn('[Bridge] ⚠️ Múltiples usuarios con nombre "' + nameToSearch + '", no se puede migrar automáticamente');
-                        }
-                        
-                        // Use Nostr profile data
-                        if (nostrProfile.name) {
-                            session.name = nostrProfile.name;
-                            currentUser.name = nostrProfile.name;
-                        }
-                        if (nostrProfile.picture) {
-                            session.picture = nostrProfile.picture;
-                        }
-                    }
-                }
-                
-                // Step 4: If still not found, ask user for their name (manual migration)
-                if (!data) {
-                    console.log('[Bridge] 🔍 Usuario no encontrado automáticamente, pidiendo nombre...');
-                    const userName = prompt(
-                        '⚠️ No se encontró tu cuenta automáticamente.\n\n' +
-                        'Si ya tenías cuenta en ColombiaP2P, escribe tu nombre de usuario exacto para vincular tu identidad.\n\n' +
-                        'Si eres nuevo, pulsa Cancelar y usa "Crear Identidad" en su lugar.'
-                    );
-                    
-                    if (userName && userName.trim()) {
-                        const trimmedName = userName.trim();
-                        console.log('[Bridge] 🔍 Buscando por nombre manual:', trimmedName);
-                        
-                        const nameResult = await supabaseClient
-                            .from('users')
-                            .select('name, id, avatar_url, public_key')
-                            .ilike('name', trimmedName);
-                        
-                        if (nameResult.data && nameResult.data.length === 1) {
-                            data = nameResult.data[0];
-                            const oldKey = data.public_key;
-                            
-                            // Migrate public_key in users table
-                            console.log('[Bridge] 🔄 Migrando public_key manual:', oldKey.substring(0,20), '→', result.npub.substring(0,20));
-                            await supabaseClient
-                                .from('users')
-                                .update({ public_key: result.npub })
-                                .eq('id', data.id);
-                            
-                            // Migrate related tables
-                            try {
-                                await supabaseClient.from('posts').update({ author_public_key: result.npub }).eq('author_public_key', oldKey);
-                                await supabaseClient.from('offers').update({ author_public_key: result.npub }).eq('author_public_key', oldKey);
-                                await supabaseClient.from('post_likes').update({ user_public_key: result.npub }).eq('user_public_key', oldKey);
-                            } catch (migErr) {
-                                console.warn('[Bridge] ⚠️ Migración tablas relacionadas:', migErr.message);
-                            }
-                            
-                            console.log('[Bridge] ✅ Migración manual completada para:', trimmedName);
-                        } else if (nameResult.data && nameResult.data.length > 1) {
-                            alert('⚠️ Hay múltiples usuarios con ese nombre. Contacta al administrador para resolver la migración.');
-                        } else {
-                            alert('❌ No se encontró ningún usuario con el nombre "' + trimmedName + '".\n\nSi eres nuevo, usa "Crear Identidad".');
-                        }
-                    }
-                }
-
-                // Apply data if found
-                if (data) {
-                    foundInSupabase = true;
-                    if (data.name && !data.name.startsWith('npub1') && !data.name.endsWith('...')) {
-                        session.name = data.name;
-                        currentUser.name = data.name;
-                        console.log('[Bridge] ✅ Nombre desde Supabase:', data.name);
-                    }
-                    if (data.id) {
-                        currentUser.id = data.id;
-                    }
-                    if (data.avatar_url) {
-                        session.picture = data.avatar_url;
-                        console.log('[Bridge] ✅ Avatar desde Supabase');
-                    }
+                if (!session.picture && p.picture) {
+                    session.picture = p.picture;
+                    console.log('[Bridge] ✅ Avatar desde relays');
                 }
             }
         } catch(e) {
-            console.warn('[Bridge] Supabase lookup failed:', e.message);
-        }
-        
-        // ── Fallback: If still no name/picture, try relays ──
-        if (!session.name || !session.picture) {
-            try {
-                if (!foundInSupabase) {
-                    // Only wait if we haven't already fetched from relays above
-                    await new Promise(r => setTimeout(r, 1000));
-                }
-                const p = await Promise.race([
-                    LBW_Sync.resolveProfile(result.pubkeyHex),
-                    new Promise(r => setTimeout(() => r(null), 3000))
-                ]);
-                if (p) {
-                    if (!session.name) {
-                        const resolvedName = p.name || p.display_name || '';
-                        if (resolvedName) {
-                            session.name = resolvedName;
-                            currentUser.name = resolvedName;
-                            console.log('[Bridge] ✅ Nombre desde relays:', resolvedName);
-                        }
-                    }
-                    if (!session.picture && p.picture) {
-                        session.picture = p.picture;
-                        console.log('[Bridge] ✅ Avatar desde relays');
-                    }
-                }
-            } catch(e) {
-                console.warn('[Bridge] Relay lookup failed:', e.message);
-            }
-        }
-
-        // Si tras todo el lookup no apareció en Supabase, lo registramos
-        // ahora con el nombre resuelto (de Nostr o npub corto como
-        // fallback). Idempotente — si ya existe no hace nada. Garantiza
-        // que TODO usuario que accede vía "Ya tengo cuenta" quede en el
-        // contador "ID Registradas".
-        if (!foundInSupabase) {
-            const nameForReg = (session.name && !session.name.startsWith('npub1') && !session.name.endsWith('...'))
-                ? session.name
-                : '';
-            const ensuredId = await _ensureUserInSupabase(result.npub, nameForReg);
-            if (ensuredId) {
-                currentUser.id = ensuredId;
-                try { window.LBW_persistKeys && window.LBW_persistKeys(currentUser); } catch(e) {}
-            }
+            console.warn('[Bridge] Relay lookup failed:', e.message);
         }
 
         // Save synced currentUser to localStorage
@@ -887,6 +702,7 @@ const LBW_NostrBridge = (() => {
                 if (await LBW_Nostr.waitForExtension(3000)) {
                     await LBW_Nostr.loginWithExtension();
                     _applyLoginToUI(s);
+                    _applyAvatarFromCache(s);
                     _updateLoginModeUI('extension');
                     await _startAllFeeds();
                     sessionRestored = true;
@@ -944,6 +760,7 @@ const LBW_NostrBridge = (() => {
                     window.LBW_persistKeys && window.LBW_persistKeys(currentUser);
 
                     _applyLoginToUI(s);
+                    _applyAvatarFromCache(s);
                     _updateLoginModeUI('nsec');
                     await _startAllFeeds();
                     console.log('[Bridge] ✅ Sesión nsec restaurada');
@@ -1034,6 +851,20 @@ const LBW_NostrBridge = (() => {
             
             return sessionRestored;
         } catch (e) { console.error('[Bridge] ❌ restoreSession error:', e); return false; }
+    }
+
+    function _applyAvatarFromCache(session) {
+        if (session.picture) return; // ya hay avatar en sesión
+        try {
+            // session.pubkey es siempre hex (set desde result.pubkeyHex)
+            const cached = JSON.parse(localStorage.getItem('userProfile_' + session.pubkey) || 'null');
+            if (cached && cached.avatarUrl) {
+                ['homeAvatar', 'profileAvatar'].forEach(id => {
+                    const el = document.getElementById(id);
+                    if (el) el.src = cached.avatarUrl;
+                });
+            }
+        } catch(_) {}
     }
 
     function _applyLoginToUI(session) {
