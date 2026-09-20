@@ -18,9 +18,15 @@ const C2P_Rachas = (function () {
     }
 
     function _myPubkey() {
-        return (typeof LBW_Nostr !== 'undefined' && LBW_Nostr.isLoggedIn())
-            ? LBW_Nostr.getPubkey()
-            : (typeof currentUser !== 'undefined' && currentUser?.pubkey) ? currentUser.pubkey : '';
+        if (typeof LBW_Nostr !== 'undefined' && LBW_Nostr.isLoggedIn()) {
+            return LBW_Nostr.getPubkey();
+        }
+        // Fallback: leer de la sesión en localStorage antes de que Nostr inicialice
+        try {
+            const s = JSON.parse(localStorage.getItem('lbw_nostr_session') || '{}');
+            if (s.pubkey && /^[0-9a-f]{64}$/.test(s.pubkey)) return s.pubkey;
+        } catch (_) {}
+        return (typeof currentUser !== 'undefined' && currentUser?.pubkey) ? currentUser.pubkey : '';
     }
 
     function _today() {
