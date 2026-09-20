@@ -2,9 +2,10 @@
 
 const C2P_Rachas = (function () {
 
-    const STORAGE_KEY_LAST = 'c2p_last_activity_date';
+    const STORAGE_KEY_LAST  = 'c2p_last_activity_date';
     const STORAGE_KEY_STREAK = 'c2p_current_streak';
-    const STORAGE_KEY_MAX = 'c2p_max_streak';
+    const STORAGE_KEY_MAX   = 'c2p_max_streak';
+    const STORAGE_KEY_FIRST = 'c2p_first_activity_date'; // fecha primer uso (nunca se borra)
     const STORAGE_KEY_REF_BY = 'c2p_referred_by';
 
     const XP_PER_STREAK_DAY = 1;
@@ -36,19 +37,34 @@ const C2P_Rachas = (function () {
     function _readLocal() {
         try {
             return {
-                last:    localStorage.getItem(STORAGE_KEY_LAST)   || '',
-                current: parseInt(localStorage.getItem(STORAGE_KEY_STREAK) || '0', 10),
-                max:     parseInt(localStorage.getItem(STORAGE_KEY_MAX)    || '0', 10),
+                last:      localStorage.getItem(STORAGE_KEY_LAST)   || '',
+                current:   parseInt(localStorage.getItem(STORAGE_KEY_STREAK) || '0', 10),
+                max:       parseInt(localStorage.getItem(STORAGE_KEY_MAX)    || '0', 10),
+                firstDate: localStorage.getItem(STORAGE_KEY_FIRST)  || '',
             };
-        } catch (_) { return { last: '', current: 0, max: 0 }; }
+        } catch (_) { return { last: '', current: 0, max: 0, firstDate: '' }; }
     }
 
-    function _writeLocal(last, current, max) {
+    function _writeLocal(last, current, max, firstDate) {
         try {
             localStorage.setItem(STORAGE_KEY_LAST,   last);
             localStorage.setItem(STORAGE_KEY_STREAK, String(current));
             localStorage.setItem(STORAGE_KEY_MAX,    String(max));
+            if (firstDate && !localStorage.getItem(STORAGE_KEY_FIRST)) {
+                localStorage.setItem(STORAGE_KEY_FIRST, firstDate);
+            }
         } catch (_) {}
+    }
+
+    // ── Días como miembro (antigüedad) ────────────────────────
+    // Usa la fecha del primer uso registrada en localStorage o PocketBase.
+    function getMemberDays() {
+        try {
+            const firstDate = localStorage.getItem(STORAGE_KEY_FIRST);
+            if (!firstDate) return 1;
+            const ms = Date.now() - new Date(firstDate).getTime();
+            return Math.max(1, Math.floor(ms / 86400000) + 1);
+        } catch (_) { return 1; }
     }
 
     // ── Registrar actividad ───────────────────────────────────
@@ -56,7 +72,13 @@ const C2P_Rachas = (function () {
         const today = _today();
         const data  = _readLocal();
 
-        let { last, current, max } = data;
+        let { last, current, max, firstDate } = data;
+
+        // Guardar primera fecha de uso (antigüedad) — solo se escribe una vez
+        if (!firstDate) {
+            firstDate = today;
+            try { localStorage.setItem(STORAGE_KEY_FIRST, firstDate); } catch (_) {}
+        }
 
         if (last === today) return { current, max, xpEarned: 0 }; // ya registrado hoy
 
@@ -71,7 +93,7 @@ const C2P_Rachas = (function () {
         }
 
         if (current > max) max = current;
-        _writeLocal(today, current, max);
+        _writeLocal(today, current, max, firstDate);
 
         // XP por racha (cada 7 días extra)
         const XP_WEEKLY_BONUS = 5;
@@ -134,10 +156,17 @@ const C2P_Rachas = (function () {
         try {
             const rec = await pb.collection('user_streaks')
                 .getFirstListItem(`user_pubkey = "${pubkey}"`);
-            // PB tiene la verdad; sincronizar local
+            // PB tiene la verdad; sincronizar local.
+            // rec.created es la fecha en que se creó el registro en PB
+            // → representa la primera vez que el usuario usó la app en este pubkey.
+            const pbFirstDate = rec.created ? rec.created.slice(0, 10) : '';
+            const firstDate = local.firstDate || pbFirstDate;
+            if (pbFirstDate && !local.firstDate) {
+                try { localStorage.setItem(STORAGE_KEY_FIRST, pbFirstDate); } catch (_) {}
+            }
             _writeLocal(rec.last_activity_date?.slice(0, 10) || local.last,
-                        rec.current_streak, rec.max_streak);
-            return { last: rec.last_activity_date?.slice(0, 10), current: rec.current_streak, max: rec.max_streak };
+                        rec.current_streak, rec.max_streak, firstDate);
+            return { last: rec.last_activity_date?.slice(0, 10), current: rec.current_streak, max: rec.max_streak, firstDate };
         } catch (_) {
             return local;
         }
@@ -298,6 +327,7 @@ const C2P_Rachas = (function () {
     return {
         init,
         recordActivity,
+        getMemberDays,
         getStreak,
         getReferralLink,
         getReferralCount,

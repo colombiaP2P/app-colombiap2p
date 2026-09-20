@@ -538,9 +538,10 @@ function updateProfileDisplay() {
     document.getElementById('statMerits').textContent = merits;
     document.getElementById('statContributions').textContent = totalContributions;
     
-    // Días activo desde la fecha de registro
-    const regDate = new Date(userProfile.registrationDate);
-    const daysActive = Math.max(1, Math.floor((Date.now() - regDate.getTime()) / 86400000));
+    // Días activo = antigüedad desde el primer uso registrado en localStorage / PocketBase
+    const daysActive = (typeof C2P_Rachas !== 'undefined')
+        ? C2P_Rachas.getMemberDays()
+        : Math.max(1, Math.floor((Date.now() - new Date(userProfile.registrationDate).getTime()) / 86400000));
     document.getElementById('statMemberSince').textContent = daysActive;
     
     // Update citizenship details (auto-calculated)
