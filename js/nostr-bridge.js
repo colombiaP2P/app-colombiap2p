@@ -703,6 +703,36 @@ const LBW_NostrBridge = (() => {
         _updateLoginModeUI('nsec');
         await _startAllFeeds();
 
+        // Re-resolve name/picture en background con timeout largo (para móviles lentos)
+        if (!session.name || !session.picture) {
+            setTimeout(async () => {
+                try {
+                    const p = await Promise.race([
+                        LBW_Sync.resolveProfile(result.pubkeyHex),
+                        new Promise(r => setTimeout(() => r(null), 12000))
+                    ]);
+                    if (!p) return;
+                    const name = p.name || p.display_name || '';
+                    if (name && (!session.name || session.name.startsWith('npub1'))) {
+                        _updateDisplayName(name);
+                        session.name = name;
+                        localStorage.setItem('lbw_nostr_session', JSON.stringify(session));
+                    }
+                    if (p.picture && !session.picture) {
+                        session.picture = p.picture;
+                        localStorage.setItem('lbw_nostr_session', JSON.stringify(session));
+                        ['profileAvatar', 'homeAvatar'].forEach(id => {
+                            const el = document.getElementById(id);
+                            if (el) el.src = p.picture;
+                        });
+                        if (!userProfile) userProfile = {};
+                        userProfile.avatarUrl = p.picture;
+                        try { localStorage.setItem('userProfile_' + result.pubkeyHex, JSON.stringify(userProfile)); } catch(_) {}
+                    }
+                } catch (_) {}
+            }, 3000);
+        }
+
         return result;
     }
 
