@@ -88,6 +88,10 @@ async function updateXPDisplay(meritData) {
         const total = pbMerits + nostrMerits;
         _renderXPDisplay(total);
 
+        // Actualizar stat bar con total real
+        const statMeritsEl = document.getElementById('statMerits');
+        if (statMeritsEl) statMeritsEl.textContent = total;
+
         // Actualizar nivel de ciudadanía con el total real (PB + Nostr)
         if (typeof updateCitizenshipGauge === 'function') updateCitizenshipGauge(total);
         const citizenship = getCitizenshipLevel(total);
@@ -534,12 +538,10 @@ function updateProfileDisplay() {
     document.getElementById('statMerits').textContent = merits;
     document.getElementById('statContributions').textContent = totalContributions;
     
-    // Format member since
+    // Días activo desde la fecha de registro
     const regDate = new Date(userProfile.registrationDate);
-    const monthNames = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 
-                      'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic'];
-    document.getElementById('statMemberSince').textContent = 
-        `${monthNames[regDate.getMonth()]} ${regDate.getFullYear()}`;
+    const daysActive = Math.max(1, Math.floor((Date.now() - regDate.getTime()) / 86400000));
+    document.getElementById('statMemberSince').textContent = daysActive;
     
     // Update citizenship details (auto-calculated)
     document.getElementById('citizenshipType').textContent = `${citizenship.icon} Nv.${citizenship.level} — ${citizenship.title}`;
