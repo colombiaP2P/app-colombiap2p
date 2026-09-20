@@ -154,7 +154,25 @@ const LBW_NIP46 = (() => {
                 throw new Error('El bunker no devolvió una pubkey válida');
             }
 
-            _signer = signer;
+            // BunkerSigner.signEvent() llama verifyEvent() internamente y falla
+            // con Amber porque serializa el evento distinto a nostr-tools (whitespace,
+            // orden JSON). Solución: usar nuestro custom RPC signer para las ops
+            // post-connect, que no tiene ese check. BunkerSigner solo sirve para
+            // el handshake inicial (connect + getPublicKey).
+            const rpcSigner = _createCustomSigner(clientSk, bp.pubkey, bp.relays);
+            _signer = {
+                getPublicKey:  async () => userPubkey,
+                signEvent:     rpcSigner.signEvent.bind(rpcSigner),
+                nip04Encrypt:  rpcSigner.nip04Encrypt.bind(rpcSigner),
+                nip04Decrypt:  rpcSigner.nip04Decrypt.bind(rpcSigner),
+                nip44Encrypt:  rpcSigner.nip44Encrypt.bind(rpcSigner),
+                nip44Decrypt:  rpcSigner.nip44Decrypt.bind(rpcSigner),
+                ping:          rpcSigner.ping.bind(rpcSigner),
+                close: async () => {
+                    try { await signer.close(); } catch (_) {}
+                    await rpcSigner.close();
+                }
+            };
             _userPubkey = userPubkey;
             _bunkerPubkey = bp.pubkey;
             _relays = bp.relays.slice();
