@@ -274,10 +274,10 @@ async function generateInvoice() {
 
         showNotification('Generando invoice...');
 
-        // Conversión a sats (heurística: 1 EUR/USD ≈ 10k sats; TODO: tasa real)
-        const amountSats = currency === 'BTC'
-            ? Math.round(amount * 1e8)
-            : Math.round(amount * 10000);
+        // Conversión a sats
+        const amountSats = currency === 'SATS'
+            ? Math.round(amount)
+            : Math.round(amount * 10000); // USD heurístico
 
         let invoiceStr = null;
 
@@ -456,8 +456,8 @@ async function loadTransactions() {
             const txs = await window.LBW_NWC.listTransactions(20);
             renderTransactions(container, txs.map(t => ({
                 type: t.type === 'incoming' ? 'receive' : 'send',
-                amount: (t.amount || 0) / 1000 / 1e8, // msats → BTC
-                currency: 'BTC',
+                amount: Math.round((t.amount || 0) / 1000), // msats → sats
+                currency: 'SATS',
                 memo: t.description || t.description_hash || '(sin descripción)',
                 date: new Date((t.created_at || t.settled_at || Math.floor(Date.now() / 1000)) * 1000).toISOString(),
                 status: t.settled_at ? 'completed' : 'pending'
@@ -473,12 +473,12 @@ async function loadTransactions() {
     // Demo (Blink / WebLN)
     const demoTransactions = [
         {
-            type: 'receive', amount: 0.00010000, currency: 'BTC',
+            type: 'receive', amount: 10000, currency: 'SATS',
             memo: 'Pago por servicio',
             date: new Date(Date.now() - 3600000).toISOString(), status: 'completed'
         },
         {
-            type: 'send', amount: 0.00005000, currency: 'BTC',
+            type: 'send', amount: 5000, currency: 'SATS',
             memo: 'Compra en LiberBit',
             date: new Date(Date.now() - 7200000).toISOString(), status: 'completed'
         }
@@ -504,7 +504,7 @@ function renderTransactions(container, txs) {
                 </div>
                 <div style="text-align: right; white-space: nowrap;">
                     <div style="font-weight: 700; color: ${tx.type === 'receive' ? 'var(--color-success)' : 'var(--color-text-primary)'};">
-                        ${tx.type === 'receive' ? '+' : '-'}${Number(tx.amount).toFixed(8)} ${tx.currency}
+                        ${tx.type === 'receive' ? '+' : '-'}${Number(tx.amount).toLocaleString('es-CO')} ${tx.currency}
                     </div>
                     <div style="font-size: 0.75rem; color: var(--color-text-secondary);">
                         ${timeAgo(new Date(tx.date).getTime())}
