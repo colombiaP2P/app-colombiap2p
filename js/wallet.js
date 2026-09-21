@@ -279,18 +279,17 @@ async function generateInvoice() {
             ? Math.round(amount)
             : Math.round(amount * 10000); // USD heurístico
 
+        if (amountSats < 1) {
+            showNotification('El monto mínimo es 1 SAT', 'error');
+            return;
+        }
+
         let invoiceStr = null;
 
         // ── Vía 1: NWC (prioridad si conectado) ────────────────────────────
         if (walletData.type === 'nwc' && window.LBW_NWC && window.LBW_NWC.isConnected()) {
-            try {
-                const res = await window.LBW_NWC.makeInvoice(amountSats, memo);
-                invoiceStr = res.invoice;
-            } catch (err) {
-                console.warn('[Wallet] NWC make_invoice falló, probando fallback:', err.message);
-                showNotification('NWC: ' + err.message, 'error');
-                // continúa con fallbacks
-            }
+            const res = await window.LBW_NWC.makeInvoice(amountSats, memo);
+            invoiceStr = res.invoice;
         }
 
         // ── Vía 2: WebLN (Alby, Zeus, etc. en el navegador) ────────────────

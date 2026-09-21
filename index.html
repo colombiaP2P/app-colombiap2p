@@ -1235,9 +1235,9 @@
                 <h2 style="color: var(--color-gold); margin-bottom: 1rem; text-align: center;">📥 Recibir Pago</h2>
                 
                 <div style="background: var(--color-bg-dark); padding: 1.5rem; border-radius: 12px; margin-bottom: 1.5rem;">
-                    <label style="display: block; margin-bottom: 0.5rem; color: var(--color-text-secondary); font-size: 0.9rem;">Cantidad</label>
+                    <label style="display: block; margin-bottom: 0.5rem; color: var(--color-text-secondary); font-size: 0.9rem;">Cantidad (número entero de SATS)</label>
                     <div style="display: grid; grid-template-columns: 1fr auto; gap: 1rem;">
-                        <input type="number" id="receiveAmount" placeholder="0.00" style="width: 100%; padding: 0.75rem; background: var(--color-bg-card); border: 2px solid var(--color-border); border-radius: 8px; color: var(--color-text-primary); font-size: 1.2rem;">
+                        <input type="number" id="receiveAmount" placeholder="ej. 1000" min="1" step="1" style="width: 100%; padding: 0.75rem; background: var(--color-bg-card); border: 2px solid var(--color-border); border-radius: 8px; color: var(--color-text-primary); font-size: 1.2rem;">
                         <select id="receiveCurrency" style="padding: 0.75rem; background: var(--color-bg-card); border: 2px solid var(--color-border); border-radius: 8px; color: var(--color-text-primary);">
                             <option value="SATS">SATS</option>
                             <option value="USD">USD</option>
@@ -3235,7 +3235,7 @@
     <script src="js/c2p-rachas.js?v=11"></script>
     <script src="js/profile.js?v=c2p-20"></script>
     <script src="js/nwc.js?v=secA1-1"></script>
-    <script src="js/wallet.js?v=secA1-2"></script>
+    <script src="js/wallet.js?v=secA1-3"></script>
 
     <!-- Nostr Integration Layer: debe cargarse ANTES que los modulos UI que dependen de el -->
     <script src="js/nostr-store.js?v=phase1"></script>
