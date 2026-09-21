@@ -20,7 +20,7 @@ const LBW_Missions = (function () {
         financiada:      { emoji: '⏳', label: 'Financiada',      color: '#FFB74D', weight: '×0.6' }
     };
 
-    const MIN_CITIZENSHIP_TO_CREATE = 'Amigo';
+    const MIN_CITIZENSHIP_TO_CREATE = 'Fiatelo';
 
     // Pubkeys con permiso de aprobar/cancelar misiones independiente de méritos
     const ADMIN_PUBKEYS = [
@@ -111,7 +111,7 @@ const LBW_Missions = (function () {
             description: data.description.trim(),
             merit_category: data.merit_category,
             merit_amount: parseInt(data.merit_amount),
-            min_citizenship: data.min_citizenship || 'Amigo',
+            min_citizenship: data.min_citizenship || 'Fiatelo',
             deadline: data.deadline || null,
             delivery_instructions: data.delivery_instructions || '',
             status: _isGenesis() ? 'open' : 'pending_approval',
@@ -139,7 +139,7 @@ const LBW_Missions = (function () {
         if (mission.creator_pubkey === pubkey) throw new Error('No puedes reclamar tu propia misión.');
 
         // Check min citizenship
-        if (mission.min_citizenship && mission.min_citizenship !== 'Amigo') {
+        if (mission.min_citizenship && mission.min_citizenship !== 'Fiatelo') {
             const minMerits = _minMeritsForCitizenship(mission.min_citizenship);
             if (_myMerits() < minMerits) {
                 throw new Error(`Necesitas ser ${mission.min_citizenship} (${minMerits}+ méritos) para reclamar esta misión.`);
@@ -270,8 +270,7 @@ const LBW_Missions = (function () {
         }
         // Fallback si LBW_Merits no está disponible aún
         const map = {
-            'Amigo': 0, 'E-Residency': 100, 'Colaborador': 500,
-            'Ciudadano Senior': 1000, 'Custodio': 2000, 'Génesis': 3000
+            'Fiatelo': 0, 'Plebeyo': 50, 'Hodler': 100, 'Noder': 200, 'Bitcoiner': 400, 'Maximalist': 800, 'Satoshi': 1000, 'Génesis': 3000
         };
         return map[level] || 0;
     }
@@ -364,7 +363,7 @@ const LBW_Missions = (function () {
                     <div style="display:flex;gap:0.5rem;flex-wrap:wrap;align-items:center;">
                         <span style="font-size:0.72rem;background:rgba(229,185,92,0.12);color:var(--color-gold);padding:0.2rem 0.6rem;border-radius:12px;font-weight:700;border:1px solid rgba(229,185,92,0.25);">⭐ ${m.merit_amount} méritos ${cat.weight}</span>
                         <span style="font-size:0.72rem;background:rgba(255,255,255,0.06);color:var(--color-text-secondary);padding:0.2rem 0.6rem;border-radius:12px;">${cat.label}</span>
-                        ${m.min_citizenship && m.min_citizenship !== 'Amigo' ? `<span style="font-size:0.72rem;background:rgba(156,39,176,0.1);color:#CE93D8;padding:0.2rem 0.6rem;border-radius:12px;">min. ${m.min_citizenship}</span>` : ''}
+                        ${m.min_citizenship && m.min_citizenship !== 'Fiatelo' ? `<span style="font-size:0.72rem;background:rgba(156,39,176,0.1);color:#CE93D8;padding:0.2rem 0.6rem;border-radius:12px;">min. ${m.min_citizenship}</span>` : ''}
                         ${deadlineHtml}
                         <span style="font-size:0.7rem;color:${status.color};font-weight:600;">${status.emoji} ${status.text}</span>
                     </div>
@@ -462,7 +461,7 @@ const LBW_Missions = (function () {
                     </div>
                     <div style="padding:0.75rem;background:rgba(255,255,255,0.04);border-radius:10px;border:1px solid var(--color-border);">
                         <div style="font-size:0.7rem;color:var(--color-text-secondary);margin-bottom:0.2rem;">Requisito mínimo</div>
-                        <div style="font-size:0.95rem;font-weight:600;color:var(--color-text-primary);">${m.min_citizenship || 'Amigo'}</div>
+                        <div style="font-size:0.95rem;font-weight:600;color:var(--color-text-primary);">${m.min_citizenship || 'Fiatelo'}</div>
                         ${m.deadline ? `<div style="font-size:0.7rem;color:${days !== null && days < 3 ? '#FF5252' : 'var(--color-text-secondary)'};">📅 Deadline: ${_formatDate(m.deadline)}</div>` : ''}
                     </div>
                 </div>
@@ -482,7 +481,7 @@ const LBW_Missions = (function () {
 
         const cat = CATEGORY_META[m.merit_category] || CATEGORY_META.productiva;
         const deadlineStr = m.deadline ? `\n📅 Deadline: ${_formatDate(m.deadline)}` : '';
-        const reqStr = m.min_citizenship && m.min_citizenship !== 'Amigo' ? `\n🛂 Requiere: ${m.min_citizenship}` : '';
+        const reqStr = m.min_citizenship && m.min_citizenship !== 'Fiatelo' ? `\n🛂 Requiere: ${m.min_citizenship}` : '';
 
         const text = `🎯 MISIÓN COLOMBIAP2P\n\n${m.title}\n\n${m.description}\n\n${cat.emoji} Categoría: ${cat.label} ${cat.weight}\n⭐ Recompensa: ${m.merit_amount} méritos${reqStr}${deadlineStr}\n\n¿Puedes completarla? → colombiap2p.com\n\n#ColombiaP2P #Bitcoin #Lightning #Nostr`;
 
@@ -602,11 +601,13 @@ const LBW_Missions = (function () {
                     <div class="form-group">
                         <label style="display:block;margin-bottom:0.4rem;color:var(--color-gold);font-size:0.85rem;">Ciudadanía mínima</label>
                         <select id="missionMinCitizenship" style="width:100%;padding:0.7rem;background:var(--color-bg-dark);border:2px solid var(--color-border);border-radius:8px;color:var(--color-text-primary);">
-                            <option value="Amigo">👋 Amigo (cualquiera)</option>
-                            <option value="E-Residency">🪪 E-Residency (100+)</option>
-                            <option value="Colaborador">🤝 Colaborador (500+)</option>
-                            <option value="Ciudadano Senior">🛂 Ciudadano Senior (1000+)</option>
-                            <option value="Custodio">🌍 Custodio (2000+)</option>
+                            <option value="Fiatelo">😴 Fiatelo (cualquiera)</option>
+                            <option value="Plebeyo">👤 Plebeyo (50+)</option>
+                            <option value="Hodler">🫙 Hodler (100+)</option>
+                            <option value="Noder">⚡ Noder (200+)</option>
+                            <option value="Bitcoiner">₿ Bitcoiner (400+)</option>
+                            <option value="Maximalist">🔥 Maximalist (800+)</option>
+                            <option value="Satoshi">👑 Satoshi (1000+)</option>
                         </select>
                     </div>
                     <div class="form-group">
