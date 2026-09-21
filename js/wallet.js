@@ -274,10 +274,10 @@ async function generateInvoice() {
 
         showNotification('Generando invoice...');
 
-        // Conversión a sats
-        const amountSats = currency === 'SATS'
-            ? Math.round(amount)
-            : Math.round(amount * 10000); // USD heurístico
+        // Conversión a sats (SATS o BTC legacy → directo; USD → heurístico)
+        const amountSats = currency === 'USD'
+            ? Math.round(amount * 10000)
+            : Math.round(amount);
 
         if (amountSats < 1) {
             showNotification('El monto mínimo es 1 SAT', 'error');
