@@ -452,7 +452,7 @@ async function loadTransactions() {
     if (walletData.type === 'nwc' && window.LBW_NWC && window.LBW_NWC.isConnected()) {
         container.innerHTML = '<div style="text-align:center;padding:1.5rem;color:var(--color-text-secondary);">Cargando transacciones…</div>';
         try {
-            const txs = await window.LBW_NWC.listTransactions(20);
+            const txs = await window.LBW_NWC.listTransactions(5);
             renderTransactions(container, txs.map(t => ({
                 type: t.type === 'incoming' ? 'receive' : 'send',
                 amount: Math.round((t.amount || 0) / 1000), // msats → sats
@@ -482,7 +482,7 @@ async function loadTransactions() {
             date: new Date(Date.now() - 7200000).toISOString(), status: 'completed'
         }
     ];
-    renderTransactions(container, demoTransactions);
+    renderTransactions(container, demoTransactions.slice(0, 5));
 }
 
 function renderTransactions(container, txs) {
