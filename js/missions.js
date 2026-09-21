@@ -779,6 +779,7 @@ const LBW_Missions = (function () {
     // ── Init ──────────────────────────────────────────────────
     async function init() {
         await loadMissions();
+        renderMissionsTab();
         console.log(`✅ Missions loaded: ${_missions.length}`);
     }
 
