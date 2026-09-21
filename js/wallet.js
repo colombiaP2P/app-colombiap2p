@@ -8,7 +8,7 @@ let walletData = {
     type: null, // 'blink' | 'webln' | 'nwc'
     authToken: null,
     wallets: [],
-    currentCurrency: 'BTC',
+    currentCurrency: 'SATS',
     balance: {
         BTC: 0,
         USD: 0
@@ -178,7 +178,7 @@ function disconnectWallet() {
         type: null,
         authToken: null,
         wallets: [],
-        currentCurrency: 'BTC',
+        currentCurrency: 'SATS',
         balance: { BTC: 0, USD: 0 },
         nwcSummary: null
     };
@@ -206,7 +206,7 @@ function persistWallet() {
 
 function switchCurrency(currency) {
     walletData.currentCurrency = currency;
-    document.getElementById('currencyBTC').classList.toggle('active', currency === 'BTC');
+    document.getElementById('currencyBTC').classList.toggle('active', currency === 'SATS');
     document.getElementById('currencyUSD').classList.toggle('active', currency === 'USD');
     updateBalanceDisplay();
 }
@@ -216,14 +216,16 @@ function updateBalanceDisplay() {
     const balanceUSDEquiv = document.getElementById('balanceUSDEquiv');
     if (!balanceDisplay || !balanceUSDEquiv) return;
 
-    if (walletData.currentCurrency === 'BTC') {
-        balanceDisplay.textContent = walletData.balance.BTC.toFixed(8) + ' BTC';
+    const sats = Math.round(walletData.balance.BTC * 1e8);
+
+    if (walletData.currentCurrency === 'SATS' || walletData.currentCurrency === 'BTC') {
+        balanceDisplay.textContent = sats.toLocaleString('es-CO') + ' SATS';
         balanceUSDEquiv.textContent = walletData.balance.USD
             ? '≈ $' + walletData.balance.USD.toFixed(2) + ' USD'
-            : '≈ ' + Math.round(walletData.balance.BTC * 1e8).toLocaleString() + ' sats';
+            : '≈ ' + walletData.balance.BTC.toFixed(8) + ' BTC';
     } else {
         balanceDisplay.textContent = '$' + walletData.balance.USD.toFixed(2) + ' USD';
-        balanceUSDEquiv.textContent = '≈ ' + walletData.balance.BTC.toFixed(8) + ' BTC';
+        balanceUSDEquiv.textContent = '≈ ' + sats.toLocaleString('es-CO') + ' SATS';
     }
 }
 

@@ -1171,8 +1171,8 @@
 
                             <!-- Currency Switcher -->
                             <div style="display: flex; gap: 1rem; margin-bottom: 2rem;">
-                                <button id="currencyBTC" class="currency-btn active" onclick="switchCurrency('BTC')">
-                                    ⚡ BTC
+                                <button id="currencyBTC" class="currency-btn active" onclick="switchCurrency('SATS')">
+                                    ⚡ SATS
                                 </button>
                                 <button id="currencyUSD" class="currency-btn" onclick="switchCurrency('USD')">
                                     💵 USD
@@ -1183,7 +1183,7 @@
                             <div style="text-align: center; margin-bottom: 2rem;">
                                 <div style="font-size: 0.9rem; color: rgba(255,255,255,0.7); margin-bottom: 0.5rem;">Balance disponible</div>
                                 <div id="balanceDisplay" style="font-size: 3rem; font-weight: 700; color: white; margin-bottom: 0.5rem;">
-                                    0.00000000 BTC
+                                    0 SATS
                                 </div>
                                 <div id="balanceUSDEquiv" style="font-size: 1.2rem; color: rgba(255,255,255,0.8);">
                                     ≈ $0.00 USD
@@ -3235,7 +3235,7 @@
     <script src="js/c2p-rachas.js?v=11"></script>
     <script src="js/profile.js?v=c2p-20"></script>
     <script src="js/nwc.js?v=secA1-1"></script>
-    <script src="js/wallet.js?v=secA1-1"></script>
+    <script src="js/wallet.js?v=secA1-2"></script>
 
     <!-- Nostr Integration Layer: debe cargarse ANTES que los modulos UI que dependen de el -->
     <script src="js/nostr-store.js?v=phase1"></script>
