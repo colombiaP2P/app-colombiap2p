@@ -277,7 +277,8 @@ const LBW_Missions = (function () {
 
     // ── Rendering ─────────────────────────────────────────────
     function renderMissionsTab() {
-        const container = document.getElementById('c2p-merit-tab-misiones');
+        const container = document.getElementById('c2p-misiones-standalone') ||
+                          document.getElementById('c2p-merit-tab-misiones');
         if (!container) return;
 
         const pubkey = _myPubkey();

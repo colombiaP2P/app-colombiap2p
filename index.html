@@ -364,7 +364,7 @@
                     </div>
 
                     <!-- 3. Misiones -->
-                    <div class="app-card" onclick="openSubApp('merits'); setTimeout(()=>switchC2PMTab('misiones'),200);">
+                    <div class="app-card" onclick="openApp('misiones')">
                         <div class="app-icon">🎯</div>
                         <div class="app-name">Misiones</div>
                         <div class="app-description">Tareas y recompensas</div>
@@ -1918,7 +1918,7 @@
                     <div class="c2p-merit-tab" onclick="switchC2PMTab('info')" data-c2p-merit-tab="info">
                         ℹ️ Info
                     </div>
-                    <div class="c2p-merit-tab" onclick="switchC2PMTab('misiones')" data-c2p-merit-tab="misiones">
+                    <div class="c2p-merit-tab" onclick="openApp('misiones')" data-c2p-merit-tab="misiones">
                         🎯 Misiones <span id="tabBadgeMissions" style="display:none;background:var(--color-gold);color:#000;font-size:0.6rem;font-weight:700;min-width:16px;height:16px;border-radius:8px;padding:0 3px;display:inline-flex;align-items:center;justify-content:center;margin-left:0.25rem;"></span>
                     </div>
                     <div class="c2p-merit-tab" onclick="switchC2PMTab('ranking-pioneros')" data-c2p-merit-tab="ranking-pioneros">
@@ -2341,13 +2341,7 @@
                 <!-- ═══════════════════════════════════════════════ -->
                 <!-- Tab 9: MISIONES (Merit Bounties) -->
                 <!-- ═══════════════════════════════════════════════ -->
-                <div class="c2p-merit-tab-content" id="c2p-merit-tab-misiones">
-                    <!-- Populated dynamically by LBW_Missions.renderMissionsTab() -->
-                    <div style="text-align:center;padding:3rem 1rem;color:var(--color-text-secondary);">
-                        <div style="font-size:2.5rem;margin-bottom:0.75rem;">🎯</div>
-                        <p>Cargando misiones...</p>
-                    </div>
-                </div>
+                <div class="c2p-merit-tab-content" id="c2p-merit-tab-misiones"></div>
 
                 <!-- ═══════════════════════════════════════════════ -->
                 <!-- Tab: RANKING PIONEROS -->
@@ -2429,6 +2423,22 @@
 
             </div>
         </section>
+
+        <!-- ═══════════════════════════════════════════════════════ -->
+        <!-- SECCIÓN: MISIONES (standalone, sin header de Méritos)  -->
+        <!-- ═══════════════════════════════════════════════════════ -->
+        <section class="section" id="misionesSection">
+            <div class="chat-section">
+                <button class="back-btn" onclick="backToHome()">← Volver</button>
+                <div id="c2p-misiones-standalone">
+                    <div style="text-align:center;padding:3rem 1rem;color:var(--color-text-secondary);">
+                        <div style="font-size:2.5rem;margin-bottom:0.75rem;">🎯</div>
+                        <p>Cargando misiones...</p>
+                    </div>
+                </div>
+            </div>
+        </section>
+
         <div class="modal" id="contributionFormModal">
             <div class="modal-content" style="max-width: 800px; max-height: 90vh; overflow-y: auto; padding: 2rem;">
                 <button class="modal-close" onclick="closeContributionForm()">✕</button>
@@ -3255,7 +3265,7 @@
     <script src="js/debate.js?v=nip72-1"></script>
     <script src="js/avatar-fix.js?v=2"></script>
     <!-- Missions system (Merit Bounties) -->
-    <script src="js/missions.js?v=c2p-11"></script>
+    <script src="js/missions.js?v=c2p-12"></script>
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
             integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
             crossorigin=""></script>
@@ -3690,6 +3700,10 @@
                     // que el DOM ya se ha activado (showSection hace el toggle).
                     setTimeout(() => {
                         if (window.LBW_Transparency && LBW_Transparency.init) LBW_Transparency.init();
+                    }, 100);
+                } else if (app === 'misiones') {
+                    setTimeout(() => {
+                        if (window.LBW_Missions) LBW_Missions.init();
                     }, 100);
                 }
             };
