@@ -43,6 +43,8 @@ async function _fetchLNbitsData(lnbitsUrl, readKey) {
         const list = Array.isArray(raw) ? raw : (Array.isArray(raw?.data) ? raw.data : []);
         _debug.paymentsRaw = list.length;
         _debug.pendingValues = list.slice(0, 5).map(p => p.pending);
+        _debug.firstPaymentKeys = list.length > 0 ? Object.keys(list[0]) : [];
+        _debug.firstPayment = list.length > 0 ? list[0] : null;
         movements = list
             .filter(p => !p.pending)
             .map(p => {
