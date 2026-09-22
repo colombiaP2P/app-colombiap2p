@@ -74,7 +74,7 @@ async function _fetchLNbitsData(lnbitsUrl, readKey) {
 export default async function handler(req, res) {
     res.setHeader('Content-Type', 'application/json');
     res.setHeader('Access-Control-Allow-Origin', '*');
-    res.setHeader('Cache-Control', 's-maxage=60, stale-while-revalidate=300');
+    res.setHeader('Cache-Control', 'no-store');
 
     const forceRefresh = req.query.nocache === '1';
     if (!forceRefresh && _cache && Date.now() - _cacheAt < TTL_MS) {

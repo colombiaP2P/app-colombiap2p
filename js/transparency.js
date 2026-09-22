@@ -515,7 +515,8 @@ const LBW_Transparency = (() => {
         }
         try {
             // 1. Perfil público de coinos (lightning address, avatar, etc.)
-            const r = await fetch('/api/transparency/wallet', { cache: 'no-store' });
+            const url = force ? `/api/transparency/wallet?nocache=1&t=${Date.now()}` : '/api/transparency/wallet';
+            const r = await fetch(url, { cache: 'no-store' });
             const data = await r.json();
             if (!r.ok && data && !data.configured) {
                 _walletData = null;
@@ -905,6 +906,8 @@ const LBW_Transparency = (() => {
         _walletError = null;
         _zapsCache = null;
         _zapsCacheAt = 0;
+        // force=true para bypassear caché del servidor (nocache=1) y CDN (timestamp en URL)
+        _walletData = await _fetchWalletData(true);
         await renderWalletPanel();
     }
 
