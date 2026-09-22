@@ -143,7 +143,8 @@ async function payAportacionWithZap() {
             invoice: cbData.pr,
             amountSats,
             message,
-            senderPubkey
+            senderPubkey,
+            isZap: !!meta.allowsNostr
         });
 
     } catch (err) {
@@ -155,21 +156,30 @@ async function payAportacionWithZap() {
 }
 
 // Muestra el invoice resultante + QR + acciones (copiar, abrir wallet).
-function _showAportacionInvoice({ invoice, amountSats, message, senderPubkey }) {
+function _showAportacionInvoice({ invoice, amountSats, message, senderPubkey, isZap }) {
     const box = document.getElementById('aportacionInvoiceBox');
     if (!box) return;
     box.style.display = 'block';
     const npubShort = senderPubkey
         ? (senderPubkey.substring(0, 8) + '…' + senderPubkey.substring(senderPubkey.length - 4))
         : '—';
+    const escapedMsg = message ? message.replace(/[<>&"']/g, c => ({'<':'&lt;','>':'&gt;','&':'&amp;','"':'&quot;',"'":'&#39;'}[c])) : '';
+    const headerBadge = isZap
+        ? `<span style="font-size:0.7rem;background:rgba(206,147,216,0.2);color:#CE93D8;padding:0.25rem 0.6rem;border-radius:10px;border:1px solid rgba(206,147,216,0.4);font-weight:700;">⚡ ZAP NIP-57 FIRMADO</span>
+           <span style="font-size:0.78rem;color:var(--color-text-secondary);">como <strong style="color:#CE93D8;font-family:var(--font-mono);">${npubShort}</strong></span>`
+        : `<span style="font-size:0.7rem;background:rgba(255,152,0,0.15);color:#FFB74D;padding:0.25rem 0.6rem;border-radius:10px;border:1px solid rgba(255,152,0,0.4);font-weight:700;">⚡ INVOICE LIGHTNING</span>
+           <span style="font-size:0.78rem;color:var(--color-text-secondary);">sin atribución NIP-57</span>`;
+    const footerNote = isZap
+        ? `Cuando pagues este invoice, el nodo Lightning publicará un evento Nostr (kind:9735) firmado vinculando tu npub al pago.
+           Aparecerá automáticamente en <strong>Transparencia → Wallet</strong> con el badge <span style="color:#CE93D8;">⚡ zap</span>.`
+        : `Este invoice fue generado sin soporte NIP-57 (el proveedor no publicará un zap receipt). El pago llega igualmente a la tesorería.`;
     box.innerHTML = `
         <div style="background:linear-gradient(135deg,rgba(206,147,216,0.1),rgba(255,152,0,0.06));border:1px solid rgba(206,147,216,0.35);border-radius:14px;padding:1.25rem;margin-top:1rem;">
             <div style="display:flex;align-items:center;gap:0.5rem;margin-bottom:0.75rem;flex-wrap:wrap;">
-                <span style="font-size:0.7rem;background:rgba(206,147,216,0.2);color:#CE93D8;padding:0.25rem 0.6rem;border-radius:10px;border:1px solid rgba(206,147,216,0.4);font-weight:700;">⚡ ZAP NIP-57 FIRMADO</span>
-                <span style="font-size:0.78rem;color:var(--color-text-secondary);">como <strong style="color:#CE93D8;font-family:var(--font-mono);">${npubShort}</strong></span>
+                ${headerBadge}
             </div>
             <div style="font-size:1.6rem;font-weight:800;color:#FFB74D;margin-bottom:0.5rem;">${amountSats.toLocaleString('es-ES')} sats</div>
-            ${message ? `<div style="font-size:0.85rem;color:var(--color-text-secondary);font-style:italic;margin-bottom:0.75rem;">"${message.replace(/[<>&"']/g, c => ({'<':'&lt;','>':'&gt;','&':'&amp;','"':'&quot;',"'":'&#39;'}[c]))}"</div>` : ''}
+            ${escapedMsg ? `<div style="font-size:0.85rem;color:var(--color-text-secondary);font-style:italic;margin-bottom:0.75rem;">"${escapedMsg}"</div>` : ''}
 
             <div id="aportacionInvoiceQr" style="background:white;padding:0.75rem;border-radius:10px;display:inline-block;margin:0.5rem 0;"></div>
 
@@ -180,8 +190,7 @@ function _showAportacionInvoice({ invoice, amountSats, message, senderPubkey }) 
             </div>
 
             <div style="margin-top:0.85rem;font-size:0.72rem;color:var(--color-text-secondary);line-height:1.5;">
-                Cuando pagues este invoice, el nodo Lightning publicará un evento Nostr (kind:9735) firmado vinculando tu npub al pago.
-                Aparecerá automáticamente en <strong>Transparencia → Wallet</strong> con el badge <span style="color:#CE93D8;">⚡ zap</span>.
+                ${footerNote}
             </div>
         </div>
     `;

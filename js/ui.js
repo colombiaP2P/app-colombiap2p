@@ -399,6 +399,7 @@ async function openApp(appName) {
     } else if (appName === 'aportacionEconomica') {
         showSection('aportacionEconomicaSection');
         setTimeout(generateLnQR, 100);
+        if (typeof _updateZapButtonVisibility === 'function') _updateZapButtonVisibility();
     } else if (appName === 'eventos') {
         showSection('eventosSection');
         if (typeof C2P_Eventos !== 'undefined') C2P_Eventos.init();
