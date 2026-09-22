@@ -13,7 +13,7 @@ const C2P_LN_ADDRESS   = 'colombiap2p@colsats.com';
 const C2P_LNURL_PUBLIC = 'https://colsats.com/.well-known/lnurlp/colombiap2p';
 const C2P_PUBLIC_URL   = 'https://colsats.com';
 
-const TTL_MS = 60_000; // 1 min cache
+const TTL_MS = 30_000; // 30 s cache
 let _cache = null;
 let _cacheAt = 0;
 
@@ -37,16 +37,22 @@ async function _fetchLNbitsData(lnbitsUrl, readKey) {
         const raw = await paymentsRes.value.json();
         const list = Array.isArray(raw) ? raw : (raw.data || []);
         movements = list
-            .filter(p => p.pending === false)
-            .map(p => ({
-                type:    p.amount > 0 ? 'in' : 'out',
-                amount:  Math.abs(Math.floor(p.amount / 1000)),
-                memo:    p.memo || '',
-                time:    p.time ? p.time * 1000 : Date.now(),
-                payment_hash: p.payment_hash || '',
-                bolt11:  p.bolt11 || '',
-                extra:   p.extra || {},
-            }));
+            .filter(p => !p.pending)
+            .map(p => {
+                const tsMs = p.time
+                    ? p.time * 1000
+                    : (p.created_at ? new Date(p.created_at).getTime() : Date.now());
+                return {
+                    type:   p.amount > 0 ? 'in' : 'out',
+                    amount: Math.abs(Math.floor(p.amount / 1000)),
+                    memo:   p.memo || p.description || '',
+                    time:   tsMs,
+                    ts:     tsMs,   // alias usado por el frontend para ordenar
+                    payment_hash: p.payment_hash || '',
+                    bolt11: p.bolt11 || '',
+                    extra:  p.extra || {},
+                };
+            });
     }
 
     return { balance, movements, authNotSupported: balance === null };
