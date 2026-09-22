@@ -527,8 +527,9 @@ const LBW_Transparency = (() => {
             //    Los emparejamos por amount+ts con cada movimiento entrante
             //    para mostrar la pubkey verificable del donante.
             try {
-                if (data.pubkey && Array.isArray(data.movements) && data.movements.length > 0) {
-                    const zaps = await _fetchZapsForTreasury(data.pubkey, false);
+                const _treasuryPubkey = data.pubkey || data.lnurlp?.nostrPubkey || '';
+                if (_treasuryPubkey && Array.isArray(data.movements) && data.movements.length > 0) {
+                    const zaps = await _fetchZapsForTreasury(_treasuryPubkey, false);
                     if (zaps.length > 0) {
                         data.movements = _matchMovementsWithZaps(data.movements, zaps);
                         data.zapsFound = zaps.length;
@@ -732,8 +733,14 @@ const LBW_Transparency = (() => {
         const pageEnd = pageStart + WALLET_PAGE_SIZE;
         const pageRows = movs.slice(pageStart, pageEnd);
 
-        // Admin: Génesis logueado puede emitir méritos desde aquí
-        const _isAdminWallet = typeof getUnifiedMerits === 'function' && !!getUnifiedMerits().isGovernor;
+        // Admin: Génesis (≥3.000 méritos) o admin conocido puede emitir méritos desde aquí
+        const _C2P_ADMINS = [
+            '2479ef8e78d635cb40054f1e1a3895b13d67b36b2326b2a1d68df7b989b4cac0',
+            '51cfd8f59cd6c8e7699e5b8e3cfed94967c780939877f78e16da995107f432b9',
+        ];
+        const _myPubkeyForAdmin = typeof LBW_Nostr !== 'undefined' && LBW_Nostr.getPubkey ? LBW_Nostr.getPubkey() : null;
+        const _isAdminWallet = (typeof getUnifiedMerits === 'function' && !!getUnifiedMerits().isGovernor)
+            || (_myPubkeyForAdmin && _C2P_ADMINS.includes(_myPubkeyForAdmin));
         let _awardedZaps = [];
         try { _awardedZaps = JSON.parse(localStorage.getItem('c2p_awarded_zaps') || '[]'); } catch (_e) {}
 
@@ -1110,8 +1117,15 @@ const LBW_Transparency = (() => {
         try { awarded = JSON.parse(localStorage.getItem('c2p_awarded_zaps') || '[]'); } catch (_e) {}
         if (awarded.includes(zapKey)) { showNotification('Ya se emitieron méritos para este zap.', 'info'); return; }
 
-        if (typeof getUnifiedMerits === 'undefined' || !getUnifiedMerits().isGovernor) {
-            showNotification('Solo Génesis (≥3.000 méritos) pueden emitir méritos.', 'error');
+        const _adminPks = [
+            '2479ef8e78d635cb40054f1e1a3895b13d67b36b2326b2a1d68df7b989b4cac0',
+            '51cfd8f59cd6c8e7699e5b8e3cfed94967c780939877f78e16da995107f432b9',
+        ];
+        const _callerPk = typeof LBW_Nostr !== 'undefined' && LBW_Nostr.getPubkey ? LBW_Nostr.getPubkey() : null;
+        const _isAuth = (typeof getUnifiedMerits !== 'undefined' && getUnifiedMerits().isGovernor)
+            || (_callerPk && _adminPks.includes(_callerPk));
+        if (!_isAuth) {
+            showNotification('Solo Génesis (≥3.000 méritos) o admins pueden emitir méritos.', 'error');
             return;
         }
         if (typeof LBW_Merits === 'undefined' || !LBW_Merits.awardMerit) {

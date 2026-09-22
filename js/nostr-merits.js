@@ -321,9 +321,13 @@ const LBW_Merits = (() => {
 
         const pubkey = LBW_Nostr.getPubkey();
         
-        // [v2.1] CRITICAL FIX: Verify caller is a Génesis (≥3000 merits)
+        // [v2.1] CRITICAL FIX: Verify caller is a Génesis (≥3000 merits) or known admin
         // Exception: Bootstrap awards (category 'fundacional') can be self-awarded for initial setup
-        if (category !== 'fundacional') {
+        const _C2P_ADMIN_PUBKEYS = [
+            '2479ef8e78d635cb40054f1e1a3895b13d67b36b2326b2a1d68df7b989b4cac0',
+            '51cfd8f59cd6c8e7699e5b8e3cfed94967c780939877f78e16da995107f432b9',
+        ];
+        if (category !== 'fundacional' && !_C2P_ADMIN_PUBKEYS.includes(pubkey)) {
             const callerData = _merits.get(pubkey);
             const callerTotal = callerData ? callerData.total : 0;
             if (callerTotal < 3000) {

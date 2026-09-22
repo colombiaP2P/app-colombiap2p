@@ -123,10 +123,8 @@ export default async function handler(req, res) {
                 result.txCount          = lnbits.txCount;
                 result.authNotSupported = lnbits.authNotSupported;
                 result._debug           = lnbits._debug;
-                // Leer nostrPubkey del wallet si LNURL no lo devolvió
-                if (!result.lnurlp?.nostrPubkey && lnbitsUrl) {
-                    result.pubkey = lnurlData?.nostrPubkey || '';
-                }
+                // Siempre exponer el nostrPubkey para que el cliente pueda buscar zap receipts (NIP-57)
+                result.pubkey = result.lnurlp?.nostrPubkey || lnurlData?.nostrPubkey || '';
             } catch (e) {
                 console.warn('[C2P Treasury] LNbits API falló:', e.message);
             }
