@@ -73,8 +73,7 @@ function generateLnQR() {
 //    firmar con LBW_Nostr.signEvent (ext / nsec / bunker).
 // 3. GET callback?amount=<msats>&nostr=<event-json>&comment=<msg>
 //    Devuelve { pr: "lnbc..." } — invoice BOLT11.
-// 4. Mostrar invoice + QR. Usuario paga desde su wallet → coinos
-//    publica kind:9735 → cadena de transparencia muestra atribución.
+// 4. Mostrar invoice + QR. Suscribir kind:9735 para auto-detectar pago.
 async function payAportacionWithZap() {
     const amountSats = parseInt(document.getElementById('customSatsAmount').value, 10);
     const message = (document.getElementById('aportacionMessage') || {}).value || '';
@@ -107,25 +106,27 @@ async function payAportacionWithZap() {
         // 2. Intentar zap NIP-57 si el proveedor lo soporta; si no, invoice normal
         let callbackUrl = meta.callback + '?amount=' + amountMsats;
         let senderPubkey = LBW_Nostr.getPubkey ? LBW_Nostr.getPubkey() : '';
+        let zapRequestId = null;
+        let zapRelays = [];
 
         if (meta.allowsNostr) {
-            let relays = [];
-            try { relays = (LBW_Nostr.getReadRelays && LBW_Nostr.getReadRelays()) || []; } catch (_) {}
-            if (relays.length === 0) relays = ['wss://relay.damus.io', 'wss://nos.lol', 'wss://relay.colombiap2p.com'];
-            relays = relays.slice(0, 8);
+            try { zapRelays = (LBW_Nostr.getReadRelays && LBW_Nostr.getReadRelays()) || []; } catch (_) {}
+            if (zapRelays.length === 0) zapRelays = ['wss://relay.damus.io', 'wss://nos.lol', 'wss://relay.colombiap2p.com'];
+            zapRelays = zapRelays.slice(0, 8);
 
             const zapReqTemplate = {
                 kind: 9734,
                 created_at: Math.floor(Date.now() / 1000),
                 content: (message || '').substring(0, 280),
                 tags: [
-                    ['relays', ...relays],
+                    ['relays', ...zapRelays],
                     ['amount', String(amountMsats)],
                     ['p', meta.nostrPubkey || '']
                 ]
             };
             const signed = await LBW_Nostr.signEvent(zapReqTemplate);
             senderPubkey = signed.pubkey;
+            zapRequestId = signed.id;
             callbackUrl += '&nostr=' + encodeURIComponent(JSON.stringify(signed));
         }
 
@@ -138,14 +139,19 @@ async function payAportacionWithZap() {
         if (cbData.status === 'ERROR') throw new Error(cbData.reason || 'Error LNURLP');
         if (!cbData.pr) throw new Error('Callback no devolvió invoice (pr)');
 
-        // 4. Render invoice
-        _showAportacionInvoice({
-            invoice: cbData.pr,
-            amountSats,
-            message,
-            senderPubkey,
-            isZap: !!meta.allowsNostr
-        });
+        // 4. Render invoice + iniciar escucha de zap receipt
+        const isZap = !!meta.allowsNostr;
+        _showAportacionInvoice({ invoice: cbData.pr, amountSats, message, senderPubkey, isZap });
+        if (isZap && zapRequestId) {
+            _listenForZapReceipt({
+                zapRequestId,
+                zapRelays,
+                invoice: cbData.pr,
+                nostrPubkey: meta.nostrPubkey || '',
+                amountSats,
+                senderPubkey
+            });
+        }
 
     } catch (err) {
         console.warn('[Lightning] zap aportación falló:', err);
@@ -153,6 +159,77 @@ async function payAportacionWithZap() {
     } finally {
         if (btn) { btn.disabled = false; btn.innerHTML = '⚡ Firmar y pagar como zap (auto-atribución)'; }
     }
+}
+
+// Suscribe a kind:9735 para detectar el zap receipt automáticamente.
+// Cuando llega, muestra el estado de éxito sin que el usuario haga nada.
+function _listenForZapReceipt({ zapRequestId, zapRelays, invoice, nostrPubkey, amountSats, senderPubkey }) {
+    if (typeof LBW_Nostr === 'undefined' || !LBW_Nostr.subscribe) return;
+
+    // Cancelar escucha anterior si existe
+    if (window._c2pZapReceiptSub) {
+        try { LBW_Nostr.unsubscribe(window._c2pZapReceiptSub); } catch (_) {}
+    }
+    if (window._c2pZapReceiptTimeout) clearTimeout(window._c2pZapReceiptTimeout);
+
+    const since = Math.floor(Date.now() / 1000) - 30;
+    const sub = LBW_Nostr.subscribe(
+        [{ kinds: [9735], '#p': [nostrPubkey], since }],
+        (event) => {
+            const bolt11Tag = event.tags.find(t => t[0] === 'bolt11');
+            const eTag = event.tags.find(t => t[0] === 'e');
+            const matches = (bolt11Tag && bolt11Tag[1] === invoice) ||
+                            (eTag && eTag[1] === zapRequestId);
+            if (!matches) return;
+            clearTimeout(window._c2pZapReceiptTimeout);
+            try { LBW_Nostr.unsubscribe(sub); } catch (_) {}
+            window._c2pZapReceiptSub = null;
+            _showAportacionSuccess({ amountSats, senderPubkey, isAutoDetected: true });
+        },
+        null,
+        zapRelays
+    );
+    window._c2pZapReceiptSub = sub;
+    // Auto-cancelar tras 5 minutos
+    window._c2pZapReceiptTimeout = setTimeout(() => {
+        try { LBW_Nostr.unsubscribe(sub); } catch (_) {}
+        window._c2pZapReceiptSub = null;
+    }, 300000);
+}
+
+// Muestra el estado de éxito tras la confirmación del pago.
+function _showAportacionSuccess({ amountSats, senderPubkey, isAutoDetected }) {
+    const box = document.getElementById('aportacionInvoiceBox');
+    if (!box) return;
+    const npubShort = senderPubkey
+        ? (senderPubkey.substring(0, 8) + '…' + senderPubkey.substring(senderPubkey.length - 4))
+        : '';
+    const detectionNote = isAutoDetected
+        ? '✅ Zap receipt (kind:9735) recibido desde los relays.'
+        : '✅ Pago confirmado por el usuario.';
+    box.innerHTML = `
+        <div style="background:linear-gradient(135deg,rgba(76,175,80,0.12),rgba(255,152,0,0.06));border:2px solid rgba(76,175,80,0.5);border-radius:14px;padding:1.5rem;margin-top:1rem;text-align:center;">
+            <div style="font-size:2.5rem;margin-bottom:0.5rem;">🧡</div>
+            <div style="font-size:1.4rem;font-weight:800;color:#81C784;margin-bottom:0.25rem;">¡Aportación recibida!</div>
+            <div style="font-size:1.1rem;font-weight:700;color:#FFB74D;margin-bottom:1rem;">${amountSats.toLocaleString('es-ES')} sats</div>
+            ${npubShort ? `<div style="font-size:0.78rem;color:var(--color-text-secondary);margin-bottom:0.75rem;">desde <strong style="color:#CE93D8;font-family:var(--font-mono);">${npubShort}</strong></div>` : ''}
+            <div style="font-size:0.72rem;color:var(--color-text-secondary);margin-bottom:1.25rem;">${detectionNote}</div>
+
+            <div style="background:rgba(255,152,0,0.08);border:1px solid rgba(255,152,0,0.25);border-radius:10px;padding:1rem;margin-bottom:1.25rem;text-align:left;">
+                <div style="font-size:0.82rem;font-weight:700;color:#FFB74D;margin-bottom:0.5rem;">¿Cuándo recibo mis Méritos?</div>
+                <div style="font-size:0.8rem;color:var(--color-text-secondary);line-height:1.6;">
+                    El equipo ColombiaP2P verifica los zaps recibidos y emite los <strong style="color:var(--color-text-primary);">Méritos con peso 1.0×</strong> a tu npub en un plazo de <strong style="color:var(--color-text-primary);">24 horas</strong>.<br>
+                    Podrás verlos en tu sección <strong>Méritos</strong> y en <strong>Transparencia → Wallet</strong> con el badge ⚡ zap.
+                </div>
+            </div>
+
+            <div style="display:flex;gap:0.75rem;justify-content:center;flex-wrap:wrap;">
+                <button onclick="openApp('transparencia')" style="padding:0.75rem 1.25rem;background:linear-gradient(135deg,#FF9800,#F57C00);border:none;border-radius:10px;color:white;font-weight:700;cursor:pointer;font-size:0.9rem;">Ver Transparencia →</button>
+                <button onclick="document.getElementById('aportacionInvoiceBox').style.display='none'" style="padding:0.75rem 1.25rem;background:transparent;border:1px solid var(--color-border);border-radius:10px;color:var(--color-text-secondary);font-weight:600;cursor:pointer;font-size:0.85rem;">Cerrar</button>
+            </div>
+        </div>
+    `;
+    if (isAutoDetected) showNotification('¡Zap confirmado! Gracias por tu aportación 🧡', 'success');
 }
 
 // Muestra el invoice resultante + QR + acciones (copiar, abrir wallet).
@@ -173,6 +250,7 @@ function _showAportacionInvoice({ invoice, amountSats, message, senderPubkey, is
         ? `Cuando pagues este invoice, el nodo Lightning publicará un evento Nostr (kind:9735) firmado vinculando tu npub al pago.
            Aparecerá automáticamente en <strong>Transparencia → Wallet</strong> con el badge <span style="color:#CE93D8;">⚡ zap</span>.`
         : `Este invoice fue generado sin soporte NIP-57 (el proveedor no publicará un zap receipt). El pago llega igualmente a la tesorería.`;
+    const senderPubkeyAttr = JSON.stringify(senderPubkey).replace(/"/g, '&quot;');
     box.innerHTML = `
         <div style="background:linear-gradient(135deg,rgba(206,147,216,0.1),rgba(255,152,0,0.06));border:1px solid rgba(206,147,216,0.35);border-radius:14px;padding:1.25rem;margin-top:1rem;">
             <div style="display:flex;align-items:center;gap:0.5rem;margin-bottom:0.75rem;flex-wrap:wrap;">
@@ -186,10 +264,17 @@ function _showAportacionInvoice({ invoice, amountSats, message, senderPubkey, is
             <div style="margin-top:0.75rem;display:flex;gap:0.5rem;flex-wrap:wrap;">
                 <button onclick="window.open('lightning:${invoice}','_blank'); showNotification('Abriendo wallet…','info');" style="padding:0.7rem 1rem;background:linear-gradient(135deg,#FF9800,#F57C00);border:none;border-radius:10px;color:white;font-weight:700;cursor:pointer;font-size:0.9rem;">⚡ Abrir wallet</button>
                 <button onclick="navigator.clipboard.writeText('${invoice}').then(()=>showNotification('Invoice copiado','success'))" style="padding:0.7rem 1rem;background:transparent;border:1px solid var(--color-border);border-radius:10px;color:var(--color-text-primary);font-weight:600;cursor:pointer;font-size:0.85rem;">📋 Copiar invoice</button>
-                <button onclick="document.getElementById('aportacionInvoiceBox').style.display='none'" style="padding:0.7rem 1rem;background:transparent;border:1px solid var(--color-border);border-radius:10px;color:var(--color-text-secondary);font-weight:600;cursor:pointer;font-size:0.85rem;">✕ Cerrar</button>
             </div>
 
-            <div style="margin-top:0.85rem;font-size:0.72rem;color:var(--color-text-secondary);line-height:1.5;">
+            <div id="aportacionPayStatus" style="margin-top:1rem;padding:0.75rem 1rem;background:rgba(255,152,0,0.06);border:1px solid rgba(255,152,0,0.2);border-radius:10px;display:flex;align-items:center;justify-content:space-between;gap:0.75rem;flex-wrap:wrap;">
+                <span style="font-size:0.8rem;color:var(--color-text-secondary);">
+                    <span id="aportacionPayStatusDot" style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#FF9800;margin-right:0.4rem;vertical-align:middle;"></span>
+                    <span id="aportacionPayStatusText">Esperando confirmación del pago…</span>
+                </span>
+                <button onclick="_showAportacionSuccess({amountSats:${amountSats},senderPubkey:${senderPubkeyAttr},isAutoDetected:false})" style="padding:0.5rem 1rem;background:linear-gradient(135deg,#4CAF50,#388E3C);border:none;border-radius:8px;color:white;font-weight:700;cursor:pointer;font-size:0.82rem;white-space:nowrap;">✓ Ya pagué</button>
+            </div>
+
+            <div style="margin-top:0.75rem;font-size:0.72rem;color:var(--color-text-secondary);line-height:1.5;">
                 ${footerNote}
             </div>
         </div>
