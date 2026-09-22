@@ -623,7 +623,9 @@ const LBW_Transparency = (() => {
         const WINDOW_SECS = 600;
         return movements.map(m => {
             if (m.type !== 'in') return m;
-            const matches = zaps.filter(z => z.sats === m.amount && Math.abs(z.ts - m.ts) < WINDOW_SECS);
+            // m.ts está en ms (LNbits), z.ts está en segundos (Nostr event.created_at)
+            const mSecs = m.ts > 1e12 ? Math.floor(m.ts / 1000) : m.ts;
+            const matches = zaps.filter(z => z.sats === m.amount && Math.abs(z.ts - mSecs) < WINDOW_SECS);
             if (matches.length === 0) return m;
             const best = matches.reduce((a, b) =>
                 Math.abs(a.ts - m.ts) < Math.abs(b.ts - m.ts) ? a : b
