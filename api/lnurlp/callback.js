@@ -1,8 +1,7 @@
 // [C2P FASE 9] Proxy callback LNURLP → colsats.com
-// Recibe la petición del navegador y la reenvía al callback real de colsats.com.
-// El callback original viene de _upstream_callback en la respuesta del well-known.
+// Obtiene el callback real desde el well-known de Colsats (evita URL hardcodeada).
 
-const C2P_LN_CALLBACK = 'https://colsats.com/lnurlp/colombiap2p/callback';
+const C2P_LN_WELLKNOWN = 'https://colsats.com/.well-known/lnurlp/colombiap2p';
 
 export default async function handler(req, res) {
   res.setHeader('Content-Type', 'application/json');
@@ -12,13 +11,26 @@ export default async function handler(req, res) {
   if (req.method === 'OPTIONS') return res.status(200).end();
 
   try {
+    // Obtener el callback real desde el well-known
+    const metaRes = await fetch(C2P_LN_WELLKNOWN, {
+      headers: { 'Accept': 'application/json' },
+      signal: AbortSignal.timeout(8000),
+    });
+    if (!metaRes.ok) {
+      return res.status(502).json({ error: 'No se pudo leer well-known de Colsats (' + metaRes.status + ')' });
+    }
+    const meta = await metaRes.json();
+    if (!meta.callback) {
+      return res.status(502).json({ error: 'Colsats no devolvió callback en well-known' });
+    }
+
+    // Reenviar todos los query params al callback real
     const queryString = new URLSearchParams(req.query).toString();
-    const upstreamUrl = `${C2P_LN_CALLBACK}?${queryString}`;
+    const upstreamUrl = `${meta.callback}?${queryString}`;
 
     const response = await fetch(upstreamUrl, {
       headers: { 'Accept': 'application/json' },
       signal: AbortSignal.timeout(10000),
-      redirect: 'error',
     });
 
     if (!response.ok) {
