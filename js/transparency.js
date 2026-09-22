@@ -17,7 +17,7 @@
 const LBW_Transparency = (() => {
     'use strict';
 
-    let _currentTab = 'merits';
+    let _currentTab = 'wallet';
     let _meritFilter = { category: '', search: '' };
     let _showAllUsers = false;
     const USERS_TOP_DEFAULT = 10;
@@ -498,16 +498,12 @@ const LBW_Transparency = (() => {
 
             <div style="margin-top:1.5rem;"></div>
             ${myActivityHtml}
-            ${_renderUsersLeaderboardHtml(supa && supa.users)}
+            ${_renderUsersLeaderboardHtml(null)}
         `;
 
         // Resolver nombres async
         const uniquePubkeys = new Set();
         filtered.forEach(m => { if (m.issuer) uniquePubkeys.add(m.issuer); if (m.recipient) uniquePubkeys.add(m.recipient); });
-        // También resuelve nombres de los usuarios del leaderboard
-        if (supa && Array.isArray(supa.users)) {
-            supa.users.forEach(u => { if (u.pubkey) uniquePubkeys.add(u.pubkey); });
-        }
         for (const pk of uniquePubkeys) {
             _resolveNameInto(pk, `[data-pubkey-slot="${pk}"]`);
         }
@@ -1011,8 +1007,7 @@ const LBW_Transparency = (() => {
 
     // Punto de entrada cuando se abre la sección
     function init() {
-        _ensureMeritsSubscription();
-        switchTab(_currentTab);
+        renderWalletPanel();
     }
 
     async function refreshMerits() {
@@ -1030,11 +1025,8 @@ const LBW_Transparency = (() => {
     // (categoría + búsqueda) que están aplicados en la vista. Incluye
     // tanto emisiones formales como eventos de actividad.
     async function exportMeritsCSV() {
-        const supa = await _fetchSupabaseLedger(false);
         const activity = await _fetchActivityEvents(false);
-        const formal = (supa && Array.isArray(supa.entries))
-            ? supa.entries
-            : (LBW_Merits && LBW_Merits.getAllMerits ? LBW_Merits.getAllMerits({ limit: 9999 }) : []);
+        const formal = LBW_Merits && LBW_Merits.getAllMerits ? LBW_Merits.getAllMerits({ limit: 9999 }) : [];
         const seen = new Set();
         let entries = [];
         for (const e of formal)   { if (e && e.id && !seen.has(e.id)) { seen.add(e.id); entries.push(e); } }

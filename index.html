@@ -1477,35 +1477,13 @@
             <div class="chat-section" style="max-width:900px;">
                 <button class="back-btn" onclick="backToMenu()">← Volver al Menú</button>
 
-                <h2 style="color: var(--color-gold); margin-bottom: 0.5rem;">🔍 Transparencia</h2>
+                <h2 style="color: var(--color-gold); margin-bottom: 0.5rem;">₿ Tesorería</h2>
                 <p style="color: var(--color-text-secondary); margin-bottom: 1.5rem; font-size: 0.9rem;">
-                    Transparencia total de ColombiaP2P: méritos emitidos y movimientos de la tesorería comunitaria.
+                    Balance y movimientos de la wallet comunitaria de ColombiaP2P.
                 </p>
 
-                <!-- Tabs -->
-                <div style="display:flex;gap:0.5rem;margin-bottom:1.25rem;border-bottom:1px solid var(--color-border);padding-bottom:0;">
-                    <button data-tx-tab="merits" onclick="LBW_Transparency.switchTab('merits')"
-                        style="flex:1;padding:0.7rem;background:rgba(229,185,92,0.15);border:1px solid var(--color-gold);border-bottom:none;border-radius:8px 8px 0 0;color:var(--color-gold);font-weight:700;cursor:pointer;font-size:0.85rem;">
-                        🏅 Méritos
-                    </button>
-                    <button data-tx-tab="wallet" onclick="LBW_Transparency.switchTab('wallet')"
-                        style="flex:1;padding:0.7rem;background:transparent;border:1px solid var(--color-border);border-bottom:none;border-radius:8px 8px 0 0;color:var(--color-text-secondary);cursor:pointer;font-size:0.85rem;">
-                        ₿ Tesorería
-                    </button>
-                    <button data-tx-tab="xp" onclick="C2P_Treasury.showXP()"
-                        style="flex:1;padding:0.7rem;background:transparent;border:1px solid var(--color-border);border-bottom:none;border-radius:8px 8px 0 0;color:var(--color-text-secondary);cursor:pointer;font-size:0.85rem;">
-                        🎮 Méritos
-                    </button>
-                </div>
-
-                <!-- Panels -->
-                <div id="transparencyMeritsPanel"></div>
-                <div id="transparencyWalletPanel" style="display:none;"></div>
-                <div id="transparencyXpPanel" style="display:none;">
-                    <div id="c2pXpTransactions">
-                        <p class="c2p-empty-state" style="padding:2rem;">Cargando historial de méritos...</p>
-                    </div>
-                </div>
+                <!-- Panel tesorería -->
+                <div id="transparencyWalletPanel"></div>
             </div>
         </section>
 
@@ -3249,8 +3227,8 @@
     <script src="js/delegations-ui.js?v=apr17a"></script>
     <script src="js/nostr-merits.js?v=transparency-4"></script>
     <!-- Sección Transparencia: méritos + treasury -->
-    <script src="js/transparency.js?v=c2p-13"></script>
-    <script src="js/c2p-treasury.js?v=3"></script>
+    <script src="js/transparency.js?v=c2p-14"></script>
+    <script src="js/c2p-treasury.js?v=4"></script>
     <script src="js/c2p-stats.js?v=2"></script>
     <!-- merits.js cargado DESPUÉS de nostr-merits.js ya que depende de LBW_Merits -->
     <script src="js/merits.js?v=c2p-8"></script>

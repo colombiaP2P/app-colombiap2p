@@ -1,5 +1,5 @@
 // ColombiaP2P — Módulo Tesorería (FASE 11)
-// Maneja el tab Méritos en Transparencia y helpers de tesorería.
+// El historial XP del usuario está disponible en la sección Perfil.
 
 const C2P_Treasury = (function () {
 
@@ -27,21 +27,24 @@ const C2P_Treasury = (function () {
         return d.toLocaleDateString('es-CO', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit', timeZone: 'America/Bogota' });
     }
 
-    // ── Tab XP — historial de transacciones ──────────────────
-    async function showXP() {
-        // Manejar tabs activos
-        document.querySelectorAll('[data-tx-tab]').forEach(btn => {
-            const isXP = btn.dataset.txTab === 'xp';
-            btn.style.background    = isXP ? 'rgba(247,147,26,0.15)' : 'transparent';
-            btn.style.color         = isXP ? 'var(--color-bitcoin)' : 'var(--color-text-secondary)';
-            btn.style.borderColor   = isXP ? 'var(--color-bitcoin)' : 'var(--color-border)';
-            btn.style.fontWeight    = isXP ? '700' : '400';
-        });
-        document.getElementById('transparencyMeritsPanel').style.display = 'none';
-        document.getElementById('transparencyWalletPanel').style.display = 'none';
-        document.getElementById('transparencyXpPanel').style.display    = 'block';
+    function _renderXpRow(r) {
+        const meta = SOURCE_LABEL[r.source] || { icon: '⚡', label: r.source };
+        return `
+        <div style="display:flex;align-items:center;gap:0.75rem;padding:0.7rem 0.9rem;background:var(--color-bg-card);border-radius:10px;border:1px solid var(--color-border);">
+            <div style="font-size:1.4rem;width:2rem;text-align:center;flex-shrink:0;">${meta.icon}</div>
+            <div style="flex:1;min-width:0;">
+                <div style="font-size:0.85rem;font-weight:600;color:var(--color-text-primary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${LBW.escapeHtml(r.reason || meta.label)}</div>
+                <div style="font-size:0.72rem;color:var(--color-text-secondary);">${meta.label} · ${_formatDate(r.created)}</div>
+            </div>
+            <div style="font-size:1rem;font-weight:700;color:var(--color-bitcoin);white-space:nowrap;">+${(r.amount||0).toLocaleString('es-CO')} Méritos</div>
+        </div>`;
+    }
 
-        const container = document.getElementById('c2pXpTransactions');
+    // Renderiza el historial XP del usuario en un contenedor dado
+    async function renderXpInto(containerId) {
+        const container = document.getElementById(containerId);
+        if (!container) return;
+
         const pb = _getPB();
         const pubkey = _myPubkey();
 
@@ -83,28 +86,7 @@ const C2P_Treasury = (function () {
         }
     }
 
-    function _renderXpRow(r) {
-        const meta = SOURCE_LABEL[r.source] || { icon: '⚡', label: r.source };
-        return `
-        <div style="display:flex;align-items:center;gap:0.75rem;padding:0.7rem 0.9rem;background:var(--color-bg-card);border-radius:10px;border:1px solid var(--color-border);">
-            <div style="font-size:1.4rem;width:2rem;text-align:center;flex-shrink:0;">${meta.icon}</div>
-            <div style="flex:1;min-width:0;">
-                <div style="font-size:0.85rem;font-weight:600;color:var(--color-text-primary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${LBW.escapeHtml(r.reason || meta.label)}</div>
-                <div style="font-size:0.72rem;color:var(--color-text-secondary);">${meta.label} · ${_formatDate(r.created)}</div>
-            </div>
-            <div style="font-size:1rem;font-weight:700;color:var(--color-bitcoin);white-space:nowrap;">+${(r.amount||0).toLocaleString('es-CO')} Méritos</div>
-        </div>`;
-    }
-
-    // ── Wallet panel — helpers públicos ───────────────────────
-    // Llamado desde el tab "Tesorería" para activar el panel existente de LBW_Transparency
-    function showWallet() {
-        if (typeof LBW_Transparency !== 'undefined') {
-            LBW_Transparency.switchTab('wallet');
-        }
-    }
-
-    return { showXP, showWallet };
+    return { renderXpInto };
 
 })();
 
