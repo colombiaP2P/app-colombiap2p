@@ -35,7 +35,7 @@ async function _fetchLNbitsData(lnbitsUrl, readKey) {
 
     if (paymentsRes.status === 'fulfilled' && paymentsRes.value.ok) {
         const raw = await paymentsRes.value.json();
-        const list = Array.isArray(raw) ? raw : (raw.data || []);
+        const list = Array.isArray(raw) ? raw : (Array.isArray(raw?.data) ? raw.data : []);
         movements = list
             .filter(p => !p.pending)
             .map(p => {
@@ -55,7 +55,9 @@ async function _fetchLNbitsData(lnbitsUrl, readKey) {
             });
     }
 
-    return { balance, movements, authNotSupported: balance === null };
+    const totalIn  = movements.filter(m => m.type === 'in').reduce((s, m) => s + m.amount, 0);
+    const totalOut = movements.filter(m => m.type === 'out').reduce((s, m) => s + m.amount, 0);
+    return { balance, movements, totalIn, totalOut, txCount: movements.length, authNotSupported: balance === null };
 }
 
 export default async function handler(req, res) {
