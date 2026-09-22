@@ -27,15 +27,22 @@ async function _fetchLNbitsData(lnbitsUrl, readKey) {
     ]);
 
     let balance = null, movements = [];
+    let _debug = {};
 
     if (walletRes.status === 'fulfilled' && walletRes.value.ok) {
         const w = await walletRes.value.json();
         balance = Math.floor((w.balance || 0) / 1000); // msats → sats
+    } else {
+        _debug.walletErr = walletRes.status === 'fulfilled'
+            ? 'HTTP ' + walletRes.value.status
+            : walletRes.reason?.message;
     }
 
     if (paymentsRes.status === 'fulfilled' && paymentsRes.value.ok) {
         const raw = await paymentsRes.value.json();
         const list = Array.isArray(raw) ? raw : (Array.isArray(raw?.data) ? raw.data : []);
+        _debug.paymentsRaw = list.length;
+        _debug.pendingValues = list.slice(0, 5).map(p => p.pending);
         movements = list
             .filter(p => !p.pending)
             .map(p => {
@@ -47,17 +54,21 @@ async function _fetchLNbitsData(lnbitsUrl, readKey) {
                     amount: Math.abs(Math.floor(p.amount / 1000)),
                     memo:   p.memo || p.description || '',
                     time:   tsMs,
-                    ts:     tsMs,   // alias usado por el frontend para ordenar
+                    ts:     tsMs,
                     payment_hash: p.payment_hash || '',
                     bolt11: p.bolt11 || '',
                     extra:  p.extra || {},
                 };
             });
+    } else {
+        _debug.paymentsErr = paymentsRes.status === 'fulfilled'
+            ? 'HTTP ' + paymentsRes.value.status
+            : paymentsRes.reason?.message;
     }
 
     const totalIn  = movements.filter(m => m.type === 'in').reduce((s, m) => s + m.amount, 0);
     const totalOut = movements.filter(m => m.type === 'out').reduce((s, m) => s + m.amount, 0);
-    return { balance, movements, totalIn, totalOut, txCount: movements.length, authNotSupported: balance === null };
+    return { balance, movements, totalIn, totalOut, txCount: movements.length, authNotSupported: balance === null, _debug };
 }
 
 export default async function handler(req, res) {
@@ -65,7 +76,8 @@ export default async function handler(req, res) {
     res.setHeader('Access-Control-Allow-Origin', '*');
     res.setHeader('Cache-Control', 's-maxage=60, stale-while-revalidate=300');
 
-    if (_cache && Date.now() - _cacheAt < TTL_MS) {
+    const forceRefresh = req.query.nocache === '1';
+    if (!forceRefresh && _cache && Date.now() - _cacheAt < TTL_MS) {
         return res.status(200).json({ ..._cache, cached: true });
     }
 
@@ -104,9 +116,13 @@ export default async function handler(req, res) {
         if (lnbitsUrl && readKey) {
             try {
                 const lnbits = await _fetchLNbitsData(lnbitsUrl, readKey);
-                result.balance         = lnbits.balance;
-                result.movements       = lnbits.movements;
+                result.balance          = lnbits.balance;
+                result.movements        = lnbits.movements;
+                result.totalIn          = lnbits.totalIn;
+                result.totalOut         = lnbits.totalOut;
+                result.txCount          = lnbits.txCount;
                 result.authNotSupported = lnbits.authNotSupported;
+                result._debug           = lnbits._debug;
                 // Leer nostrPubkey del wallet si LNURL no lo devolvió
                 if (!result.lnurlp?.nostrPubkey && lnbitsUrl) {
                     result.pubkey = lnurlData?.nostrPubkey || '';
