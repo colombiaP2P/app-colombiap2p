@@ -250,7 +250,7 @@ function _showAportacionInvoice({ invoice, amountSats, message, senderPubkey, is
         ? `Cuando pagues este invoice, el nodo Lightning publicará un evento Nostr (kind:9735) firmado vinculando tu npub al pago.
            Aparecerá automáticamente en <strong>Transparencia → Wallet</strong> con el badge <span style="color:#CE93D8;">⚡ zap</span>.`
         : `Este invoice fue generado sin soporte NIP-57 (el proveedor no publicará un zap receipt). El pago llega igualmente a la tesorería.`;
-    const senderPubkeyAttr = JSON.stringify(senderPubkey).replace(/"/g, '&quot;');
+    const senderPubkeyAttr = JSON.stringify(senderPubkey || '').replace(/"/g, '&quot;');
     box.innerHTML = `
         <div style="background:linear-gradient(135deg,rgba(206,147,216,0.1),rgba(255,152,0,0.06));border:1px solid rgba(206,147,216,0.35);border-radius:14px;padding:1.25rem;margin-top:1rem;">
             <div style="display:flex;align-items:center;gap:0.5rem;margin-bottom:0.75rem;flex-wrap:wrap;">
