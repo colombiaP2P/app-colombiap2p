@@ -576,7 +576,7 @@ const LBW_Transparency = (() => {
         const zaps = await new Promise(resolve => {
             const out = [];
             const seen = new Set();
-            const timeout = setTimeout(() => resolve(out), 8000);
+            const timeout = setTimeout(() => resolve(out), 4000);
             let done = false;
             function finish() {
                 if (done) return;
@@ -713,7 +713,7 @@ const LBW_Transparency = (() => {
                 ` : ''}
 
                 <div style="text-align:right;margin-top:1rem;">
-                    <button onclick="LBW_Transparency.refreshWallet()" style="font-size:0.72rem;padding:0.3rem 0.7rem;border-radius:8px;background:transparent;border:1px solid var(--color-border);color:var(--color-text-secondary);cursor:pointer;">🔄 Actualizar</button>
+                    <button onclick="LBW_Transparency.refreshWallet(this)" style="font-size:0.72rem;padding:0.3rem 0.7rem;border-radius:8px;background:transparent;border:1px solid var(--color-border);color:var(--color-text-secondary);cursor:pointer;">🔄 Actualizar</button>
                 </div>
             `;
             return;
@@ -769,7 +769,7 @@ const LBW_Transparency = (() => {
                     <div style="display:flex;gap:0.4rem;align-items:center;">
                         ${staleBadge}
                         ${lnAddr ? `<button onclick="LBW_Transparency.copyToClipboard('${_esc(lnAddr)}', this)" style="font-size:0.7rem;padding:0.25rem 0.6rem;border-radius:10px;background:rgba(229,185,92,0.12);border:1px solid rgba(229,185,92,0.35);color:var(--color-gold);cursor:pointer;">📋 Copiar address</button>` : ''}
-                        <button onclick="LBW_Transparency.refreshWallet()" style="font-size:0.7rem;padding:0.25rem 0.6rem;border-radius:10px;background:transparent;border:1px solid var(--color-border);color:var(--color-text-secondary);cursor:pointer;">🔄 Actualizar</button>
+                        <button onclick="LBW_Transparency.refreshWallet(this)" style="font-size:0.7rem;padding:0.25rem 0.6rem;border-radius:10px;background:transparent;border:1px solid var(--color-border);color:var(--color-text-secondary);cursor:pointer;">🔄 Actualizar</button>
                     </div>
                 </div>
             </div>
@@ -907,7 +907,23 @@ const LBW_Transparency = (() => {
         }
     }
 
-    async function refreshWallet() {
+    async function refreshWallet(btnEl) {
+        // Feedback visual inmediato en el botón
+        const btn = btnEl instanceof Element ? btnEl : null;
+        if (btn) { btn.disabled = true; btn.textContent = '⏳ Actualizando…'; }
+
+        // Mostrar spinner en el panel de inmediato sin esperar el fetch
+        const panel = document.getElementById('transparencyWalletPanel');
+        if (panel) {
+            const refreshBar = document.createElement('div');
+            refreshBar.id = 'c2pWalletRefreshBar';
+            refreshBar.style.cssText = 'position:sticky;top:0;z-index:10;background:rgba(206,147,216,0.12);border-bottom:1px solid rgba(206,147,216,0.3);padding:0.4rem 1rem;font-size:0.78rem;color:#CE93D8;text-align:center;';
+            refreshBar.textContent = '⏳ Consultando LNbits…';
+            const existing = document.getElementById('c2pWalletRefreshBar');
+            if (existing) existing.remove();
+            panel.insertAdjacentElement('afterbegin', refreshBar);
+        }
+
         _walletData = null;
         _walletDataAt = 0;
         _walletError = null;
@@ -916,6 +932,8 @@ const LBW_Transparency = (() => {
         // force=true para bypassear caché del servidor (nocache=1) y CDN (timestamp en URL)
         _walletData = await _fetchWalletData(true);
         await renderWalletPanel();
+
+        if (btn) { btn.disabled = false; btn.textContent = '🔄 Actualizar'; }
     }
 
     function goToWalletPage(n) {
