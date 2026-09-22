@@ -163,12 +163,6 @@ const LBW_Transparency = (() => {
         }).catch(() => {});
     }
 
-    // Cache de datos del ledger Supabase para evitar refetch en cada
-    // re-render por cambio de filtro. Se invalida al cabo de 60s o cuando
-    // el usuario pulsa "Actualizar".
-    let _supabaseDataCache = null;
-    let _supabaseDataCacheAt = 0;
-    const SUPABASE_CACHE_TTL_MS = 60 * 1000;
     let _activityEventsCache = null;
     let _activityEventsCacheAt = 0;
 
@@ -248,53 +242,6 @@ const LBW_Transparency = (() => {
         return all;
     }
 
-    async function _fetchSupabaseLedger(force) {
-        if (!force && _supabaseDataCache && (Date.now() - _supabaseDataCacheAt < SUPABASE_CACHE_TTL_MS)) {
-            return _supabaseDataCache;
-        }
-        if (typeof supabaseClient === 'undefined') return null;
-        try {
-            // Stats agregadas + leaderboard completo (mismo getter que
-            // usa el Ledger Maestro de la sección Méritos).
-            let stats = null;
-            let users = [];
-            if (typeof LBW_MeritsSync !== 'undefined' && LBW_MeritsSync.loadSupabaseLedger) {
-                const ledger = await LBW_MeritsSync.loadSupabaseLedger({ limit: 999 });
-                if (ledger) {
-                    if (ledger.stats) stats = ledger.stats;
-                    if (Array.isArray(ledger.users)) users = ledger.users;
-                }
-            }
-            // Lista de emisiones individuales (kind:31002) más recientes
-            const { data, error } = await supabaseClient
-                .from('lbwm_merit_events')
-                .select('id, pubkey, npub, amount, category, reason, awarded_by, nostr_d_tag, nostr_created_at, source')
-                .order('nostr_created_at', { ascending: false })
-                .limit(500);
-            if (error) {
-                console.warn('[Transparency] Supabase lbwm_merit_events error:', error.message);
-                return stats ? { stats, users, entries: [] } : null;
-            }
-            const entries = (data || []).map(r => ({
-                id: r.id,
-                dTag: r.nostr_d_tag || '',
-                recipient: r.pubkey,
-                issuer: r.awarded_by || '',
-                amount: r.amount || 0,
-                category: r.category || '',
-                reason: r.reason || '',
-                created_at: r.nostr_created_at || 0,
-                source: r.source || ''
-            }));
-            _supabaseDataCache = { stats, users, entries };
-            _supabaseDataCacheAt = Date.now();
-            return _supabaseDataCache;
-        } catch (e) {
-            console.warn('[Transparency] _fetchSupabaseLedger error:', e.message);
-            return null;
-        }
-    }
-
     async function renderMeritsPanel() {
         const panel = document.getElementById('transparencyMeritsPanel');
         if (!panel) return;
@@ -303,21 +250,13 @@ const LBW_Transparency = (() => {
             return;
         }
 
-        // Prefer Supabase (canonical, igual fuente que Ledger Maestro).
-        // Fallback a memoria local si Supabase falla. Además fetcheamos
-        // los eventos de actividad (chat, marketplace, votos, propuestas)
-        // para incluirlos como filas del registro.
-        const supa = await _fetchSupabaseLedger(false);
         const activityEntries = await _fetchActivityEvents(false);
 
-        let stats, merits, dataSource;
-        // Combinar formal (Supabase entries) + actividad. Dedup por id.
-        let formalEntries = [];
-        if (supa && supa.entries) {
-            formalEntries = supa.entries;
-        } else if (LBW_Merits && LBW_Merits.getAllMerits) {
-            formalEntries = LBW_Merits.getAllMerits({ limit: 500 });
-        }
+        let stats, merits;
+        const dataSource = 'memory';
+        let formalEntries = LBW_Merits && LBW_Merits.getAllMerits
+            ? LBW_Merits.getAllMerits({ limit: 500 })
+            : [];
         const seenIds = new Set();
         const mergedAll = [];
         for (const e of formalEntries) {
@@ -327,8 +266,6 @@ const LBW_Transparency = (() => {
             if (e && e.id && !seenIds.has(e.id)) { seenIds.add(e.id); mergedAll.push(e); }
         }
 
-        // byCategory recomputado desde la lista mergeada (incluye formal
-        // + actividad). Así los chips de categoría reflejan TODO.
         const byCategoryMerged = {};
         const uniqueRecip = new Set();
         const uniqueIssuersFormal = new Set();
@@ -338,19 +275,7 @@ const LBW_Transparency = (() => {
             if (m.issuer) uniqueIssuersFormal.add(m.issuer);
         }
 
-        if (supa && supa.stats) {
-            // Total y users del Ledger Maestro (con cap aplicado por usuario).
-            // No re-sumamos las filas de actividad porque eso ignoraría el cap
-            // de 300 — mantenemos coherencia con el resto de la app.
-            stats = {
-                count: mergedAll.length,
-                total: supa.stats.totalMerits || 0,
-                byCategory: byCategoryMerged,
-                uniqueIssuers: uniqueIssuersFormal.size,
-                uniqueRecipients: supa.stats.totalUsers || uniqueRecip.size
-            };
-            dataSource = 'supabase';
-        } else {
+        {
             const baseStats = LBW_Merits.getAllMeritsStats();
             stats = {
                 count: mergedAll.length,
@@ -359,7 +284,6 @@ const LBW_Transparency = (() => {
                 uniqueIssuers: uniqueIssuersFormal.size,
                 uniqueRecipients: uniqueRecip.size
             };
-            dataSource = 'memory';
         }
 
         // Asignar nº de bloque a TODOS los merits antes de filtrar.
@@ -425,9 +349,7 @@ const LBW_Transparency = (() => {
             }
         } catch (e) {}
 
-        const sourceBadge = dataSource === 'supabase'
-            ? `<span style="font-size:0.65rem;background:rgba(81,207,102,0.15);color:#51cf66;padding:0.2rem 0.5rem;border-radius:10px;border:1px solid rgba(81,207,102,0.3);">📚 Ledger Maestro (Supabase)</span>`
-            : `<span style="font-size:0.65rem;background:rgba(255,167,38,0.15);color:#FFA726;padding:0.2rem 0.5rem;border-radius:10px;border:1px solid rgba(255,167,38,0.3);">💾 Cache local (Supabase no disponible)</span>`;
+        const sourceBadge = `<span style="font-size:0.65rem;background:rgba(255,167,38,0.15);color:#FFA726;padding:0.2rem 0.5rem;border-radius:10px;border:1px solid rgba(255,167,38,0.3);">💾 Nostr + caché local</span>`;
 
         panel.innerHTML = `
             <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.5rem;flex-wrap:wrap;gap:0.5rem;">
@@ -604,33 +526,7 @@ const LBW_Transparency = (() => {
                 _walletError = data;
                 return null;
             }
-            // 2. Snapshot de balance + movimientos desde Supabase
-            //    (poblada por GitHub Action treasury-sync cada 15 min).
-            //    Si existe, sobrescribimos balance/movements y desactivamos
-            //    authNotSupported para que el render use la tabla blockchain.
-            try {
-                if (typeof supabaseClient !== 'undefined') {
-                    const { data: snaps } = await supabaseClient
-                        .from('treasury_snapshots')
-                        .select('balance, total_in, total_out, tx_count, movements, fetched_at')
-                        .order('fetched_at', { ascending: false })
-                        .limit(1);
-                    if (snaps && snaps.length > 0) {
-                        const s = snaps[0];
-                        data.balance = s.balance || 0;
-                        data.totalIn = s.total_in || 0;
-                        data.totalOut = s.total_out || 0;
-                        data.txCount = s.tx_count || 0;
-                        data.movements = Array.isArray(s.movements) ? s.movements : [];
-                        data.snapshotAt = s.fetched_at;
-                        data.authNotSupported = false;
-                    }
-                }
-            } catch (e) {
-                console.warn('[Transparency] snapshot treasury fallo:', e && e.message);
-                // Seguimos con el perfil público — la UI lo soporta vía authNotSupported
-            }
-            // 3. Zaps NIP-57 (kind:9735) firmados por coinos con #p=treasury.
+            // 2. Zaps NIP-57 (kind:9735) firmados por coinos con #p=treasury.
             //    Los emparejamos por amount+ts con cada movimiento entrante
             //    para mostrar la pubkey verificable del donante.
             try {
@@ -1119,10 +1015,7 @@ const LBW_Transparency = (() => {
         switchTab(_currentTab);
     }
 
-    // Fuerza refetch de Supabase + actividad y re-render
     async function refreshMerits() {
-        _supabaseDataCache = null;
-        _supabaseDataCacheAt = 0;
         _activityEventsCache = null;
         _activityEventsCacheAt = 0;
         await renderMeritsPanel();

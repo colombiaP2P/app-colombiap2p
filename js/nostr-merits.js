@@ -788,11 +788,7 @@ const LBW_Merits = (() => {
     // Maps old v1.0 category names to v2.0 for backward compatibility
     // with contributions already stored in Nostr relays.
     // [M-14] Esta es la versión CANÓNICA. Se exporta vía la API pública
-    // (LBW_Merits.normalizeCategory) para que supabase-merits-sync.js la
-    // reuse y no diverja. Antes había dos copias inconsistentes:
-    // - nostr-merits.js: 'financial' → 'financiada' (sin mapeo de 'economico')
-    // - supabase-merits-sync.js: 'financial' → 'economica', con 'economico' → 'economica'
-    // Decisión unificada:
+    // (LBW_Merits.normalizeCategory). Decisión unificada:
     //   * 'financial' → 'financiada' (semántica original v1.0: "financiada por la
     //     comunidad", coincide con la categoría v2.0 con peso 0.6).
     //   * 'economico' → 'economica' (typo histórico del awardMarketplaceMerit

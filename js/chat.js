@@ -137,17 +137,6 @@ async function updateChatBadges() {
     const pubKey = currentUser.pubkey || currentUser.publicKey;
     
     try {
-        // Community badge: new posts since last seen (sigue usando Supabase para posts públicos)
-        if (currentChatTab !== 'community') {
-            const { data: newPosts } = await supabaseClient
-                .from('posts')
-                .select('id')
-                .gt('created_at', new Date(lastSeenCommunity).toISOString())
-                .neq('author_public_key', pubKey);
-            
-            if (newPosts) updateChatTabBadge('community', newPosts.length);
-        }
-        
         // Private badge: usar conteo de Nostr (DMs cifrados)
         if (currentChatTab !== 'private') {
             // El badge de privados lo maneja LBW_NostrBridge._updateDMBadge()
@@ -436,35 +425,7 @@ async function searchChatUsers(query) {
     
     try {
         let users = [];
-        
-        // Search by name (ilike for case-insensitive)
-        const { data: nameResults } = await supabaseClient
-            .from('users')
-            .select('public_key, name, avatar_url')
-            .ilike('name', `%${query}%`)
-            .neq('public_key', pubKey)
-            .limit(10);
-        
-        if (nameResults) users = [...nameResults];
-        
-        // Also search by public_key if query looks like a key
-        if (query.length >= 6) {
-            const { data: keyResults } = await supabaseClient
-                .from('users')
-                .select('public_key, name, avatar_url')
-                .ilike('public_key', `%${query}%`)
-                .neq('public_key', pubKey)
-                .limit(5);
-            
-            if (keyResults) {
-                // Deduplicate
-                const existingKeys = new Set(users.map(u => u.public_key));
-                keyResults.forEach(u => {
-                    if (!existingKeys.has(u.public_key)) users.push(u);
-                });
-            }
-        }
-        
+
         if (users.length === 0) {
             resultsContainer.innerHTML = '<div style="padding: 0.75rem; text-align: center; color: var(--color-text-secondary); font-size: 0.8rem;">No se encontraron usuarios</div>';
             return;

@@ -55,18 +55,6 @@ async function updateHomeAvatar() {
         } catch (e) {}
     }
     
-    // Try Supabase
-    try {
-        const { data } = await supabaseClient
-            .from('users')
-            .select('avatar_url')
-            .eq('public_key', pubKey)
-            .maybeSingle();
-        
-        if (data && data.avatar_url) {
-            homeAvatarEl.src = data.avatar_url;
-        }
-    } catch (err) {}
 }
 
 async function updateAllBadges() {
@@ -87,17 +75,7 @@ async function updateChatBadge() {
         // Get last visit timestamp
         const lastVisit = parseInt(localStorage.getItem('lastVisit_chat') || '0');
         
-        // Count posts created after last visit
-        const { data, error } = await supabaseClient
-            .from('posts')
-            .select('id, created_at')
-            .gte('created_at', new Date(lastVisit).toISOString())
-            .neq('author_public_key', pubKey); // Exclude own posts
-        
         let communityUnread = 0;
-        if (!error && data) {
-            communityUnread = data.length;
-        }
         // Incluir DMs no leídos (entrantes posteriores a lastSeen_private)
         let dmUnread = 0;
         if (typeof LBW_NostrBridge !== 'undefined' && LBW_NostrBridge.getUnreadDMCount) {
@@ -116,17 +94,7 @@ async function updateNetworkingBadge() {
         // Get last visit timestamp
         const lastVisit = parseInt(localStorage.getItem('lastVisit_networking') || '0');
         
-        // Count offers created after last visit
-        const { data, error } = await supabaseClient
-            .from('offers')
-            .select('id, created_at')
-            .gte('created_at', new Date(lastVisit).toISOString())
-            .neq('author_public_key', pubKey); // Exclude own offers
-        
-        if (!error && data) {
-            const unreadCount = data.length;
-            updateBadge('networking', unreadCount);
-        }
+        updateBadge('networking', 0);
     } catch (err) {
         console.error('Error updating networking badge:', err);
     }

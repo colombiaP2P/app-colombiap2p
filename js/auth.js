@@ -41,59 +41,8 @@ async function checkExistingSession() {
             
             window.LBW_persistKeys && window.LBW_persistKeys(currentUser);
 
-            // [M-12] Migración hex→npub en Supabase con timeout y retry persistente.
-            // Antes: si el proxy fallaba, el user quedaba con hex en Supabase mientras
-            // el cliente ya estaba en npub → queries WHERE public_key=npub no
-            // encontraban al user → no se asociaban méritos económicos. Y no se
-            // reintentaba nunca porque el cliente ya no veía el hex en su lado.
-            const MIG_PENDING_KEY = 'lbw_pending_hex_npub_mig:' + pubKey;
-            try {
-                const dbTimeout = new Promise((_, reject) => setTimeout(() => reject(new Error('Supabase timeout')), 5000));
-                const userUpdate = supabaseClient.from('users').update({ public_key: npubKey }).eq('public_key', pubKey);
-                await Promise.race([userUpdate, dbTimeout]);
-
-                const postsUpdate = supabaseClient.from('posts').update({ author_public_key: npubKey }).eq('author_public_key', pubKey);
-                await Promise.race([postsUpdate, dbTimeout]);
-
-                const offersUpdate = supabaseClient.from('offers').update({ author_public_key: npubKey }).eq('author_public_key', pubKey);
-                await Promise.race([offersUpdate, dbTimeout]);
-
-                try { localStorage.removeItem(MIG_PENDING_KEY); } catch (e) {}
-                console.log('[Auth] Migración hex→npub completada en Supabase');
-            } catch (err) {
-                // Persiste flag para reintentar en el próximo login.
-                try { localStorage.setItem(MIG_PENDING_KEY, JSON.stringify({ npubKey, ts: Date.now() })); } catch (e) {}
-                console.warn('[Auth] [M-12] Migración hex→npub Supabase pendiente — reintentaremos en próximo login:', err.message);
-            }
         }
 
-        // [M-12] Reintento de migración pendiente desde un login anterior.
-        // Si el cliente ya está en npub pero quedó pendiente la actualización en
-        // Supabase, lo intentamos cada vez que recargues hasta que tenga éxito.
-        try {
-            for (let i = 0; i < localStorage.length; i++) {
-                const k = localStorage.key(i);
-                if (!k || !k.startsWith('lbw_pending_hex_npub_mig:')) continue;
-                const oldHex = k.substring('lbw_pending_hex_npub_mig:'.length);
-                let pendingData;
-                try { pendingData = JSON.parse(localStorage.getItem(k) || '{}'); } catch (e) { continue; }
-                if (!pendingData || !pendingData.npubKey) continue;
-                const newNpub = pendingData.npubKey;
-                try {
-                    const dbTimeout = new Promise((_, reject) => setTimeout(() => reject(new Error('Supabase timeout')), 5000));
-                    await Promise.race([supabaseClient.from('users').update({ public_key: newNpub }).eq('public_key', oldHex), dbTimeout]);
-                    await Promise.race([supabaseClient.from('posts').update({ author_public_key: newNpub }).eq('author_public_key', oldHex), dbTimeout]);
-                    await Promise.race([supabaseClient.from('offers').update({ author_public_key: newNpub }).eq('author_public_key', oldHex), dbTimeout]);
-                    try { localStorage.removeItem(k); } catch (e) {}
-                    console.log('[Auth] [M-12] Migración pendiente reintentada con éxito para hex=' + oldHex.substring(0, 12));
-                    break; // procesamos máx una por sesión para no encadenar fallos
-                } catch (e) {
-                    console.warn('[Auth] [M-12] Reintento sigue fallando, lo dejamos para la próxima:', e.message);
-                    break;
-                }
-            }
-        } catch (e) {}
-        
         // Recover name from lbw_nostr_session if currentUser.name is missing or is a truncated npub
         const currentPubKey = currentUser.publicKey || currentUser.pubkey;
         const nameIsMissing = !currentUser.name || 
@@ -109,41 +58,6 @@ async function checkExistingSession() {
                     console.log('[Auth] Name recovered from Nostr session:', currentUser.name);
                 }
             } catch (e) {}
-        }
-        
-        // Sync with Supabase to get user ID and name if not present
-        // Wrapped in a race with a 5s timeout so a dead proxy never blocks showMainMenu()
-        if (currentPubKey) {
-            try {
-                const timeout = new Promise(resolve => setTimeout(() => resolve({ data: null, error: 'timeout' }), 5000));
-                const query = supabaseClient
-                    .from('users')
-                    .select('*')
-                    .eq('public_key', currentPubKey)
-                    .single();
-                const { data, error } = await Promise.race([query, timeout]);
-                
-                if (data) {
-                    if (!currentUser.id) {
-                        currentUser.id = data.id;
-                    }
-                    currentUser.pubkey = currentPubKey;
-                    currentUser.publicKey = currentPubKey;
-                    
-                    // Recover name from Supabase if local name is still missing/truncated
-                    const localNameBad = !currentUser.name || 
-                        currentUser.name.startsWith('npub1') || 
-                        currentUser.name.endsWith('...');
-                    if (localNameBad && data.name) {
-                        currentUser.name = data.name;
-                        console.log('[Auth] Name recovered from Supabase:', currentUser.name);
-                    }
-                    
-                    window.LBW_persistKeys && window.LBW_persistKeys(currentUser);
-                }
-            } catch (err) {
-                console.log('User not in Supabase yet:', err.message);
-            }
         }
         
         // Inicializar Nostr con las credenciales guardadas

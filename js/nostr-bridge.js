@@ -200,91 +200,6 @@ const LBW_NostrBridge = (() => {
         return newVal;
     }
 
-    // ── Helper: registrar al usuario en Supabase si aún no existe ─────
-    // Llamado desde todos los flujos de login (nsec, NIP-07, NIP-46) para
-    // que TODO usuario que acceda quede registrado en `users` y aparezca
-    // en el contador "ID Registradas". Sin esto, solo los que crean cuenta
-    // nueva via "Crear identidad" quedaban en Supabase; los que entraban
-    // con su nsec/extension/bunker existente quedaban fuera del dashboard.
-    //
-    // Idempotente: si el usuario ya existe (matched por public_key=npub),
-    // devuelve su id sin tocar nada. Si no existe, inserta con citizenship
-    // 'Amigo' por defecto (LBWM v2.0 calcula el level real desde méritos).
-    async function _ensureUserInSupabase(npub, displayName) {
-        if (typeof supabaseClient === 'undefined') return null;
-        if (!npub || typeof npub !== 'string' || !npub.startsWith('npub1')) return null;
-        try {
-            // Check first — evita race con insert si ya existe
-            const { data: existing, error: selErr } = await supabaseClient
-                .from('users')
-                .select('id, name')
-                .eq('public_key', npub)
-                .maybeSingle();
-            if (selErr) {
-                console.warn('[Bridge] _ensureUserInSupabase select error:', selErr.message);
-                return null;
-            }
-            if (existing && existing.id) {
-                // Si el nombre actual parece un placeholder (un npub o
-                // truncado) y ahora tenemos un nombre real desde Nostr,
-                // lo actualizamos. Esto cubre el caso del backfill SQL
-                // que dejó name=npub para usuarios registrados sin haber
-                // hecho login todavía.
-                try {
-                    const looksLikePlaceholder = existing.name && (
-                        existing.name.startsWith('npub1') ||
-                        existing.name.endsWith('...') ||
-                        existing.name.endsWith('…')
-                    );
-                    const haveRealName = displayName &&
-                        typeof displayName === 'string' &&
-                        displayName.trim() &&
-                        !displayName.startsWith('npub1') &&
-                        !displayName.endsWith('...') &&
-                        !displayName.endsWith('…');
-                    if (looksLikePlaceholder && haveRealName && displayName.trim() !== existing.name) {
-                        const { error: updErr } = await supabaseClient
-                            .from('users')
-                            .update({ name: displayName.trim().substring(0, 80) })
-                            .eq('id', existing.id);
-                        if (!updErr) {
-                            console.log('[Bridge] 📝 Nombre actualizado en Supabase (placeholder → real):', displayName);
-                        }
-                    }
-                } catch (e) {}
-                return existing.id;
-            }
-
-            // Insert nuevo
-            const name = (displayName && typeof displayName === 'string')
-                ? displayName.trim().substring(0, 80)
-                : '';
-            const newId = (typeof generateUUID === 'function')
-                ? generateUUID()
-                : ('lbw-' + Date.now() + '-' + Math.random().toString(36).slice(2, 10));
-            const { data: inserted, error: insErr } = await supabaseClient
-                .from('users')
-                .insert([{
-                    id: newId,
-                    public_key: npub,
-                    name: name || npub.substring(0, 16),
-                    citizenship_type: 'Amigo',
-                    registration_date: new Date().toISOString()
-                }])
-                .select('id')
-                .single();
-            if (insErr) {
-                console.warn('[Bridge] _ensureUserInSupabase insert error:', insErr.message);
-                return null;
-            }
-            console.log('[Bridge] 📋 Usuario registrado en Supabase:', npub.substring(0, 20) + '…');
-            return inserted ? inserted.id : newId;
-        } catch (e) {
-            console.warn('[Bridge] _ensureUserInSupabase exception:', e.message);
-            return null;
-        }
-    }
-
     // ── Auth ─────────────────────────────────────────────────
     async function handleNIP07Login() {
         const btn = document.getElementById('nip07LoginBtn');
@@ -298,16 +213,6 @@ const LBW_NostrBridge = (() => {
                 method: 'extension', loginTime: Date.now()
             };
             localStorage.setItem('lbw_nostr_session', JSON.stringify(session));
-            // Registrar en Supabase si es la primera vez que entra a LBW
-            // (idempotente — no duplica si ya existe). Best-effort: si
-            // falla, el login continúa, simplemente no aparecerá en el
-            // dashboard hasta que vuelva a entrar.
-            _ensureUserInSupabase(result.npub, session.name).then(id => {
-                if (id && typeof currentUser !== 'undefined' && currentUser) {
-                    currentUser.id = id;
-                    try { window.LBW_persistKeys && window.LBW_persistKeys(currentUser); } catch(e) {}
-                }
-            }).catch(() => {});
             _applyLoginToUI(session);
             _updateLoginModeUI('extension');
             await _startAllFeeds();
@@ -365,15 +270,6 @@ const LBW_NostrBridge = (() => {
                 };
                 window.LBW_persistKeys && window.LBW_persistKeys(currentUser);
             }
-
-            // Registrar en Supabase (idempotente) para que aparezca en
-            // el contador "ID Registradas"
-            _ensureUserInSupabase(result.npub, session.name).then(id => {
-                if (id && typeof currentUser !== 'undefined' && currentUser) {
-                    currentUser.id = id;
-                    try { window.LBW_persistKeys && window.LBW_persistKeys(currentUser); } catch(e) {}
-                }
-            }).catch(() => {});
 
             _applyLoginToUI(session);
             _applyAvatarFromCache(session);
@@ -633,51 +529,6 @@ const LBW_NostrBridge = (() => {
             window.LBW_persistKeys && window.LBW_persistKeys(currentUser);
         }
 
-        // ══ Save new user to Supabase immediately ══
-        try {
-            if (typeof supabaseClient !== 'undefined' && typeof generateUUID === 'function') {
-                // Check first if already exists (avoid duplicate insert error)
-                const { data: existing } = await supabaseClient
-                    .from('users')
-                    .select('id')
-                    .eq('public_key', result.npub)
-                    .maybeSingle();
-
-                if (!existing) {
-                    const newId = generateUUID();
-                    const { data: newUser, error: insertError } = await supabaseClient
-                        .from('users')
-                        .insert([{
-                            id: newId,
-                            public_key: result.npub,
-                            name: name,
-                            citizenship_type: 'Amigo',
-                            registration_date: new Date().toISOString()
-                        }])
-                        .select()
-                        .single();
-
-                    if (insertError) {
-                        console.warn('[Bridge] ⚠️ Supabase insert error (non-fatal):', insertError.message);
-                    } else if (newUser) {
-                        if (typeof currentUser !== 'undefined' && currentUser) {
-                            currentUser.id = newUser.id;
-                            try { window.LBW_persistKeys && window.LBW_persistKeys(currentUser); } catch(e) {}
-                        }
-                        console.log('[Bridge] ✅ Nueva identidad guardada en Supabase:', name, result.npub.substring(0, 20));
-                    }
-                } else {
-                    console.log('[Bridge] ℹ️ Usuario ya existe en Supabase, id:', existing.id);
-                    if (typeof currentUser !== 'undefined' && currentUser) {
-                        currentUser.id = existing.id;
-                        try { window.LBW_persistKeys && window.LBW_persistKeys(currentUser); } catch(e) {}
-                    }
-                }
-            }
-        } catch (e) {
-            console.warn('[Bridge] ⚠️ Error guardando en Supabase (non-fatal):', e.message);
-        }
-
         _updateLoginModeUI('created');
         await _startAllFeeds();
         return result;
@@ -814,34 +665,7 @@ const LBW_NostrBridge = (() => {
                     let resolvedName = '';
                     let resolvedPicture = '';
                     
-                    // 1. Try Supabase (primary source of truth)
-                    try {
-                        if (typeof supabaseClient !== 'undefined') {
-                            const npub = s.npub || (typeof hexToNpub === 'function' ? hexToNpub(s.pubkey) : '');
-                            if (npub) {
-                                const { data } = await supabaseClient
-                                    .from('users')
-                                    .select('name, avatar_url, id')
-                                    .eq('public_key', npub)
-                                    .single();
-                                if (data) {
-                                    if (nameIsBad && data.name && !data.name.startsWith('npub1') && !data.name.endsWith('...')) {
-                                        resolvedName = data.name;
-                                        console.log('[Bridge] ✅ Nombre desde Supabase:', resolvedName);
-                                    }
-                                    if (needsPicture && data.avatar_url) {
-                                        resolvedPicture = data.avatar_url;
-                                        console.log('[Bridge] ✅ Avatar desde Supabase');
-                                    }
-                                    if (data.id && typeof currentUser !== 'undefined' && currentUser) {
-                                        currentUser.id = data.id;
-                                    }
-                                }
-                            }
-                        }
-                    } catch(e) {}
-                    
-                    // 2. Fallback: try relays
+                    // Try relays for name/picture
                     if ((nameIsBad && !resolvedName) || (needsPicture && !resolvedPicture)) {
                         try {
                             const p = await Promise.race([
@@ -2059,18 +1883,6 @@ const LBW_NostrBridge = (() => {
                     if (cached) {
                         if (!name) name = cached.name || cached.display_name || null;
                         if (!picture) picture = cached.picture || cached.image || null;
-                    }
-                } catch(e) {}
-            }
-            if ((!name || !picture) && typeof supabaseClient !== 'undefined') {
-                try {
-                    const npub = LBW_Nostr.pubkeyToNpub(pubkey);
-                    const { data } = await supabaseClient
-                        .from('users').select('name, avatar_url')
-                        .eq('public_key', npub).maybeSingle();
-                    if (data) {
-                        if (!name) name = data.name || null;
-                        if (!picture) picture = data.avatar_url || null;
                     }
                 } catch(e) {}
             }

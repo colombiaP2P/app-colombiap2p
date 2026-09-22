@@ -1,7 +1,7 @@
 // ========== MARKETPLACE PAY — Phase 2 ==========
 // LBW_MarketPay: gestiona pagos Lightning en el marketplace
 // Flujo: lud16 (kind-0) → LNURLP → invoice → WebLN/QR → confirmación → LBWM
-// Dependencias: LBW_Nostr, LBW_Merits (nostr-merits.js), supabaseClient
+// Dependencias: LBW_Nostr, LBW_Merits (nostr-merits.js)
 
 (function () {
     'use strict';
@@ -262,32 +262,7 @@
             console.warn('[MarketPay] ⚠️ No se pudo actualizar estado Nostr:', e.message);
         }
 
-        // 2. Guardar en Supabase (tabla lightning_payments)
-        try {
-            const payRecord = {
-                id:            crypto.randomUUID ? crypto.randomUUID() : Date.now().toString(),
-                buyer_pubkey:  LBW_Nostr.pubkeyToNpub(buyerPubkey),
-                seller_pubkey: LBW_Nostr.pubkeyToNpub(sellerPubkey),
-                listing_id:    listing.id || listing.dTag || '',
-                listing_title: listing.title || '',
-                // [SEC-10] amount_sats ahora son los sats REALES pagados,
-                // no parseInt(listing.price). Para una oferta de 100 EUR,
-                // antes guardaba 100 (mintiendo "100 sats"); ahora guarda
-                // los ~245.000 sats que efectivamente cobró el LNURLP.
-                amount_sats:   conv.sats || 0,
-                currency:      listing.currency || 'sats',
-                payment_hash:  paymentHash || '',
-                bolt11:        bolt11 || '',
-                status:        'completed',
-                created_at:    new Date().toISOString()
-            };
-            await supabaseClient.from('lightning_payments').insert([payRecord]);
-            console.log('[MarketPay] ✅ Pago registrado en Supabase');
-        } catch (e) {
-            console.warn('[MarketPay] ⚠️ No se pudo guardar en Supabase:', e.message);
-        }
-
-        // 3. LBWM: primera venta → registrar evento local (NO publica en Nostr).
+        // 2. LBWM: primera venta → registrar evento local (NO publica en Nostr).
         // [SEC-A3] El kind 31002 firmado por el comprador era rechazado por
         // SEC-22 (no es Génesis). awardMarketplaceMerit ahora solo persiste
         // dedup en localStorage hasta que se rediseñe el flujo. Mantenemos la

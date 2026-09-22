@@ -62,17 +62,7 @@
                         }
                     } catch(e) {}
                 }
-                // Capa 3: Supabase users (por npub)
-                if (!name && typeof supabaseClient !== 'undefined') {
-                    try {
-                        const npub = LBW_Nostr.pubkeyToNpub(pubkey);
-                        const { data } = await supabaseClient
-                            .from('users').select('name, avatar_url')
-                            .eq('public_key', npub).maybeSingle();
-                        if (data) { name = data.name || null; picture = data.avatar_url || null; }
-                    } catch(e) {}
-                }
-                // Capa 4: relay Nostr
+                // Capa 3: relay Nostr
                 if (!name) {
                     try {
                         const profile = await LBW_Nostr.fetchUserProfile(pubkey);

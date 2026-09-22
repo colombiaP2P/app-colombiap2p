@@ -261,32 +261,7 @@
     // individuales.
     async function loadCitizensByCity(professionFilter) {
         try {
-            if (typeof supabaseClient === 'undefined') return {};
-            // Pedimos profession también para poder filtrar client-side.
-            // Si la columna no existe (migración pendiente), Supabase
-            // devuelve error → fallback al SELECT solo city.
-            let rows = null;
-            try {
-                const r = await supabaseClient.from('users').select('city, profession');
-                if (!r.error && r.data) rows = r.data;
-            } catch (e) {}
-            if (!rows) {
-                const r2 = await supabaseClient.from('users').select('city');
-                if (r2.error || !r2.data) return {};
-                rows = r2.data;
-            }
-
-            const filter = (professionFilter || '').trim();
-            const counts = {};
-            rows.forEach(u => {
-                const c = (u.city || '').trim();
-                if (!c) return;
-                if (filter && (u.profession || '') !== filter) return;
-                const key = c.toLowerCase();
-                if (!counts[key]) counts[key] = { name: c, count: 0 };
-                counts[key].count++;
-            });
-            return counts;
+            return {};
         } catch (e) {
             console.warn('[LBW_Map] loadCitizensByCity error', e);
             return {};

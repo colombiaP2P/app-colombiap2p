@@ -25,6 +25,7 @@ function saveReplyMapping(postId, replyData) {
 }
 
 async function publishPost() {
+    // Posts now handled by LBW_NostrBridge.publishCommunityPost()
     const content = document.getElementById('newPostContent').value.trim();
     if (!content) {
         showNotification('Escribe algo', 'error');
@@ -42,32 +43,9 @@ async function publishPost() {
             content: content
         };
         
-        // Insert post into Supabase (without reply columns)
-        const { data, error } = await supabaseClient
-            .from('posts')
-            .insert([postData])
-            .select()
-            .single();
-
-        if (error) {
-            console.error('Error publishing post:', error);
-            showNotification('Error al publicar: ' + error.message, 'error');
-            return;
-        }
-        
-        // Save reply mapping locally if replying
-        if (currentReplyTo) {
-            saveReplyMapping(data.id || postId, {
-                reply_to_id: currentReplyTo.id,
-                reply_to_author: currentReplyTo.author,
-                reply_to_content: currentReplyTo.content
-            });
-        }
-
         document.getElementById('newPostContent').value = '';
         cancelReply();
         showNotification('¡Publicado! ✨');
-        await loadPosts();
     } catch (err) {
         console.error('Error:', err);
         showNotification('Error al publicar', 'error');
@@ -76,94 +54,10 @@ async function publishPost() {
 
 async function loadPosts() {
     try {
-        const currentUserPubKey = currentUser.pubkey || currentUser.publicKey;
-        
-        // Load posts from Supabase
-        const { data, error } = await supabaseClient
-            .from('posts')
-            .select('*')
-            .order('created_at', { ascending: false });
-
-        if (error) {
-            // Silent handling for DataCloneError (iframe limitation)
-            if (error.message && error.message.includes('DataCloneError')) {
-                console.log('Posts: iframe limitation, using cached data');
-            } else {
-                console.error('Error loading posts:', error.message || error);
-            }
-            allPosts = [];
-        } else {
-            // Get unique author public keys
-            const authorKeys = [...new Set(data.map(p => p.author_public_key))];
-            
-            // Fetch avatars for all authors
-            const { data: usersData } = await supabaseClient
-                .from('users')
-                .select('public_key, avatar_url')
-                .in('public_key', authorKeys);
-            
-            // Create avatar map
-            const avatarMap = {};
-            if (usersData) {
-                usersData.forEach(user => {
-                    avatarMap[user.public_key] = user.avatar_url;
-                });
-            }
-            
-            // Get all post IDs
-            const postIds = data.map(p => p.id);
-            
-            // Fetch likes for all posts
-            const { data: likesData } = await supabaseClient
-                .from('post_likes')
-                .select('post_id, user_public_key, user_name')
-                .in('post_id', postIds);
-            
-            // Create likes map
-            const likesMap = {};
-            if (likesData) {
-                likesData.forEach(like => {
-                    if (!likesMap[like.post_id]) {
-                        likesMap[like.post_id] = {
-                            count: 0,
-                            users: [],
-                            likedByCurrentUser: false
-                        };
-                    }
-                    likesMap[like.post_id].count++;
-                    likesMap[like.post_id].users.push(like.user_name);
-                    if (like.user_public_key === currentUserPubKey) {
-                        likesMap[like.post_id].likedByCurrentUser = true;
-                    }
-                });
-            }
-            
-            const replyMappings = getReplyMappings();
-            
-            allPosts = data.map(post => {
-                const replyData = replyMappings[post.id] || {};
-                return {
-                    id: post.id,
-                    author: post.author_name,
-                    avatar_url: avatarMap[post.author_public_key] || null,
-                    content: post.content,
-                    created_at: new Date(post.created_at).getTime(),
-                    likes: likesMap[post.id] || { count: 0, users: [], likedByCurrentUser: false },
-                    reply_to_id: replyData.reply_to_id || null,
-                    reply_to_author: replyData.reply_to_author || null,
-                    reply_to_content: replyData.reply_to_content || null
-                };
-            });
-        }
-
-        // NOTE: Community chat is now rendered by LBW_NostrBridge._renderCommunityMessage()
-        // loadPosts() only populates allPosts data (used by profile for post count)
-        // It no longer renders to the DOM to avoid overwriting Nostr chat messages
-
+        // Posts are loaded via Nostr (LBW_NostrBridge); allPosts kept as empty stub
+        allPosts = [];
     } catch (err) {
-        if (!(err.message && err.message.includes('DataCloneError'))) {
-            console.error('Error loading posts:', err.message);
-        }
+        console.error('Error loading posts:', err.message);
     }
 }
 
@@ -203,48 +97,7 @@ function scrollToPost(postId) {
 
 // Toggle like on post
 async function toggleLike(postId) {
-    try {
-        const pubKey = currentUser.pubkey || currentUser.publicKey;
-        
-        // Check if already liked
-        const { data: existingLike } = await supabaseClient
-            .from('post_likes')
-            .select('id')
-            .eq('post_id', postId)
-            .eq('user_public_key', pubKey)
-            .single();
-        
-        if (existingLike) {
-            // Unlike - remove like
-            const { error } = await supabaseClient
-                .from('post_likes')
-                .delete()
-                .eq('post_id', postId)
-                .eq('user_public_key', pubKey);
-            
-            if (error) throw error;
-            
-        } else {
-            // Like - add like
-            const { error } = await supabaseClient
-                .from('post_likes')
-                .insert({
-                    id: generateUUID(),
-                    post_id: postId,
-                    user_public_key: pubKey,
-                    user_name: currentUser.name
-                });
-            
-            if (error) throw error;
-        }
-        
-        // Reload posts to update like counts
-        await loadPosts();
-        
-    } catch (err) {
-        console.error('Error toggling like:', err);
-        showNotification('Error al actualizar like', 'error');
-    }
+    // Likes were Supabase-backed; reactions now handled via Nostr kind:7
 }
 
 function logout() {
