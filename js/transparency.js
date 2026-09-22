@@ -864,22 +864,26 @@ const LBW_Transparency = (() => {
                                     </td>
                                     <td style="padding:0.55rem 0.7rem;text-align:right;font-weight:700;color:${color};white-space:nowrap;">${sign}${Math.abs(m.amount || 0).toLocaleString('es-ES')}</td>
                                     <td style="padding:0.55rem 0.7rem;max-width:280px;color:var(--color-text-secondary);font-family:var(--font-display);font-size:0.76rem;">
-                                        ${m.zap ? (() => {
-                                            const zapKey = `${(m.zap.senderPubkey||'').substring(0,16)}_${m.zap.sats||0}_${m.ts||0}`;
+                                        ${(() => {
+                                            const payKey = `${m.payment_hash || (m.ts+'_'+m.amount)}`;
+                                            const zapKey = m.zap
+                                                ? `${(m.zap.senderPubkey||'').substring(0,16)}_${m.zap.sats||0}_${m.ts||0}`
+                                                : `manual_${payKey}`;
                                             const alreadyAwarded = _awardedZaps.includes(zapKey);
-                                            return `
-                                            <div style="display:flex;flex-direction:column;gap:0.3rem;">
-                                                <div style="display:flex;align-items:center;gap:0.35rem;flex-wrap:wrap;">
+                                            const memoHtml = m.memo ? `<span style="font-style:italic;">"${_sanitizeMemo(m.memo)}"</span>` : '<span style="opacity:0.4;">—</span>';
+                                            const zapBadge = m.zap ? `
+                                                <div style="display:flex;align-items:center;gap:0.35rem;flex-wrap:wrap;margin-bottom:0.2rem;">
                                                     <span title="Donante verificado vía zap Nostr (NIP-57)" style="font-size:0.65rem;background:rgba(206,147,216,0.15);color:#CE93D8;padding:0.1rem 0.4rem;border-radius:8px;border:1px solid rgba(206,147,216,0.3);font-family:var(--font-display);">⚡ zap</span>
                                                     <span data-pubkey-slot="${m.zap.senderPubkey}" title="${_esc(m.zap.senderPubkey)}" style="font-family:var(--font-mono);font-size:0.72rem;color:#CE93D8;font-weight:600;">${_shortNpub(m.zap.senderPubkey)}</span>
                                                 </div>
-                                                ${m.zap.senderMessage ? `<div style="font-style:italic;color:var(--color-text-secondary);">"${_sanitizeMemo(m.zap.senderMessage)}"</div>` : ''}
-                                                ${_isAdminWallet ? (alreadyAwarded
-                                                    ? `<span style="font-size:0.65rem;color:#51cf66;background:rgba(81,207,102,0.1);padding:0.15rem 0.45rem;border-radius:6px;border:1px solid rgba(81,207,102,0.3);">✅ Méritos emitidos</span>`
-                                                    : `<button onclick="LBW_Transparency.awardMeritsForZap('${_esc(m.zap.senderPubkey)}',${m.zap.sats||0},${m.ts||0})" style="font-size:0.68rem;padding:0.2rem 0.55rem;background:rgba(206,147,216,0.12);border:1px solid rgba(206,147,216,0.4);border-radius:6px;color:#CE93D8;cursor:pointer;font-weight:700;white-space:nowrap;">🏅 Emitir méritos</button>`
-                                                ) : ''}
-                                            </div>
-                                        `})() : (m.memo ? `<span style="font-style:italic;">"${_sanitizeMemo(m.memo)}"</span>` : '<span style="opacity:0.4;">—</span>')}
+                                                ${m.zap.senderMessage ? `<div style="font-style:italic;color:var(--color-text-secondary);margin-bottom:0.2rem;">"${_sanitizeMemo(m.zap.senderMessage)}"</div>` : ''}
+                                            ` : memoHtml;
+                                            const adminBtn = _isAdminWallet && isIn ? (alreadyAwarded
+                                                ? `<span style="font-size:0.65rem;color:#51cf66;background:rgba(81,207,102,0.1);padding:0.15rem 0.45rem;border-radius:6px;border:1px solid rgba(81,207,102,0.3);display:inline-block;margin-top:0.2rem;">✅ Méritos emitidos</span>`
+                                                : `<button onclick="LBW_Transparency.awardMeritsForZap('${m.zap ? _esc(m.zap.senderPubkey) : ''}',${m.amount||0},${m.ts||0},'${_esc(payKey)}')" style="font-size:0.68rem;padding:0.2rem 0.55rem;background:rgba(206,147,216,0.12);border:1px solid rgba(206,147,216,0.4);border-radius:6px;color:#CE93D8;cursor:pointer;font-weight:700;white-space:nowrap;margin-top:0.2rem;">🏅 Emitir méritos</button>`
+                                            ) : '';
+                                            return `<div style="display:flex;flex-direction:column;gap:0;">${zapBadge}${adminBtn}</div>`;
+                                        })()}
                                     </td>
                                 </tr>
                             `;}).join('')}
@@ -1137,11 +1141,12 @@ const LBW_Transparency = (() => {
 
     // ── Admin: emitir méritos por zap desde Transparencia ──────────────────────
 
-    function awardMeritsForZap(senderPubkey, amountSats, zapTs) {
-        const zapKey = `${(senderPubkey||'').substring(0,16)}_${amountSats}_${zapTs}`;
+    function awardMeritsForZap(senderPubkey, amountSats, zapTs, payKey) {
+        // payKey es el identificador único del pago (payment_hash o ts_amount)
+        const _key = payKey || `${(senderPubkey||'').substring(0,16)}_${amountSats}_${zapTs}`;
         let awarded = [];
         try { awarded = JSON.parse(localStorage.getItem('c2p_awarded_zaps') || '[]'); } catch (_e) {}
-        if (awarded.includes(zapKey)) { showNotification('Ya se emitieron méritos para este zap.', 'info'); return; }
+        if (awarded.includes(_key)) { showNotification('Ya se emitieron méritos para este pago.', 'info'); return; }
 
         const _adminPks = [
             '2479ef8e78d635cb40054f1e1a3895b13d67b36b2326b2a1d68df7b989b4cac0',
@@ -1159,6 +1164,7 @@ const LBW_Transparency = (() => {
             return;
         }
 
+        const hasZap = !!senderPubkey;
         const existing = document.getElementById('c2pAwardZapDialog');
         if (existing) existing.remove();
 
@@ -1166,33 +1172,61 @@ const LBW_Transparency = (() => {
         dialog.id = 'c2pAwardZapDialog';
         dialog.style.cssText = 'position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,0.72);display:flex;align-items:center;justify-content:center;padding:1rem;';
         dialog.innerHTML = `
-            <div style="background:var(--color-bg-card);border:2px solid rgba(206,147,216,0.5);border-radius:16px;padding:1.5rem;max-width:420px;width:100%;box-shadow:0 8px 32px rgba(0,0,0,0.5);">
+            <div style="background:var(--color-bg-card);border:2px solid rgba(206,147,216,0.5);border-radius:16px;padding:1.5rem;max-width:440px;width:100%;box-shadow:0 8px 32px rgba(0,0,0,0.5);">
                 <div style="font-size:1rem;font-weight:800;color:#CE93D8;margin-bottom:1rem;">🏅 Emitir Méritos Económicos</div>
                 <div style="font-size:0.82rem;background:rgba(206,147,216,0.07);border:1px solid rgba(206,147,216,0.2);border-radius:8px;padding:0.75rem;margin-bottom:1rem;line-height:1.6;">
-                    <div>Donante: <strong style="color:#CE93D8;font-family:monospace;">${_shortNpub(senderPubkey)}</strong></div>
-                    <div style="font-size:0.72rem;color:var(--color-text-secondary);word-break:break-all;">${_esc(senderPubkey)}</div>
-                    <div style="margin-top:0.3rem;">Zap: <strong style="color:#FFB74D;">${(amountSats||0).toLocaleString('es-ES')} sats</strong></div>
+                    ${hasZap
+                        ? `<div>Donante (⚡ NIP-57): <strong style="color:#CE93D8;font-family:monospace;">${_shortNpub(senderPubkey)}</strong></div>
+                           <div style="font-size:0.7rem;color:var(--color-text-secondary);word-break:break-all;">${_esc(senderPubkey)}</div>`
+                        : `<div style="color:#FFB74D;font-size:0.78rem;">⚠️ Pago sin atribución NIP-57 automática.<br>Introduce el npub del donante manualmente tras verificarlo.</div>`
+                    }
+                    <div style="margin-top:0.3rem;">Pago: <strong style="color:#FFB74D;">${(amountSats||0).toLocaleString('es-ES')} sats</strong></div>
                 </div>
-                <label style="display:block;font-size:0.78rem;color:var(--color-text-secondary);margin-bottom:0.3rem;">Méritos a emitir <span style="color:var(--color-text-secondary);font-size:0.7rem;">(categoría Económica, peso 1.0×)</span></label>
+                ${!hasZap ? `
+                <label style="display:block;font-size:0.78rem;color:var(--color-text-secondary);margin-bottom:0.3rem;">npub o hex del donante <span style="color:#ff6b6b;">*</span></label>
+                <input id="c2pAwardZapNpub" type="text" placeholder="npub1... o hex pubkey" style="width:100%;box-sizing:border-box;padding:0.65rem 0.75rem;border-radius:8px;border:1px solid var(--color-border);background:var(--color-bg-dark);color:var(--color-text-primary);font-size:0.82rem;font-family:monospace;margin-bottom:0.75rem;">
+                ` : ''}
+                <label style="display:block;font-size:0.78rem;color:var(--color-text-secondary);margin-bottom:0.3rem;">Méritos a emitir <span style="font-size:0.7rem;">(categoría Económica)</span></label>
                 <input id="c2pAwardZapAmt" type="number" value="${amountSats||0}" min="1" style="width:100%;box-sizing:border-box;padding:0.65rem 0.75rem;border-radius:8px;border:1px solid var(--color-border);background:var(--color-bg-dark);color:var(--color-text-primary);font-size:1rem;margin-bottom:0.75rem;">
                 <label style="display:block;font-size:0.78rem;color:var(--color-text-secondary);margin-bottom:0.3rem;">Razón</label>
-                <input id="c2pAwardZapReason" type="text" value="⚡ Zap Lightning verificado" maxlength="120" style="width:100%;box-sizing:border-box;padding:0.65rem 0.75rem;border-radius:8px;border:1px solid var(--color-border);background:var(--color-bg-dark);color:var(--color-text-primary);font-size:0.9rem;margin-bottom:1.25rem;">
+                <input id="c2pAwardZapReason" type="text" value="${hasZap ? '⚡ Zap Lightning verificado' : '⚡ Aportación Lightning verificada'}" maxlength="120" style="width:100%;box-sizing:border-box;padding:0.65rem 0.75rem;border-radius:8px;border:1px solid var(--color-border);background:var(--color-bg-dark);color:var(--color-text-primary);font-size:0.9rem;margin-bottom:1.25rem;">
                 <div style="display:flex;gap:0.75rem;justify-content:flex-end;">
                     <button onclick="document.getElementById('c2pAwardZapDialog').remove()" style="padding:0.65rem 1.1rem;background:transparent;border:1px solid var(--color-border);border-radius:8px;color:var(--color-text-secondary);cursor:pointer;font-weight:600;font-size:0.88rem;">Cancelar</button>
-                    <button onclick="LBW_Transparency._confirmAwardZap('${_esc(senderPubkey)}','${zapKey}')" style="padding:0.65rem 1.25rem;background:linear-gradient(135deg,#CE93D8,#9C27B0);border:none;border-radius:8px;color:white;cursor:pointer;font-weight:700;font-size:0.88rem;">✓ Emitir</button>
+                    <button onclick="LBW_Transparency._confirmAwardZap('${_esc(senderPubkey)}','${_esc(_key)}')" style="padding:0.65rem 1.25rem;background:linear-gradient(135deg,#CE93D8,#9C27B0);border:none;border-radius:8px;color:white;cursor:pointer;font-weight:700;font-size:0.88rem;">✓ Emitir</button>
                 </div>
             </div>
         `;
         document.body.appendChild(dialog);
-        setTimeout(() => { const inp = document.getElementById('c2pAwardZapAmt'); if (inp) { inp.focus(); inp.select(); } }, 80);
+        setTimeout(() => {
+            const inp = document.getElementById('c2pAwardZapNpub') || document.getElementById('c2pAwardZapAmt');
+            if (inp) { inp.focus(); if (inp.select) inp.select(); }
+        }, 80);
     }
 
-    async function _confirmAwardZap(senderPubkey, zapKey) {
+    async function _confirmAwardZap(senderPubkeyOrig, zapKey) {
         const amountEl = document.getElementById('c2pAwardZapAmt');
         const reasonEl = document.getElementById('c2pAwardZapReason');
+        const npubEl   = document.getElementById('c2pAwardZapNpub');
         const amount = parseInt(amountEl?.value || '0', 10);
-        const reason = (reasonEl?.value || '').trim() || '⚡ Zap Lightning verificado';
+        const reason = (reasonEl?.value || '').trim() || '⚡ Aportación Lightning verificada';
 
+        // Si no había pubkey automática, leer del input manual y convertir npub→hex si es necesario
+        let senderPubkey = senderPubkeyOrig;
+        if (!senderPubkey && npubEl) {
+            const raw = (npubEl.value || '').trim();
+            if (!raw) { showNotification('Ingresa el npub o hex del donante.', 'error'); return; }
+            if (raw.startsWith('npub1')) {
+                try {
+                    senderPubkey = typeof nip19 !== 'undefined'
+                        ? nip19.decode(raw).data
+                        : (typeof LBW_Nostr?.bech32Decode === 'function' ? LBW_Nostr.bech32Decode(raw) : raw);
+                } catch (_) { senderPubkey = raw; }
+            } else {
+                senderPubkey = raw;
+            }
+        }
+
+        if (!senderPubkey) { showNotification('Ingresa el npub o hex del donante.', 'error'); return; }
         if (!amount || amount < 1) { showNotification('Introduce una cantidad válida.', 'error'); return; }
         document.getElementById('c2pAwardZapDialog')?.remove();
 

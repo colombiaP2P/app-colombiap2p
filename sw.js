@@ -4,7 +4,7 @@
 // Los JS llevan ?v=... en index.html, así que cualquier cambio de versión
 // se traduce en una URL nueva que el SW no tiene cacheada y va a la red.
 
-const CACHE_NAME = 'c2p-v10';
+const CACHE_NAME = 'c2p-v11';
 const STATIC_ASSETS = [
   '/',
   '/index.html',
