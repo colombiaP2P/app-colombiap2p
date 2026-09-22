@@ -528,11 +528,14 @@ const LBW_Transparency = (() => {
             //    para mostrar la pubkey verificable del donante.
             try {
                 const _treasuryPubkey = data.pubkey || data.lnurlp?.nostrPubkey || '';
+                console.log('[C2P Zaps] pubkey tesorería:', _treasuryPubkey || '(vacío)', '| movimientos:', data.movements?.length || 0);
                 if (_treasuryPubkey && Array.isArray(data.movements) && data.movements.length > 0) {
                     const zaps = await _fetchZapsForTreasury(_treasuryPubkey, false);
+                    console.log('[C2P Zaps] kind:9735 encontrados en relays:', zaps.length, zaps);
                     if (zaps.length > 0) {
                         data.movements = _matchMovementsWithZaps(data.movements, zaps);
                         data.zapsFound = zaps.length;
+                        console.log('[C2P Zaps] movimientos con zap emparejado:', data.movements.filter(m => m.zap).length);
                     }
                 }
             } catch (e) {
@@ -573,6 +576,8 @@ const LBW_Transparency = (() => {
             return _zapsCache;
         }
         if (typeof LBW_Nostr === 'undefined' || !LBW_Nostr.subscribe) return [];
+        // Relays donde colsats.com publica kind:9735 receipts (mismos que el zap request)
+        const ZAP_RELAYS = ['wss://relay.damus.io', 'wss://nos.lol', 'wss://relay.primal.net', 'wss://relay.colombiap2p.com'];
         const zaps = await new Promise(resolve => {
             const out = [];
             const seen = new Set();
@@ -609,7 +614,8 @@ const LBW_Transparency = (() => {
                 () => {
                     try { LBW_Nostr.unsubscribe(sub); } catch (e) {}
                     finish();
-                }
+                },
+                ZAP_RELAYS
             );
         });
         _zapsCache = zaps;
