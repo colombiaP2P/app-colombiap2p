@@ -104,34 +104,34 @@ async function payAportacionWithZap() {
         if (meta.maxSendable && amountMsats > meta.maxSendable) {
             throw new Error('Importe máximo: ' + Math.floor(meta.maxSendable / 1000) + ' sats');
         }
-        if (!meta.allowsNostr) {
-            throw new Error('El proveedor Lightning no soporta NIP-57 (allowsNostr requerido)');
+        // 2. Intentar zap NIP-57 si el proveedor lo soporta; si no, invoice normal
+        let callbackUrl = meta.callback + '?amount=' + amountMsats;
+        let senderPubkey = LBW_Nostr.getPubkey ? LBW_Nostr.getPubkey() : '';
+
+        if (meta.allowsNostr) {
+            let relays = [];
+            try { relays = (LBW_Nostr.getReadRelays && LBW_Nostr.getReadRelays()) || []; } catch (_) {}
+            if (relays.length === 0) relays = ['wss://relay.damus.io', 'wss://nos.lol', 'wss://relay.colombiap2p.com'];
+            relays = relays.slice(0, 8);
+
+            const zapReqTemplate = {
+                kind: 9734,
+                created_at: Math.floor(Date.now() / 1000),
+                content: (message || '').substring(0, 280),
+                tags: [
+                    ['relays', ...relays],
+                    ['amount', String(amountMsats)],
+                    ['p', meta.nostrPubkey || '']
+                ]
+            };
+            const signed = await LBW_Nostr.signEvent(zapReqTemplate);
+            senderPubkey = signed.pubkey;
+            callbackUrl += '&nostr=' + encodeURIComponent(JSON.stringify(signed));
         }
 
-        // 2. Construir y firmar kind:9734 (NIP-57 zap request)
-        let relays = [];
-        try { relays = (LBW_Nostr.getReadRelays && LBW_Nostr.getReadRelays()) || []; } catch (_) {}
-        if (relays.length === 0) relays = ['wss://relay.damus.io', 'wss://nos.lol', 'wss://relay.colombiap2p.com'];
-        relays = relays.slice(0, 8);
+        if (message) callbackUrl += '&comment=' + encodeURIComponent(message.substring(0, 144));
 
-        const zapReqTemplate = {
-            kind: 9734,
-            created_at: Math.floor(Date.now() / 1000),
-            content: (message || '').substring(0, 280),
-            tags: [
-                ['relays', ...relays],
-                ['amount', String(amountMsats)],
-                ['p', meta.nostrPubkey || '']
-            ]
-        };
-        const signed = await LBW_Nostr.signEvent(zapReqTemplate);
-
-        // 3. Pedir invoice al callback con el zap request adjunto
-        const callbackUrl = meta.callback
-            + '?amount=' + amountMsats
-            + '&nostr=' + encodeURIComponent(JSON.stringify(signed))
-            + (message ? '&comment=' + encodeURIComponent(message.substring(0, 144)) : '');
-
+        // 3. Pedir invoice al callback
         const cbRes = await fetch(callbackUrl);
         if (!cbRes.ok) throw new Error('Callback LNURLP error ' + cbRes.status);
         const cbData = await cbRes.json();
@@ -143,7 +143,7 @@ async function payAportacionWithZap() {
             invoice: cbData.pr,
             amountSats,
             message,
-            senderPubkey: signed.pubkey
+            senderPubkey
         });
 
     } catch (err) {
