@@ -365,7 +365,7 @@ const LBW_Transparency = (() => {
             <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:0.75rem;margin-bottom:1.25rem;">
                 <div class="stat-card" style="background:rgba(229,185,92,0.08);border:1px solid rgba(229,185,92,0.25);border-radius:10px;padding:0.85rem;text-align:center;">
                     <div style="font-size:1.6rem;font-weight:700;color:var(--color-gold);">${stats.total.toLocaleString('es-ES')}</div>
-                    <div style="font-size:0.72rem;color:var(--color-text-secondary);margin-top:0.15rem;">LBWM emitidos</div>
+                    <div style="font-size:0.72rem;color:var(--color-text-secondary);margin-top:0.15rem;">Méritos emitidos</div>
                 </div>
                 <div class="stat-card" style="background:rgba(64,196,255,0.08);border:1px solid rgba(64,196,255,0.25);border-radius:10px;padding:0.85rem;text-align:center;">
                     <div style="font-size:1.6rem;font-weight:700;color:#40C4FF;">${stats.count.toLocaleString('es-ES')}</div>
@@ -423,7 +423,7 @@ const LBW_Transparency = (() => {
                     </button>
                 </div>
                 <div style="font-size:0.7rem;color:var(--color-text-secondary);opacity:0.7;margin-bottom:0.6rem;line-height:1.4;">
-                    💡 Cada bloque es un evento Nostr firmado e inmutable. El hash de la izquierda es el <code style="font-family:var(--font-mono);font-size:0.68rem;background:rgba(44,95,111,0.18);padding:0.05rem 0.3rem;border-radius:3px;">event.id</code> (SHA-256 del payload canónico). El bloque #1 es el génesis del registro. Incluye emisiones formales kind:31002 + eventos de actividad. El total LBWM aplica un cap de 300 pts de actividad por usuario, por eso la suma de filas puede superar el total agregado.
+                    💡 Cada bloque es un evento Nostr firmado e inmutable. El hash de la izquierda es el <code style="font-family:var(--font-mono);font-size:0.68rem;background:rgba(44,95,111,0.18);padding:0.05rem 0.3rem;border-radius:3px;">event.id</code> (SHA-256 del payload canónico). El bloque #1 es el génesis del registro. Incluye emisiones formales kind:31002 + eventos de actividad. El total de Méritos aplica un cap de 300 pts de actividad por usuario, por eso la suma de filas puede superar el total agregado.
                 </div>
                 <div style="overflow-x:auto;border:1px solid var(--color-border);border-radius:10px;background:linear-gradient(180deg,rgba(13,23,30,0.6) 0%,rgba(13,23,30,0.35) 100%);box-shadow:inset 0 0 0 1px rgba(229,185,92,0.05);">
                     <table style="width:100%;border-collapse:collapse;font-size:0.78rem;color:var(--color-text-primary);min-width:880px;font-family:var(--font-mono);">
@@ -432,7 +432,7 @@ const LBW_Transparency = (() => {
                                 <th style="text-align:left;padding:0.55rem 0.7rem;font-size:0.66rem;font-weight:700;color:var(--color-gold);text-transform:uppercase;letter-spacing:0.08em;border-right:1px solid rgba(229,185,92,0.1);">Bloque</th>
                                 <th style="text-align:left;padding:0.55rem 0.7rem;font-size:0.66rem;font-weight:700;color:var(--color-text-secondary);text-transform:uppercase;letter-spacing:0.08em;">Hash</th>
                                 <th style="text-align:left;padding:0.55rem 0.7rem;font-size:0.66rem;font-weight:700;color:var(--color-text-secondary);text-transform:uppercase;letter-spacing:0.08em;">Timestamp</th>
-                                <th style="text-align:right;padding:0.55rem 0.7rem;font-size:0.66rem;font-weight:700;color:var(--color-text-secondary);text-transform:uppercase;letter-spacing:0.08em;">LBWM</th>
+                                <th style="text-align:right;padding:0.55rem 0.7rem;font-size:0.66rem;font-weight:700;color:var(--color-text-secondary);text-transform:uppercase;letter-spacing:0.08em;">Méritos</th>
                                 <th style="text-align:left;padding:0.55rem 0.7rem;font-size:0.66rem;font-weight:700;color:var(--color-text-secondary);text-transform:uppercase;letter-spacing:0.08em;">Categoría</th>
                                 <th style="text-align:left;padding:0.55rem 0.7rem;font-size:0.66rem;font-weight:700;color:var(--color-text-secondary);text-transform:uppercase;letter-spacing:0.08em;">Emisor → Destinatario</th>
                                 <th style="text-align:left;padding:0.55rem 0.7rem;font-size:0.66rem;font-weight:700;color:var(--color-text-secondary);text-transform:uppercase;letter-spacing:0.08em;">Memo</th>

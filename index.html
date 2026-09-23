@@ -414,7 +414,7 @@
                     <div onclick="openSubApp('merits')" class="welcome-btn-mobile" style="flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 1.25rem 1rem; background: linear-gradient(135deg, rgba(229, 185, 92, 0.2) 0%, rgba(229, 185, 92, 0.05) 100%); border: 2px solid var(--color-gold); border-radius: 16px; cursor: pointer; transition: all 0.3s ease; text-align: center;" onmouseover="this.style.transform='translateY(-2px)';this.style.boxShadow='0 8px 24px rgba(229, 185, 92, 0.3)'" onmouseout="this.style.transform='none';this.style.boxShadow='none'">
                         <div style="font-size: 2.5rem; margin-bottom: 0.5rem;">⚡</div>
                         <div style="font-size: 0.95rem; font-weight: 700; color: var(--color-gold); line-height: 1.3;">Aportar<br>Valor</div>
-                        <div style="font-size: 0.65rem; color: var(--color-text-secondary); margin-top: 0.4rem;">Ganar C2PM</div>
+                        <div style="font-size: 0.65rem; color: var(--color-text-secondary); margin-top: 0.4rem;">Ganar Méritos</div>
                     </div>
                     <!-- Aportación Económica Button -->
                     <div onclick="openApp('aportacionEconomica')" class="welcome-btn-mobile" style="flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 1.25rem 1rem; background: linear-gradient(135deg, rgba(255, 152, 0, 0.2) 0%, rgba(255, 152, 0, 0.05) 100%); border: 2px solid #FF9800; border-radius: 16px; cursor: pointer; transition: all 0.3s ease; text-align: center;" onmouseover="this.style.transform='translateY(-2px)';this.style.boxShadow='0 8px 24px rgba(255, 152, 0, 0.3)'" onmouseout="this.style.transform='none';this.style.boxShadow='none'">
@@ -773,7 +773,7 @@
                                 <span style="padding: 0.4rem 0.8rem; background: rgba(44, 95, 111, 0.3); border: 1px solid var(--color-teal-light); border-radius: 20px; font-size: 0.75rem; color: var(--color-text-primary);">🔐 Identidad Soberana</span>
                                 <span style="padding: 0.4rem 0.8rem; background: rgba(44, 95, 111, 0.3); border: 1px solid var(--color-teal-light); border-radius: 20px; font-size: 0.75rem; color: var(--color-text-primary);">🏛️ Gobernanza Directa</span>
                                 <span style="padding: 0.4rem 0.8rem; background: rgba(44, 95, 111, 0.3); border: 1px solid var(--color-teal-light); border-radius: 20px; font-size: 0.75rem; color: var(--color-text-primary);">⚡ Economía P2P</span>
-                                <span style="padding: 0.4rem 0.8rem; background: rgba(44, 95, 111, 0.3); border: 1px solid var(--color-teal-light); border-radius: 20px; font-size: 0.75rem; color: var(--color-text-primary);">🏅 Méritos C2P</span>
+                                <span style="padding: 0.4rem 0.8rem; background: rgba(44, 95, 111, 0.3); border: 1px solid var(--color-teal-light); border-radius: 20px; font-size: 0.75rem; color: var(--color-text-primary);">🏅 Méritos</span>
                                 <span style="padding: 0.4rem 0.8rem; background: rgba(44, 95, 111, 0.3); border: 1px solid var(--color-teal-light); border-radius: 20px; font-size: 0.75rem; color: var(--color-text-primary);">🌐 Red Nostr</span>
                             </div>
                         </div>
@@ -950,7 +950,7 @@
                         🏛️ Enviar Propuesta de Gobernanza
                     </button>
                     <p style="color: var(--color-text-secondary); font-size: 0.75rem; margin-top: 1rem;">
-                        Las propuestas aprobadas por la comunidad generan Méritos C2P para el contribuidor
+                        Las propuestas aprobadas por la comunidad generan Méritos para el contribuidor
                     </p>
                 </div>
             </div>
@@ -999,10 +999,6 @@
                         <div style="margin-bottom: 1.5rem;">
                             <label style="display: block; font-size: 0.8rem; color: var(--color-text-secondary); margin-bottom: 0.75rem; text-transform: uppercase; letter-spacing: 0.5px;">Cantidad sugerida</label>
                             <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 0.5rem;" class="mobile-grid-2col">
-                                <button onclick="selectSatsAmount(21)" class="sats-amount-btn" style="padding: 0.75rem 0.5rem; background: rgba(255, 152, 0, 0.08); border: 1px solid rgba(255, 152, 0, 0.3); border-radius: 10px; cursor: pointer; text-align: center; transition: all 0.2s; color: var(--color-text-primary);" onmouseover="this.style.borderColor='#FF9800'; this.style.background='rgba(255,152,0,0.15)'" onmouseout="this.style.borderColor='rgba(255,152,0,0.3)'; this.style.background='rgba(255,152,0,0.08)'">
-                                    <div style="font-size: 1.1rem; font-weight: 700; color: #FFB74D;">21</div>
-                                    <div style="font-size: 0.65rem; color: var(--color-text-secondary);">sats</div>
-                                </button>
                                 <button onclick="selectSatsAmount(210)" class="sats-amount-btn" style="padding: 0.75rem 0.5rem; background: rgba(255, 152, 0, 0.08); border: 1px solid rgba(255, 152, 0, 0.3); border-radius: 10px; cursor: pointer; text-align: center; transition: all 0.2s; color: var(--color-text-primary);" onmouseover="this.style.borderColor='#FF9800'; this.style.background='rgba(255,152,0,0.15)'" onmouseout="this.style.borderColor='rgba(255,152,0,0.3)'; this.style.background='rgba(255,152,0,0.08)'">
                                     <div style="font-size: 1.1rem; font-weight: 700; color: #FFB74D;">210</div>
                                     <div style="font-size: 0.65rem; color: var(--color-text-secondary);">sats</div>
@@ -1013,6 +1009,10 @@
                                 </button>
                                 <button onclick="selectSatsAmount(21000)" class="sats-amount-btn" style="padding: 0.75rem 0.5rem; background: rgba(255, 152, 0, 0.08); border: 1px solid rgba(255, 152, 0, 0.3); border-radius: 10px; cursor: pointer; text-align: center; transition: all 0.2s; color: var(--color-text-primary);" onmouseover="this.style.borderColor='#FF9800'; this.style.background='rgba(255,152,0,0.15)'" onmouseout="this.style.borderColor='rgba(255,152,0,0.3)'; this.style.background='rgba(255,152,0,0.08)'">
                                     <div style="font-size: 1.1rem; font-weight: 700; color: #FFB74D;">21.000</div>
+                                    <div style="font-size: 0.65rem; color: var(--color-text-secondary);">sats</div>
+                                </button>
+                                <button onclick="selectSatsAmount(50000)" class="sats-amount-btn" style="padding: 0.75rem 0.5rem; background: rgba(255, 152, 0, 0.08); border: 1px solid rgba(255, 152, 0, 0.3); border-radius: 10px; cursor: pointer; text-align: center; transition: all 0.2s; color: var(--color-text-primary);" onmouseover="this.style.borderColor='#FF9800'; this.style.background='rgba(255,152,0,0.15)'" onmouseout="this.style.borderColor='rgba(255,152,0,0.3)'; this.style.background='rgba(255,152,0,0.08)'">
+                                    <div style="font-size: 1.1rem; font-weight: 700; color: #FFB74D;">50.000</div>
                                     <div style="font-size: 0.65rem; color: var(--color-text-secondary);">sats</div>
                                 </button>
                             </div>
@@ -1057,7 +1057,7 @@
                     <div style="display: flex; flex-direction: column; gap: 0.75rem;">
                         <div style="display: flex; gap: 0.75rem; align-items: flex-start;">
                             <span style="background: rgba(255, 152, 0, 0.2); border-radius: 50%; width: 28px; height: 28px; display: flex; align-items: center; justify-content: center; font-size: 0.8rem; font-weight: 700; color: #FFB74D; flex-shrink: 0;">1</span>
-                            <p style="color: var(--color-text-primary); font-size: 0.85rem; line-height: 1.5;">Copia la dirección Lightning o escanea el código QR con tu wallet (Blink, Phoenix, Muun, Zeus, etc.)</p>
+                            <p style="color: var(--color-text-primary); font-size: 0.85rem; line-height: 1.5;">Copia la dirección Lightning o escanea el código QR con tu wallet (Colsats.com, Wallet of Satoshi, Blink, Phoenix, etc.)</p>
                         </div>
                         <div style="display: flex; gap: 0.75rem; align-items: flex-start;">
                             <span style="background: rgba(255, 152, 0, 0.2); border-radius: 50%; width: 28px; height: 28px; display: flex; align-items: center; justify-content: center; font-size: 0.8rem; font-weight: 700; color: #FFB74D; flex-shrink: 0;">2</span>
@@ -1065,7 +1065,7 @@
                         </div>
                         <div style="display: flex; gap: 0.75rem; align-items: flex-start;">
                             <span style="background: rgba(255, 152, 0, 0.2); border-radius: 50%; width: 28px; height: 28px; display: flex; align-items: center; justify-content: center; font-size: 0.8rem; font-weight: 700; color: #FFB74D; flex-shrink: 0;">3</span>
-                            <p style="color: var(--color-text-primary); font-size: 0.85rem; line-height: 1.5;">Tu aportación se registra como contribución económica y genera Méritos C2P con peso 0.01× (100 sats = 1 mérito, máx 500 méritos por persona)</p>
+                            <p style="color: var(--color-text-primary); font-size: 0.85rem; line-height: 1.5;">Tu aportación se registra como contribución económica y genera Méritos con peso 0.01× (100 sats = 1 mérito, máx 500 méritos por persona)</p>
                         </div>
                         <div style="display: flex; gap: 0.75rem; align-items: flex-start;">
                             <span style="background: rgba(255, 152, 0, 0.2); border-radius: 50%; width: 28px; height: 28px; display: flex; align-items: center; justify-content: center; font-size: 0.8rem; font-weight: 700; color: #FFB74D; flex-shrink: 0;">4</span>
@@ -1857,7 +1857,7 @@
                     <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 1.5rem;">
                         <div>
                             <div style="font-size: 0.85rem; color: var(--color-text-secondary); margin-bottom: 0.3rem;">
-                                Tu Balance C2PM v2.0
+                                Tu Balance de Méritos
                             </div>
                             <div style="font-size: 3rem; font-weight: 800; color: var(--color-gold);" id="userTotalMerits">0</div>
                             <div style="font-size: 0.85rem; color: var(--color-text-secondary); margin-top: 0.3rem;">
@@ -2155,7 +2155,7 @@
                         <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:0.6rem;margin-bottom:1.25rem;" class="mobile-grid-2col">
                             <div style="background:var(--color-bg-dark);border-radius:10px;padding:0.75rem;text-align:center;">
                                 <div style="font-size:1.4rem;font-weight:800;color:var(--color-gold);font-family:var(--font-mono);" id="ledger_total_emitido">0</div>
-                                <div style="font-size:0.7rem;color:var(--color-text-secondary);margin-top:0.2rem;">C2PM Emitidos</div>
+                                <div style="font-size:0.7rem;color:var(--color-text-secondary);margin-top:0.2rem;">Méritos emitidos</div>
                             </div>
                             <div style="background:var(--color-bg-dark);border-radius:10px;padding:0.75rem;text-align:center;">
                                 <div style="font-size:1.4rem;font-weight:800;color:#5bc4d4;font-family:var(--font-mono);" id="ledger_aportantes">0</div>
@@ -2230,7 +2230,7 @@
                 <!-- ═══════════════════════════════════════════════ -->
                 <div class="c2p-merit-tab-content" id="c2p-merit-tab-info">
                     <div class="c2p-merit-card">
-                        <h3 style="color: var(--color-gold); font-size: 1.2rem; margin-bottom: 1rem;">ℹ️ ¿Qué son los C2PM?</h3>
+                        <h3 style="color: var(--color-gold); font-size: 1.2rem; margin-bottom: 1rem;">ℹ️ ¿Qué son los Méritos?</h3>
                         
                         <div style="background: rgba(229, 185, 92, 0.1); padding: 1rem; border-radius: 10px; border-left: 3px solid var(--color-gold); margin-bottom: 1.5rem;">
                             <p style="font-size: 0.95rem; line-height: 1.7; color: var(--color-text-primary);">
@@ -2240,13 +2240,13 @@
 
                         <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin-bottom: 1.5rem;" class="mobile-grid-1col">
                             <div style="background: var(--color-bg-dark); padding: 1rem; border-radius: 10px;">
-                                <h4 style="color: var(--color-success); font-size: 0.95rem; margin-bottom: 0.5rem;">✅ Los C2PM SON:</h4>
+                                <h4 style="color: var(--color-success); font-size: 0.95rem; margin-bottom: 0.5rem;">✅ Los Méritos SON:</h4>
                                 <div style="color: var(--color-text-secondary); font-size: 0.85rem; line-height: 1.8;">
                                     Unidades de mérito funcional · Peso en gobernanza · Señal de confianza pública · Acceso preferente a proyectos · Reconocimiento permanente
                                 </div>
                             </div>
                             <div style="background: var(--color-bg-dark); padding: 1rem; border-radius: 10px;">
-                                <h4 style="color: var(--color-error); font-size: 0.95rem; margin-bottom: 0.5rem;">❌ Los C2PM NO son:</h4>
+                                <h4 style="color: var(--color-error); font-size: 0.95rem; margin-bottom: 0.5rem;">❌ Los Méritos NO son:</h4>
                                 <div style="color: var(--color-text-secondary); font-size: 0.85rem; line-height: 1.8;">
                                     Token financiero · Equity legal · Transferibles · Poder sobre personas · Dividendos garantizados
                                 </div>
@@ -2291,7 +2291,7 @@
                             </div>
                             <div style="text-align: center; padding: 0.75rem; background: var(--color-bg-dark); border-radius: 8px;">
                                 <div style="font-size: 1.5rem;">4️⃣</div>
-                                <div style="font-weight: 600; color: var(--color-text-primary); font-size: 0.85rem;">C2PM ✅</div>
+                                <div style="font-weight: 600; color: var(--color-text-primary); font-size: 0.85rem;">Méritos ✅</div>
                             </div>
                         </div>
 
@@ -2300,16 +2300,16 @@
                             <div style="padding: 1rem; background: rgba(198,89,17,0.08); border: 1px solid rgba(198,89,17,0.2); border-radius: 10px;">
                                 <h4 style="color: #C65911; font-size: 0.9rem; margin-bottom: 0.5rem;">⚡ Emisión ex-post</h4>
                                 <p style="font-size: 0.8rem; color: var(--color-text-secondary); line-height: 1.5;">
-                                    C2PM solo se emiten cuando se crea valor real verificado. Nunca por expectativas.
+                                    Los Méritos solo se emiten cuando se crea valor real verificado. Nunca por expectativas.
                                 </p>
                                 <div style="font-family: var(--font-mono); font-size: 0.85rem; color: var(--color-gold); margin-top: 0.5rem; padding: 0.5rem; background: rgba(0,0,0,0.2); border-radius: 6px;">
-                                    C2PM = Valor × Peso (wᵢ)
+                                    Méritos = Valor × Peso (wᵢ)
                                 </div>
                             </div>
                             <div style="padding: 1rem; background: rgba(229,185,92,0.08); border: 1px solid rgba(229,185,92,0.2); border-radius: 10px;">
                                 <h4 style="color: var(--color-gold); font-size: 0.9rem; margin-bottom: 0.5rem;">🛡️ Mérito permanente</h4>
                                 <p style="font-size: 0.8rem; color: var(--color-text-secondary); line-height: 1.5;">
-                                    Los C2PM no caducan. Solo se pierden por <em>slashing</em> en caso de fraude probado (público, motivado y apelable).
+                                    Los Méritos no caducan. Solo se pierden por <em>slashing</em> en caso de fraude probado (público, motivado y apelable).
                                 </p>
                             </div>
                         </div>
@@ -2427,7 +2427,7 @@
             <div class="modal-content" style="max-width: 800px; max-height: 90vh; overflow-y: auto; padding: 2rem;">
                 <button class="modal-close" onclick="closeContributionForm()">✕</button>
                 
-                <h2 style="color: var(--color-gold); margin-bottom: 1rem;">📝 Formulario de Aportación de Valor C2PM</h2>
+                <h2 style="color: var(--color-gold); margin-bottom: 1rem;">📝 Formulario de Aportación de Valor</h2>
                 
                 <p style="color: var(--color-text-secondary); margin-bottom: 2rem;">
                     Presenta tu contribución a ColombiaP2P. El equipo admin verificará y aprobará los méritos correspondientes.
@@ -2544,7 +2544,7 @@
 
                     <!-- Preview de C2PM Estimados -->
                     <div class="c2p-merit-highlight-box" style="margin-bottom: 2rem;">
-                        <h3 style="color: var(--color-gold); font-size: 1.1rem;">📊 Estimación de C2PM</h3>
+                        <h3 style="color: var(--color-gold); font-size: 1.1rem;">📊 Estimación de Méritos</h3>
                         <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 1rem;">
                             <div>
                                 <div style="font-size: 0.9rem; color: var(--color-text-secondary);">Peso categoría (wᵢ):</div>
@@ -2554,7 +2554,7 @@
                             </div>
                             <div style="font-size: 2rem; color: var(--color-text-secondary);">×</div>
                             <div style="text-align: right;">
-                                <div style="font-size: 0.9rem; color: var(--color-text-secondary);">C2PM Estimados:</div>
+                                <div style="font-size: 0.9rem; color: var(--color-text-secondary);">Méritos Estimados:</div>
                                 <div style="font-size: 2.5rem; font-weight: 800; color: var(--color-gold);">
                                     ≈ <span id="preview_lbwm">0</span>
                                 </div>
@@ -2569,7 +2569,7 @@
                     <div style="background: var(--color-bg-dark); padding: 1.5rem; border-radius: 12px; margin-bottom: 2rem;">
                         <h4 style="color: var(--color-gold); margin-bottom: 0.75rem;">📋 Declaración</h4>
                         <p style="color: var(--color-text-secondary); font-size: 0.9rem; line-height: 1.6;">
-                            Declaro que la información proporcionada es veraz y completa. Entiendo que los C2PM
+                            Declaro que la información proporcionada es veraz y completa. Entiendo que los Méritos
                             se emiten <strong>ex-post</strong> tras verificación del Comité de Emisión, y que
                             cualquier falsedad puede resultar en rechazo de la aportación o slashing de mérito ya obtenido.
                         </p>
@@ -3231,11 +3231,11 @@
     <script src="js/delegations-ui.js?v=apr17a"></script>
     <script src="js/nostr-merits.js?v=transparency-7"></script>
     <!-- Sección Transparencia: méritos + treasury -->
-    <script src="js/transparency.js?v=c2p-21"></script>
+    <script src="js/transparency.js?v=c2p-22"></script>
     <script src="js/c2p-treasury.js?v=4"></script>
     <script src="js/c2p-stats.js?v=2"></script>
     <!-- merits.js cargado DESPUÉS de nostr-merits.js ya que depende de LBW_Merits -->
-    <script src="js/merits.js?v=c2p-9"></script>
+    <script src="js/merits.js?v=c2p-10"></script>
     <script src="js/nostr-reviews.js?v=hardening-1"></script>
     <script src="js/nostr-marketplace-pay.js?v=m9-2"></script>
     <script src="js/nostr-stalls.js?v=hardening-1"></script>
@@ -3741,7 +3741,7 @@
                     <div style="font-size: 0.85rem; color: #4CAF50;">
                         ✅ Rápido<br>
                         ✅ Nivel: Verificado Básico<br>
-                        ✅ Máx: 250 C2PM
+                        ✅ Máx: 250 Méritos
                     </div>
                 </div>
             </div>
@@ -3756,8 +3756,8 @@
                 <div style="background: rgba(229, 185, 92, 0.1); padding: 0.75rem; border-radius: 8px; border: 1px solid var(--color-gold);">
                     <div style="font-size: 0.85rem; color: var(--color-gold);">
                         ⭐ Nivel: Identidad Real<br>
-                        ⭐ Antigüedad: 1 C2PM/día<br>
-                        ⭐ Límites: 250 C2PM automáticos
+                        ⭐ Antigüedad: 1 Mérito/día<br>
+                        ⭐ Límites: 250 Méritos automáticos
                     </div>
                 </div>
             </div>
@@ -3765,15 +3765,15 @@
             <!-- Option 3: Stake C2PM -->
             <div class="verification-option" onclick="selectVerificationMethod('stake')">
                 <div style="font-size: 3rem; margin-bottom: 1rem;">🔒</div>
-                <h3 style="color: var(--color-gold); margin-bottom: 0.5rem;">Stake de C2PM</h3>
+                <h3 style="color: var(--color-gold); margin-bottom: 0.5rem;">Stake de Méritos</h3>
                 <p style="color: var(--color-text-secondary); font-size: 0.9rem; margin-bottom: 1rem;">
-                    Bloquea 100 C2PM como garantía
+                    Bloquea 100 Méritos como garantía
                 </p>
                 <div style="background: rgba(229, 185, 92, 0.1); padding: 0.75rem; border-radius: 8px; border: 1px solid var(--color-gold);">
                     <div style="font-size: 0.85rem; color: var(--color-gold);">
                         ⚡ Instantáneo<br>
                         ⭐ Nivel: Identidad Real<br>
-                        ⚠️ Requiere: 100 C2PM
+                        ⚠️ Requiere: 100 Méritos
                     </div>
                 </div>
             </div>
@@ -3844,17 +3844,17 @@
             
             <div style="background: var(--color-bg-dark); padding: 1.5rem; border-radius: 12px; margin-bottom: 1.5rem;">
                 <p style="color: var(--color-text-secondary); margin-bottom: 1rem;">
-                    Bloquea 100 C2PM como garantía de buena fe. Si haces spam o fraude, perderás el stake (slashing).
+                    Bloquea 100 Méritos como garantía de buena fe. Si haces spam o fraude, perderás el stake (slashing).
                 </p>
                 
                 <div style="background: rgba(229, 185, 92, 0.1); padding: 1rem; border-radius: 8px; border: 1px solid var(--color-gold); margin-bottom: 1rem;">
                     <div style="display: flex; justify-content: space-between; margin-bottom: 0.5rem;">
                         <span style="color: var(--color-text-secondary);">Stake requerido:</span>
-                        <span style="font-weight: 700; color: var(--color-gold);">100 C2PM</span>
+                        <span style="font-weight: 700; color: var(--color-gold);">100 Méritos</span>
                     </div>
                     <div style="display: flex; justify-content: space-between;">
                         <span style="color: var(--color-text-secondary);">Tu balance:</span>
-                        <span style="font-weight: 700; color: var(--color-text-primary);" id="userBalanceForStake">0 C2PM</span>
+                        <span style="font-weight: 700; color: var(--color-text-primary);" id="userBalanceForStake">0 Méritos</span>
                     </div>
                 </div>
 
@@ -3867,7 +3867,7 @@
 
             <div class="action-buttons">
                 <button class="btn btn-secondary" onclick="closeStakeVerification()">Cancelar</button>
-                <button class="btn btn-primary" onclick="submitStakeVerification()" id="stakeBtn">Bloquear 100 C2PM</button>
+                <button class="btn btn-primary" onclick="submitStakeVerification()" id="stakeBtn">Bloquear 100 Méritos</button>
             </div>
         </div>
     </div>

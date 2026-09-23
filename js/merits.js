@@ -368,7 +368,7 @@ async function loadLeaderboard() {
                     </div>
                     <div style="text-align: right;">
                         <div style="font-size: 1.3rem; font-weight: 700; color: var(--color-gold);" id="leaderboardUserMerits">${totalMerits}</div>
-                        <div style="font-size: 0.75rem; color: var(--color-text-secondary);">C2PM</div>
+                        <div style="font-size: 0.75rem; color: var(--color-text-secondary);">Méritos</div>
                     </div>
                 </div>
                 <div style="text-align: center; padding: 1rem; color: var(--color-text-secondary); font-size: 0.9rem;">
@@ -397,7 +397,7 @@ async function loadLeaderboard() {
                     </div>
                     <div style="text-align: right;">
                         <div style="font-size: 1.1rem; font-weight: 700; color: var(--color-gold);">${entry.total}</div>
-                        <div style="font-size: 0.7rem; color: var(--color-text-secondary);">C2PM</div>
+                        <div style="font-size: 0.7rem; color: var(--color-text-secondary);">Méritos</div>
                     </div>
                 </div>
             `;
@@ -630,7 +630,7 @@ function _loadLedgerDataLegacy() {
         }).join('');
 
         const el = id => document.getElementById(id);
-        if (el('ledger_total_emitido')) el('ledger_total_emitido').textContent = totalEmitido.toFixed(2) + ' LBWM';
+        if (el('ledger_total_emitido')) el('ledger_total_emitido').textContent = totalEmitido.toFixed(2) + ' Méritos';
         if (el('ledger_emisiones')) el('ledger_emisiones').textContent = allContribs.length;
         if (el('ledger_aportantes')) el('ledger_aportantes').textContent = aportantesSet.size;
     }
@@ -906,7 +906,7 @@ async function submitContribution(event) {
                     const catDef = LBW_Merits.CATEGORIES[category];
                     await LBW_Governance.publishProposal({
                         title: `[Aportación ${catDef.emoji} ${catDef.label}] ${description}`,
-                        description: `Valor: ${value} · Peso: ×${catDef.weight} · C2PM estimados: ${(value * catDef.weight).toFixed(2)}` +
+                        description: `Valor: ${value} · Peso: ×${catDef.weight} · Méritos estimados: ${(value * catDef.weight).toFixed(2)}` +
                             (evidence ? `\nEvidencia: ${evidence}` : ''),
                         category: 'referendum'
                     });
@@ -1121,7 +1121,7 @@ function loadMyContributions() {
                         <div style="font-weight: 600; color: var(--color-text-primary);">×${c.factor_proposed || '1.0'}</div>
                     </div>
                     <div>
-                        <div style="font-size: 0.75rem; color: var(--color-text-secondary);">C2PM</div>
+                        <div style="font-size: 0.75rem; color: var(--color-text-secondary);">Méritos</div>
                         <div style="font-weight: 700; color: var(--color-gold); font-size: 1.1rem;">${typeof c.lbwm_estimated === 'number' ? c.lbwm_estimated.toFixed(2) : c.lbwm_estimated}</div>
                     </div>
                 </div>
@@ -1636,7 +1636,7 @@ function loadPendingVerifications() {
                 '</div>' +
                 '<div style="text-align:right;min-width:80px;">' +
                     '<div style="font-family:var(--font-mono);font-weight:700;color:var(--color-gold);font-size:1.1rem;">' + (c.amount || 0) + '</div>' +
-                    '<div style="font-size:0.7rem;color:var(--color-text-secondary);">C2PM</div>' +
+                    '<div style="font-size:0.7rem;color:var(--color-text-secondary);">Méritos</div>' +
                 '</div>' +
             '</div>' +
             (c.txProof ? '<div style="margin-top:0.5rem;padding:0.5rem;background:rgba(0,0,0,0.2);border-radius:6px;font-size:0.75rem;font-family:var(--font-mono);color:var(--color-text-secondary);word-break:break-all;">📎 ' + c.txProof + '</div>' : '') +
@@ -1672,19 +1672,19 @@ async function manualFounderBootstrap() {
         return;
     }
 
-    if (!confirm('¿Ejecutar bootstrap fundacional de 3.000 C2PM? Esta acción se publicará en Nostr y es irreversible.')) return;
+    if (!confirm('¿Ejecutar bootstrap fundacional de 3.000 Méritos? Esta acción se publicará en Nostr y es irreversible.')) return;
 
     try {
         showNotification('⏳ Ejecutando bootstrap fundacional...', 'success');
         const result = await LBW_Merits.bootstrapFounder(
             founderHex,
             3000,
-            'Méritos fundacionales — desarrollo app, infraestructura, diseño sistema C2PM, documentación pre-lanzamiento'
+            'Méritos fundacionales — desarrollo app, infraestructura, diseño sistema de Méritos, documentación pre-lanzamiento'
         );
         if (result.alreadyBootstrapped) {
-            showNotification('ℹ️ Ya tienes méritos fundacionales registrados (' + result.total + ' C2PM).', 'success');
+            showNotification('ℹ️ Ya tienes méritos fundacionales registrados (' + result.total + ' Méritos).', 'success');
         } else {
-            showNotification('✅ Bootstrap fundacional completado. 3.000 C2PM publicados en Nostr.', 'success');
+            showNotification('✅ Bootstrap fundacional completado. 3.000 Méritos publicados en Nostr.', 'success');
         }
         setTimeout(() => { loadMeritsData(); loadPendingVerifications(); }, 1500);
     } catch (err) {
@@ -1717,7 +1717,7 @@ function renderFounderBootstrapPanel() {
             '<div style="font-size:0.8rem;color:var(--color-text-secondary);">No se han detectado méritos fundacionales en el relay. Activa tu estado de Génesis.</div>' +
         '</div>' +
     '</div>' +
-    '<button onclick="manualFounderBootstrap()" style="background:var(--color-gold);color:#0d171e;font-weight:700;border:none;border-radius:8px;padding:0.6rem 1.25rem;cursor:pointer;font-size:0.9rem;">🚀 Ejecutar Bootstrap (3.000 C2PM)</button>';
+    '<button onclick="manualFounderBootstrap()" style="background:var(--color-gold);color:#0d171e;font-weight:700;border:none;border-radius:8px;padding:0.6rem 1.25rem;cursor:pointer;font-size:0.9rem;">🚀 Ejecutar Bootstrap (3.000 Méritos)</button>';
     container.prepend(banner);
 }
 
