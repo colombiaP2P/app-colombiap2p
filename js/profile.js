@@ -6,13 +6,14 @@
 // ColombiaP2P — Sistema de Méritos (niveles)
 // ============================================
 const C2P_XP_LEVELS = [
-    { level: 0, min: 0,    name: 'Fiatelo',    icon: '😴', color: '#8a8178' },
-    { level: 1, min: 50,   name: 'Plebeyo',    icon: '👤', color: '#4CAF50' },
-    { level: 2, min: 100,  name: 'Hodler',     icon: '🫙', color: '#8BC34A' },
-    { level: 3, min: 200,  name: 'Noder',      icon: '⚡', color: '#F7931A' },
-    { level: 4, min: 400,  name: 'Bitcoiner',  icon: '₿',  color: '#FF9800' },
-    { level: 5, min: 800,  name: 'Maximalist', icon: '🔥', color: '#FF5722' },
-    { level: 6, min: 1000, name: 'Satoshi',    icon: '👑', color: '#9C27B0' },
+    { level: 0, min: 0,    name: 'Fiatelo',     icon: '💸', color: '#78909C' },
+    { level: 1, min: 100,  name: 'Plebeyo',     icon: '👤', color: '#66BB6A' },
+    { level: 2, min: 200,  name: 'Hodler',      icon: '💎', color: '#CDDC39' },
+    { level: 3, min: 400,  name: 'Noder',       icon: '🖥️', color: '#26C6DA' },
+    { level: 4, min: 800,  name: 'Bitcoiner',   icon: '₿',  color: '#FFA726' },
+    { level: 5, min: 1600, name: 'Maximalista', icon: '🦁', color: '#FF5722' },
+    { level: 6, min: 2100, name: 'Satoshi',     icon: '🔑', color: '#AB47BC' },
+    { level: 7, min: 3000, name: 'Génesis',     icon: '👑', color: '#9C27B0' },
 ];
 
 function getXPLevel(xp) {
@@ -117,13 +118,14 @@ async function updateXPDisplay(meritData) {
 // Si LBW_Merits no está disponible, fallback local con estructura compatible
 function getCitizenshipLevel(merits) {
     if (merits >= 3000) return { level: 7, title: 'Génesis',     icon: '👑', bloc: 'Gobernanza' };
-    if (merits >= 1000) return { level: 6, title: 'Satoshi',     icon: '🟠', bloc: 'Gobernanza' };
-    if (merits >= 800)  return { level: 5, title: 'Maximalist',  icon: '🔥', bloc: 'Comunidad' };
-    if (merits >= 400)  return { level: 4, title: 'Bitcoiner',   icon: '₿',  bloc: 'Comunidad' };
-    if (merits >= 200)  return { level: 3, title: 'Noder',       icon: '⚡', bloc: 'Comunidad' };
-    if (merits >= 100)  return { level: 2, title: 'Hodler',      icon: '🫙', bloc: 'Comunidad' };
-    if (merits >= 50)   return { level: 1, title: 'Plebeyo',     icon: '👤', bloc: 'Comunidad' };
-    return              { level: 0, title: 'Fiatelo',     icon: '😴', bloc: 'Comunidad' };
+    if (merits >= 3000) return { level: 7, title: 'Génesis',     icon: '👑', bloc: 'Gobernanza' };
+    if (merits >= 2100) return { level: 6, title: 'Satoshi',     icon: '🔑', bloc: 'Gobernanza' };
+    if (merits >= 1600) return { level: 5, title: 'Maximalista', icon: '🦁', bloc: 'Ciudadanía' };
+    if (merits >= 800)  return { level: 4, title: 'Bitcoiner',   icon: '₿',  bloc: 'Ciudadanía' };
+    if (merits >= 400)  return { level: 3, title: 'Noder',       icon: '🖥️', bloc: 'Comunidad'  };
+    if (merits >= 200)  return { level: 2, title: 'Hodler',      icon: '💎', bloc: 'Comunidad'  };
+    if (merits >= 100)  return { level: 1, title: 'Plebeyo',     icon: '👤', bloc: 'Comunidad'  };
+    return              { level: 0, title: 'Fiatelo',     icon: '💸', bloc: 'Comunidad'  };
 }
 
 // getUnifiedMerits movida a nostr-merits.js (Fase 2 limpieza)
@@ -132,16 +134,17 @@ function getCitizenshipLevel(merits) {
 // Citizenship Gauge Visualization (Canvas)
 // ============================================
 const GAUGE_SEGS = [
-    { label:'Fiatelo',    shortLabel:'Fiatelo',  icon:'😴', color:'#78909C', bloc:'Comunidad',  min:0    },
-    { label:'Plebeyo',    shortLabel:'Plebeyo',  icon:'👤', color:'#4CAF50', bloc:'Comunidad',  min:50   },
-    { label:'Hodler',     shortLabel:'Hodler',   icon:'🫙', color:'#8BC34A', bloc:'Comunidad',  min:100  },
-    { label:'Noder',      shortLabel:'Noder',    icon:'⚡', color:'#CDDC39', bloc:'Comunidad',  min:200  },
-    { label:'Bitcoiner',  shortLabel:'Bitcoiner', icon:'₿',  color:'#FF9800', bloc:'Comunidad',  min:400  },
-    { label:'Maximalist', shortLabel:'Maximal.', icon:'🔥', color:'#FF5722', bloc:'Comunidad',  min:800  },
-    { label:'Satoshi',    shortLabel:'Satoshi',  icon:'🟠', color:'#9C27B0', bloc:'Gobernanza', min:1000 },
+    { label:'Fiatelo',     shortLabel:'Fiatelo',  icon:'💸', color:'#78909C', bloc:'Comunidad',  min:0    },
+    { label:'Plebeyo',     shortLabel:'Plebeyo',  icon:'👤', color:'#66BB6A', bloc:'Comunidad',  min:100  },
+    { label:'Hodler',      shortLabel:'Hodler',   icon:'💎', color:'#CDDC39', bloc:'Comunidad',  min:200  },
+    { label:'Noder',       shortLabel:'Noder',    icon:'🖥️', color:'#26C6DA', bloc:'Comunidad',  min:400  },
+    { label:'Bitcoiner',   shortLabel:'Bitcoiner',icon:'₿',  color:'#FFA726', bloc:'Ciudadanía', min:800  },
+    { label:'Maximalista', shortLabel:'Maximal.', icon:'🦁', color:'#FF5722', bloc:'Ciudadanía', min:1600 },
+    { label:'Satoshi',     shortLabel:'Satoshi',  icon:'🔑', color:'#AB47BC', bloc:'Gobernanza', min:2100 },
+    { label:'Génesis',     shortLabel:'Génesis',  icon:'👑', color:'#9C27B0', bloc:'Gobernanza', min:3000 },
 ];
 const GAUGE_THRESH = GAUGE_SEGS.map(s=>s.min);
-const GAUGE_RANGES = [50,50,100,200,400,200,2000];
+const GAUGE_RANGES = [100,100,200,400,800,500,900,900];
 const GAUGE_N = GAUGE_SEGS.length;
 const GAUGE_SEG_ANG = Math.PI / GAUGE_N;
 const GAUGE_GAP = 0.02;

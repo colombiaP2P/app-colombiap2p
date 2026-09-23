@@ -270,7 +270,7 @@ const LBW_Missions = (function () {
         }
         // Fallback si LBW_Merits no está disponible aún
         const map = {
-            'Fiatelo': 0, 'Plebeyo': 50, 'Hodler': 100, 'Noder': 200, 'Bitcoiner': 400, 'Maximalist': 800, 'Satoshi': 1000, 'Génesis': 3000
+            'Fiatelo': 0, 'Plebeyo': 100, 'Hodler': 200, 'Noder': 400, 'Bitcoiner': 800, 'Maximalista': 1600, 'Satoshi': 2100, 'Génesis': 3000
         };
         return map[level] || 0;
     }
@@ -602,13 +602,14 @@ const LBW_Missions = (function () {
                     <div class="form-group">
                         <label style="display:block;margin-bottom:0.4rem;color:var(--color-gold);font-size:0.85rem;">Ciudadanía mínima</label>
                         <select id="missionMinCitizenship" style="width:100%;padding:0.7rem;background:var(--color-bg-dark);border:2px solid var(--color-border);border-radius:8px;color:var(--color-text-primary);">
-                            <option value="Fiatelo">😴 Fiatelo (cualquiera)</option>
-                            <option value="Plebeyo">👤 Plebeyo (50+)</option>
-                            <option value="Hodler">🫙 Hodler (100+)</option>
-                            <option value="Noder">⚡ Noder (200+)</option>
-                            <option value="Bitcoiner">₿ Bitcoiner (400+)</option>
-                            <option value="Maximalist">🔥 Maximalist (800+)</option>
-                            <option value="Satoshi">👑 Satoshi (1000+)</option>
+                            <option value="Fiatelo">💸 Fiatelo (cualquiera)</option>
+                            <option value="Plebeyo">👤 Plebeyo (100+)</option>
+                            <option value="Hodler">💎 Hodler (200+)</option>
+                            <option value="Noder">🖥️ Noder (400+)</option>
+                            <option value="Bitcoiner">₿ Bitcoiner (800+)</option>
+                            <option value="Maximalista">🦁 Maximalista (1600+)</option>
+                            <option value="Satoshi">🔑 Satoshi (2100+)</option>
+                            <option value="Génesis">👑 Génesis (3000+)</option>
                         </select>
                     </div>
                     <div class="form-group">
