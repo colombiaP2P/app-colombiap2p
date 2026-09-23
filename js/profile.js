@@ -315,7 +315,7 @@ function initializeUserProfile() {
     // Initialize profile if not exists
     if (!userProfile) {
         userProfile = {
-            citizenshipType: 'Amigo',
+            citizenshipType: 'Fiatelo',
             city: '',
             registrationDate: new Date().toISOString()
         };

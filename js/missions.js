@@ -302,7 +302,7 @@ const LBW_Missions = (function () {
                         <h3 style="color:var(--color-gold);font-size:1.2rem;margin-bottom:0.3rem;">🎯 Misiones ColombiaP2P</h3>
                         <p style="font-size:0.8rem;color:var(--color-text-secondary);">La organización publica tareas a cambio de méritos. Reclama una misión para contribuir.</p>
                     </div>
-                    ${canCreate ? `<button class="btn btn-primary btn-sm" onclick="LBW_Missions.showCreateForm()" style="font-size:0.85rem;">+ Nueva Misión</button>` : `<div style="font-size:0.75rem;color:var(--color-text-secondary);padding:0.4rem 0.8rem;background:rgba(255,255,255,0.05);border-radius:20px;">Ciudadano Senior+ para crear</div>`}
+                    ${canCreate ? `<button class="btn btn-primary btn-sm" onclick="LBW_Missions.showCreateForm()" style="font-size:0.85rem;">+ Nueva Misión</button>` : `<div style="font-size:0.75rem;color:var(--color-text-secondary);padding:0.4rem 0.8rem;background:rgba(255,255,255,0.05);border-radius:20px;">Bitcoiner+ para crear</div>`}
                 </div>
 
                 <!-- Filter pills -->

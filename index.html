@@ -1065,7 +1065,11 @@
                         </div>
                         <div style="display: flex; gap: 0.75rem; align-items: flex-start;">
                             <span style="background: rgba(255, 152, 0, 0.2); border-radius: 50%; width: 28px; height: 28px; display: flex; align-items: center; justify-content: center; font-size: 0.8rem; font-weight: 700; color: #FFB74D; flex-shrink: 0;">3</span>
-                            <p style="color: var(--color-text-primary); font-size: 0.85rem; line-height: 1.5;">Tu aportación se registra como contribución económica y genera Méritos C2P con peso 1.0x</p>
+                            <p style="color: var(--color-text-primary); font-size: 0.85rem; line-height: 1.5;">Tu aportación se registra como contribución económica y genera Méritos C2P con peso 0.01× (100 sats = 1 mérito, máx 500 méritos por persona)</p>
+                        </div>
+                        <div style="display: flex; gap: 0.75rem; align-items: flex-start;">
+                            <span style="background: rgba(255, 152, 0, 0.2); border-radius: 50%; width: 28px; height: 28px; display: flex; align-items: center; justify-content: center; font-size: 0.8rem; font-weight: 700; color: #FFB74D; flex-shrink: 0;">4</span>
+                            <p style="color: var(--color-text-primary); font-size: 0.85rem; line-height: 1.5;">Los aportes por debajo de 100 sats no generan Méritos — son considerados donaciones a ColombiaP2P</p>
                         </div>
                     </div>
                     <div style="margin-top: 1rem; padding: 0.75rem; background: rgba(229, 185, 92, 0.08); border-radius: 10px; border-left: 3px solid var(--color-gold);">
@@ -3203,14 +3207,14 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"
             integrity="sha384-3zSEDfvllQohrq0PHL1fOXJuC/jSOO34H46t6UQfobFOmxE5BpjjaIJY5F2/bMnU"
             crossorigin="anonymous"></script>
-    <script src="js/lightning.js?v=c2p-12"></script>
+    <script src="js/lightning.js?v=c2p-13"></script>
     <script src="js/governance.js?v=c2p-8-nip72-5"></script>
     <!-- PocketBase SDK + cliente C2P (Sellos, Badges) -->
     <script src="https://cdn.jsdelivr.net/npm/pocketbase@0.21.0/dist/pocketbase.umd.js"></script>
     <script src="js/c2p-pocketbase.js?v=1"></script>
     <script src="js/c2p-eventos.js?v=9"></script>
     <script src="js/c2p-rachas.js?v=11"></script>
-    <script src="js/profile.js?v=c2p-20"></script>
+    <script src="js/profile.js?v=c2p-21"></script>
     <script src="js/nwc.js?v=secA1-1"></script>
     <script src="js/wallet.js?v=secA1-5"></script>
 
@@ -3218,20 +3222,20 @@
     <script src="js/nostr-store.js?v=phase1"></script>
     <script src="js/nostr-media.js?v=phase1"></script>
     <script src="js/chat-attachments.js?v=hardening-1"></script>
-    <script src="js/nostr.js?v=c2p-11"></script>
+    <script src="js/nostr.js?v=c2p-12"></script>
     <script src="js/nostr-nip46.js?v=nip46qr-4"></script>
     <script src="js/nostr-dm.js?v=phase1"></script>
     <script src="js/nostr-sync.js?v=phase1"></script>
     <script src="js/nostr-governance.js?v=nip72-6"></script>
     <script src="js/nostr-delegations.js?v=apr17a"></script>
     <script src="js/delegations-ui.js?v=apr17a"></script>
-    <script src="js/nostr-merits.js?v=transparency-5"></script>
+    <script src="js/nostr-merits.js?v=transparency-7"></script>
     <!-- Sección Transparencia: méritos + treasury -->
     <script src="js/transparency.js?v=c2p-21"></script>
     <script src="js/c2p-treasury.js?v=4"></script>
     <script src="js/c2p-stats.js?v=2"></script>
     <!-- merits.js cargado DESPUÉS de nostr-merits.js ya que depende de LBW_Merits -->
-    <script src="js/merits.js?v=c2p-8"></script>
+    <script src="js/merits.js?v=c2p-9"></script>
     <script src="js/nostr-reviews.js?v=hardening-1"></script>
     <script src="js/nostr-marketplace-pay.js?v=m9-2"></script>
     <script src="js/nostr-stalls.js?v=hardening-1"></script>
@@ -3241,7 +3245,7 @@
     <script src="js/debate.js?v=nip72-1"></script>
     <script src="js/avatar-fix.js?v=3"></script>
     <!-- Missions system (Merit Bounties) -->
-    <script src="js/missions.js?v=c2p-13"></script>
+    <script src="js/missions.js?v=c2p-14"></script>
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
             integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
             crossorigin=""></script>

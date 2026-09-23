@@ -6,8 +6,8 @@
 // Snapshots (kind 31005) for leaderboard consensus.
 //
 // v2.0 Changes:
-//   - 4 categories: Económica(1.0), Productiva(1.0), Responsabilidad(1.2), Financiada(0.6)
-//   - 6 citizenship levels: Amigo → Génesis
+//   - 4 categories: Económica(0.01, cap 500), Productiva(1.0), Responsabilidad(1.2), Financiada(0.6)
+//   - 8 citizenship levels: Fiatelo → Génesis
 //   - 3 voting blocks: Gobernanza(51%), Ciudadanía(29%), Comunidad(20%)
 //   - Génesis merit cap: min(total, 3000) for voting
 //   - Responsabilidad requires 1000+ merits in other categories
@@ -39,7 +39,8 @@ const LBW_Merits = (() => {
             label: 'Económica Definitiva',
             emoji: '💰',
             description: 'Aportaciones económicas definitivas al ecosistema',
-            weight: 1.0
+            weight: 0.01,
+            maxMerits: 500  // anti-plutocracy cap: max 500 pts por persona en esta categoría
         },
         productiva: {
             label: 'Productiva',
@@ -72,12 +73,14 @@ const LBW_Merits = (() => {
     // ── Citizenship Levels (v2.0) ──────────────────────────────
     // 6 levels derived from cumulative merits. Linear progression.
     const CITIZENSHIP_LEVELS = [
-        { name: 'Amigo',              minMerits: 0,     emoji: '👋', color: '#4CAF50',  bloc: 'Comunidad' },
-        { name: 'E-Residency',        minMerits: 100,   emoji: '🪪', color: '#8BC34A',  bloc: 'Comunidad' },
-        { name: 'Colaborador',        minMerits: 500,   emoji: '🤝', color: '#CDDC39',  bloc: 'Comunidad' },
-        { name: 'Ciudadano Senior',   minMerits: 1000,  emoji: '🛂', color: '#FF9800',  bloc: 'Ciudadanía' },
-        { name: 'Custodio',            minMerits: 2000,  emoji: '🌍', color: '#FF5722',  bloc: 'Ciudadanía' },
-        { name: 'Génesis',             minMerits: 3000,  emoji: '👑', color: '#9C27B0',  bloc: 'Gobernanza' }
+        { name: 'Fiatelo',      minMerits: 0,     emoji: '💸', color: '#78909C',  bloc: 'Comunidad'  },
+        { name: 'Plebeyo',      minMerits: 100,   emoji: '👤', color: '#66BB6A',  bloc: 'Comunidad'  },
+        { name: 'Hodler',       minMerits: 200,   emoji: '💎', color: '#CDDC39',  bloc: 'Comunidad'  },
+        { name: 'Noder',        minMerits: 400,   emoji: '🖥️', color: '#26C6DA',  bloc: 'Comunidad'  },
+        { name: 'Bitcoiner',    minMerits: 800,   emoji: '₿',  color: '#FFA726',  bloc: 'Ciudadanía' },
+        { name: 'Maximalista',  minMerits: 1600,  emoji: '🦁', color: '#FF5722',  bloc: 'Ciudadanía' },
+        { name: 'Satoshi',      minMerits: 2100,  emoji: '🔑', color: '#AB47BC',  bloc: 'Gobernanza' },
+        { name: 'Génesis',      minMerits: 3000,  emoji: '👑', color: '#9C27B0',  bloc: 'Gobernanza' },
     ];
 
     // ── Voting Blocks (v2.0) ───────────────────────────────────
@@ -983,9 +986,17 @@ const LBW_Merits = (() => {
             }
         }
 
-        userData.records.push({ id, dTag, amount, category, created_at, source });
-        userData.total += amount;
-        userData.byCategory[category] = (userData.byCategory[category] || 0) + amount;
+        // Aplicar cap por categoría si está definido (ej. anti-plutocracy en economica)
+        const _catDef = CATEGORIES[category];
+        let effectiveAmount = amount;
+        if (_catDef?.maxMerits != null) {
+            const currentCatMerits = userData.byCategory[category] || 0;
+            effectiveAmount = Math.max(0, Math.min(amount, _catDef.maxMerits - currentCatMerits));
+        }
+
+        userData.records.push({ id, dTag, amount: effectiveAmount, category, created_at, source });
+        userData.total += effectiveAmount;
+        userData.byCategory[category] = (userData.byCategory[category] || 0) + effectiveAmount;
         // [transparency-1] _allMerits ya se actualizó arriba (antes del
         // dedup-by-id). No duplicar aquí.
 
@@ -1142,9 +1153,9 @@ const LBW_Merits = (() => {
 
     // ── Voting Power (v2.0) ──────────────────────────────────
     // 3-block system:
-    //   Gobernanza (Génesis): min 51%, equitable distribution
-    //   Ciudadanía (Ciudadano Senior + Custodio): max 29%, proportional
-    //   Comunidad (Amigo + E-Residency + Colaborador): max 20%, proportional
+    //   Gobernanza (Satoshi + Génesis): min 51%, equitable distribution
+    //   Ciudadanía (Bitcoiner + Maximalista): max 29%, proportional
+    //   Comunidad (Fiatelo + Plebeyo + Hodler + Noder): max 20%, proportional
 
     function calculateVotingPower(voters) {
         const blocs = { Gobernanza: [], 'Ciudadanía': [], Comunidad: [] };

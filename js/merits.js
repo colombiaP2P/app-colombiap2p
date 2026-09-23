@@ -330,15 +330,15 @@ async function loadLeaderboard() {
             if (ledger && ledger.users && ledger.users.length > 0) {
                 // Derive bloc from level name (Supabase doesn't store bloc directly)
                 const blocFor = (lvl) => {
-                    if (lvl === 'Génesis') return 'Gobernanza';
-                    if (lvl === 'Custodio' || lvl === 'Ciudadano Senior') return 'Ciudadanía';
+                    if (lvl === 'Génesis' || lvl === 'Satoshi') return 'Gobernanza';
+                    if (lvl === 'Bitcoiner' || lvl === 'Maximalista') return 'Ciudadanía';
                     return 'Comunidad';
                 };
                 leaderboard = ledger.users.map(u => ({
                     pubkey: u.pubkey,
                     npub: u.npub || '',
                     total: u.total || 0,
-                    level: { name: u.nivel || 'Amigo', emoji: u.nivel_emoji || '👋', bloc: blocFor(u.nivel) }
+                    level: { name: u.nivel || 'Fiatelo', emoji: u.nivel_emoji || '💸', bloc: blocFor(u.nivel) }
                 }));
             }
         } catch (e) {
@@ -393,7 +393,7 @@ async function loadLeaderboard() {
                     <div style="font-size: 1.2rem; font-weight: 700; color: var(--color-gold); min-width: 36px;">${medal}</div>
                     <div style="flex: 1;">
                         <div id="${nameId}" style="color: var(--color-text-primary); font-weight: 600;">${isMe && currentUser?.name ? currentUser.name : npubShort}</div>
-                        <div style="color: var(--color-text-secondary); font-size: 0.75rem;">${lvl?.emoji || '🌐'} ${lvl?.name || 'E-Residency'} <span style="opacity:0.6">· ${lvl?.bloc || 'Comunidad'}</span></div>
+                        <div style="color: var(--color-text-secondary); font-size: 0.75rem;">${lvl?.emoji || '💸'} ${lvl?.name || 'Fiatelo'} <span style="opacity:0.6">· ${lvl?.bloc || 'Comunidad'}</span></div>
                     </div>
                     <div style="text-align: right;">
                         <div style="font-size: 1.1rem; font-weight: 700; color: var(--color-gold);">${entry.total}</div>
@@ -1143,12 +1143,12 @@ function loadMyContributions() {
 // Cualquier orden de scripts funciona ahora — si LBW_Merits aún no está cargado
 // cuando merits.js se parsea, _initGaugeConstants() resuelve más tarde, en la
 // primera llamada a una función de gauge (que ocurre post-DOMContentLoaded).
-const GAUGE_SHORT_LABELS = ['Amigo', 'E-Res.', 'Colabor.', 'C.Senior', 'Custod.', 'Génesis'];
+const GAUGE_SHORT_LABELS = ['Fiatelo', 'Plebeyo', 'Hodler', 'Noder', 'Bitcoiner', 'Maxim.', 'Satoshi', 'Génesis'];
 let GAUGE_LEVELS = [];
 let GAUGE_THRESH = [];
 let GAUGE_N = 0;
 let SEG_ANG = 0;
-const GAUGE_RANGES = [100, 400, 500, 1000, 1000, 500];
+const GAUGE_RANGES = [100, 100, 200, 400, 800, 500, 900, 900];
 const GAP = 0.02;
 
 function _initGaugeConstants() {
@@ -1179,7 +1179,8 @@ if (typeof document !== 'undefined') {
 
 function _meritsToAngle(m) {
     if (!_initGaugeConstants()) return 0;
-    if (m >= 3000) { var extra = Math.min(m - 3000, GAUGE_RANGES[5]); return Math.PI - 5 * SEG_ANG - (extra / GAUGE_RANGES[5]) * SEG_ANG; }
+    var lastIdx = GAUGE_N - 1;
+    if (m >= GAUGE_THRESH[lastIdx]) { var extra = Math.min(m - GAUGE_THRESH[lastIdx], GAUGE_RANGES[lastIdx]); return Math.PI - lastIdx * SEG_ANG - (extra / GAUGE_RANGES[lastIdx]) * SEG_ANG; }
     for (var i = 0; i < GAUGE_N - 1; i++) { if (m < GAUGE_THRESH[i + 1]) { return Math.PI - i * SEG_ANG - ((m - GAUGE_THRESH[i]) / GAUGE_RANGES[i]) * SEG_ANG; } }
     return 0;
 }

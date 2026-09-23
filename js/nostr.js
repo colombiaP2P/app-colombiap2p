@@ -1142,7 +1142,7 @@ const LBW_Nostr = (() => {
             display_name: displayName || 'Anon',
             about: 'Ciudadano de LiberBit World 🌐',
             picture: '', lud16: '', nip05: '', banner: '', website: '',
-            lbw_citizenship: 'E-Residency',
+            lbw_citizenship: 'Plebeyo',
             lbw_city: '',
             lbw_joined: new Date().toISOString()
         };

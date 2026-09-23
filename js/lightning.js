@@ -218,7 +218,7 @@ function _showAportacionSuccess({ amountSats, senderPubkey, isAutoDetected }) {
             <div style="background:rgba(255,152,0,0.08);border:1px solid rgba(255,152,0,0.25);border-radius:10px;padding:1rem;margin-bottom:1.25rem;text-align:left;">
                 <div style="font-size:0.82rem;font-weight:700;color:#FFB74D;margin-bottom:0.5rem;">¿Cuándo recibo mis Méritos?</div>
                 <div style="font-size:0.8rem;color:var(--color-text-secondary);line-height:1.6;">
-                    El equipo ColombiaP2P verifica los zaps recibidos y emite los <strong style="color:var(--color-text-primary);">Méritos con peso 1.0×</strong> a tu npub en un plazo de <strong style="color:var(--color-text-primary);">24 horas</strong>.<br>
+                    El equipo ColombiaP2P verifica los zaps recibidos y emite los <strong style="color:var(--color-text-primary);">Méritos Económicos (0.01× · 100 sats = 1 mérito · máx 500 pts)</strong> a tu npub en un plazo de <strong style="color:var(--color-text-primary);">24 horas</strong>. Los aportes menores a 100 sats son donaciones y no generan méritos.<br>
                     Podrás verlos en tu sección <strong>Méritos</strong> y en <strong>Transparencia → Wallet</strong> con el badge ⚡ zap.
                 </div>
             </div>
