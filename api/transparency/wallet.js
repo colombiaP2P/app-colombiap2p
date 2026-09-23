@@ -49,7 +49,7 @@ async function _fetchLNbitsData(lnbitsUrl, readKey) {
             .filter(p => !p.pending)
             .map(p => {
                 const tsMs = p.time
-                    ? p.time * 1000
+                    ? (typeof p.time === 'string' ? new Date(p.time).getTime() : p.time * 1000)
                     : (p.created_at ? new Date(p.created_at).getTime() : Date.now());
                 return {
                     type:   p.amount > 0 ? 'in' : 'out',
