@@ -47,7 +47,8 @@ const C2P_Rachas = (function () {
             const currentUser = _myPubkey();
             // Si hay un usuario activo y los datos no le pertenecen (incluye storedUser vacío),
             // descartar — pueden ser de una sesión anterior de otro usuario
-            if (currentUser && storedUser !== currentUser) {
+            // Solo descartar si AMBOS usuarios son conocidos y son distintos (multi-user device)
+            if (currentUser && storedUser && storedUser !== currentUser) {
                 return { last: '', current: 0, max: 0, firstDate: '' };
             }
             return {
@@ -153,12 +154,16 @@ const C2P_Rachas = (function () {
         const pubkey = _myPubkey();
         if (!pb || !pubkey) return;
         try {
+            const todayKey = _today();
+            const existing = await pb.collection('xp_transactions')
+                .getFirstListItem(`user_pubkey="${pubkey}" && source="racha" && ref_id="${todayKey}"`).catch(() => null);
+            if (existing) return;
             await pb.collection('xp_transactions').create({
                 user_pubkey: pubkey,
                 amount,
                 reason:  `Racha día ${streakDays}`,
                 source:  'racha',
-                ref_id:  String(streakDays),
+                ref_id:  todayKey,
             });
         } catch (_) {}
     }
