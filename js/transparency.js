@@ -64,7 +64,8 @@ const LBW_Transparency = (() => {
 
     function _formatDate(unix) {
         if (!unix) return '—';
-        const d = new Date(unix * 1000);
+        const ms = unix > 1e12 ? unix : unix * 1000;
+        const d = new Date(ms);
         const day = String(d.getDate()).padStart(2, '0');
         const month = String(d.getMonth() + 1).padStart(2, '0');
         const year = d.getFullYear();
@@ -581,7 +582,7 @@ const LBW_Transparency = (() => {
         const zaps = await new Promise(resolve => {
             const out = [];
             const seen = new Set();
-            const timeout = setTimeout(() => resolve(out), 4000);
+            const timeout = setTimeout(() => resolve(out), 8000);
             let done = false;
             function finish() {
                 if (done) return;
@@ -634,7 +635,7 @@ const LBW_Transparency = (() => {
             const matches = zaps.filter(z => z.sats === m.amount && Math.abs(z.ts - mSecs) < WINDOW_SECS);
             if (matches.length === 0) return m;
             const best = matches.reduce((a, b) =>
-                Math.abs(a.ts - m.ts) < Math.abs(b.ts - m.ts) ? a : b
+                Math.abs(a.ts - mSecs) < Math.abs(b.ts - mSecs) ? a : b
             );
             return Object.assign({}, m, { zap: best });
         });
@@ -968,7 +969,7 @@ const LBW_Transparency = (() => {
         };
         const header = ['fecha_iso', 'fecha_unix', 'tipo', 'sats', 'memo_sanitizado', 'tx_hash'];
         const rows = movs.map(m => [
-            new Date((m.ts || 0) * 1000).toISOString(),
+            new Date((m.ts || 0) > 1e12 ? (m.ts || 0) : (m.ts || 0) * 1000).toISOString(),
             m.ts || 0,
             m.type || '',
             m.amount || 0,
