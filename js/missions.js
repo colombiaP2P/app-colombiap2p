@@ -158,7 +158,7 @@ const LBW_Missions = (function () {
         return updated;
     }
 
-    async function submitDelivery(missionId, deliveryUrl) {
+    async function submitDelivery(missionId, deliveryNote, deliveryUrl) {
         const pubkey = _myPubkey();
         if (!pubkey) throw new Error('No estás autenticado.');
 
@@ -167,7 +167,8 @@ const LBW_Missions = (function () {
         if (mission.claimed_by_pubkey !== pubkey) throw new Error('No eres quien reclamó esta misión.');
 
         const updated = await _getPB().collection('missions').update(missionId, {
-            delivery_url: deliveryUrl,
+            delivery_note: deliveryNote,
+            delivery_url: deliveryUrl || '',
             status: 'pending_review',
             updated_at: new Date().toISOString()
         });
@@ -405,7 +406,7 @@ const LBW_Missions = (function () {
                     ${canCancel ? `<button data-lbw-action="missionCancel" data-id="${_esc(m.id)}" style="font-size:0.72rem;padding:0.3rem 0.6rem;background:rgba(255,82,82,0.1);border:1px solid #FF5252;border-radius:8px;color:#FF5252;cursor:pointer;">✕ Cancelar</button>` : ''}
                 </div>
             </div>
-            ${m.claimed_by_name ? `<div style="margin-top:0.6rem;padding-top:0.6rem;border-top:1px solid var(--color-border);font-size:0.75rem;color:var(--color-text-secondary);">👤 Reclamada por <strong style="color:var(--color-text-primary);">${_esc(m.claimed_by_name)}</strong>${m.delivery_url ? ` · <a href="${_esc(LBW.safeUrl(m.delivery_url))}" target="_blank" rel="noopener noreferrer" style="color:var(--color-teal-light);">Ver entrega ↗</a>` : ''}</div>` : ''}
+            ${m.claimed_by_name ? `<div style="margin-top:0.6rem;padding-top:0.6rem;border-top:1px solid var(--color-border);font-size:0.75rem;color:var(--color-text-secondary);">👤 Reclamada por <strong style="color:var(--color-text-primary);">${_esc(m.claimed_by_name)}</strong>${m.delivery_note ? ` · <span style="font-style:italic;">"${_esc(m.delivery_note.substring(0,80))}${m.delivery_note.length>80?'…':''}"</span>` : ''}${m.delivery_url ? ` · <a href="${_esc(LBW.safeUrl(m.delivery_url))}" target="_blank" rel="noopener noreferrer" style="color:var(--color-teal-light);">Ver entrega ↗</a>` : ''}</div>` : ''}
         </div>`;
     }
 
@@ -707,11 +708,16 @@ const LBW_Missions = (function () {
             <div class="modal-content" style="max-width:500px;padding:2rem;">
                 <button class="modal-close" onclick="document.getElementById('missionDeliveryModal').remove()">✕</button>
                 <h3 style="color:var(--color-gold);margin-bottom:0.5rem;">📤 Entregar: ${_esc(m.title)}</h3>
-                <p style="font-size:0.82rem;color:var(--color-text-secondary);margin-bottom:1.25rem;">Adjunta el link a tu entrega para que un Génesis la revise y apruebe los méritos.</p>
+                <p style="font-size:0.82rem;color:var(--color-text-secondary);margin-bottom:1.25rem;">Describe tu entrega para que un Génesis la revise y apruebe los méritos.</p>
                 ${m.delivery_instructions ? `<div style="padding:0.75rem;background:rgba(38,166,154,0.08);border-radius:8px;margin-bottom:1rem;font-size:0.8rem;color:var(--color-teal-light);"><strong>📋 Instrucciones:</strong> ${_esc(m.delivery_instructions)}</div>` : ''}
                 <div class="form-group" style="margin-bottom:1.25rem;">
-                    <label style="display:block;margin-bottom:0.4rem;color:var(--color-gold);font-size:0.85rem;">URL de entrega *</label>
-                    <input type="url" id="deliveryUrl" placeholder="https://github.com/... o enlace a tu trabajo" style="width:100%;padding:0.7rem;background:var(--color-bg-dark);border:2px solid var(--color-border);border-radius:8px;color:var(--color-text-primary);">
+                    <label style="display:block;margin-bottom:0.4rem;color:var(--color-gold);font-size:0.85rem;">Nota de entrega *</label>
+                    <textarea id="deliveryNote" rows="4" placeholder="Describe qué hiciste, cómo lo completaste, qué evidencia tienes..." style="width:100%;padding:0.7rem;background:var(--color-bg-dark);border:2px solid var(--color-border);border-radius:8px;color:var(--color-text-primary);resize:vertical;font-family:inherit;font-size:0.9rem;"></textarea>
+                    <small style="color:var(--color-text-secondary);font-size:0.75rem;">Obligatorio — explica cómo completaste la misión.</small>
+                </div>
+                <div class="form-group" style="margin-bottom:1.5rem;">
+                    <label style="display:block;margin-bottom:0.4rem;color:var(--color-text-secondary);font-size:0.85rem;">URL de entrega <span style="font-size:0.75rem;opacity:0.6;">(opcional)</span></label>
+                    <input type="url" id="deliveryUrl" placeholder="https://github.com/... o enlace a tu trabajo" style="width:100%;padding:0.7rem;background:var(--color-bg-dark);border:1px solid var(--color-border);border-radius:8px;color:var(--color-text-primary);">
                     <small style="color:var(--color-text-secondary);font-size:0.75rem;">GitHub, Notion, Google Drive, vídeo, etc.</small>
                 </div>
                 <div style="display:flex;gap:0.75rem;justify-content:flex-end;">
@@ -723,14 +729,15 @@ const LBW_Missions = (function () {
     }
 
     async function submitDeliveryForm(missionId) {
-        const url = document.getElementById('deliveryUrl')?.value.trim();
-        if (!url) { showNotification('Introduce la URL de tu entrega.', 'error'); return; }
+        const note = document.getElementById('deliveryNote')?.value.trim();
+        const url  = document.getElementById('deliveryUrl')?.value.trim();
+        if (!note) { showNotification('La nota de entrega es obligatoria.', 'error'); return; }
 
         const btn = document.querySelector('#missionDeliveryModal .btn-primary');
         if (btn) { btn.disabled = true; btn.textContent = 'Enviando...'; }
 
         try {
-            await submitDelivery(missionId, url);
+            await submitDelivery(missionId, note, url);
             document.getElementById('missionDeliveryModal')?.remove();
             showNotification('✅ Entrega enviada. Un Génesis la revisará y aprobará los méritos.', 'success');
             renderMissionsTab();
