@@ -232,16 +232,43 @@ const LBW_Missions = (function () {
     }
 
     async function _awardMissionMerits(mission) {
-        // Use existing merit contribution system
         const cat = mission.merit_category;
         const amount = mission.merit_amount;
+        const recipientPubkey = mission.claimed_by_pubkey;
+        const reason = `✅ Misión completada: ${mission.title}`;
 
+        // 1. Publicar evento Nostr kind:31002 — actualiza el gauge del destinatario
+        if (typeof LBW_Merits !== 'undefined' && LBW_Merits.awardMerit) {
+            try {
+                await LBW_Merits.awardMerit(recipientPubkey, amount, cat, reason);
+            } catch (e) {
+                console.error('[Missions] Error publicando mérito Nostr:', e);
+            }
+        }
+
+        // 2. Crear entrada en xp_transactions — visible en el tab XP del usuario
+        const pb = _getPB();
+        if (pb && recipientPubkey) {
+            try {
+                await pb.collection('xp_transactions').create({
+                    user_pubkey: recipientPubkey,
+                    amount,
+                    reason,
+                    source: 'mision',
+                    ref_id: mission.id,
+                });
+            } catch (e) {
+                console.error('[Missions] Error creando xp_transaction:', e);
+            }
+        }
+
+        // 3. Registro de auditoría en merit_contributions
         try {
             await _getPB().collection('merit_contributions').create({
-                pubkey: mission.claimed_by_pubkey,
+                pubkey: recipientPubkey,
                 value: amount,
                 category: cat,
-                description: `✅ Misión completada: ${mission.title}`,
+                description: reason,
                 payment_method: 'mission',
                 status: 'approved',
                 approved_by: _myPubkey(),
@@ -250,7 +277,7 @@ const LBW_Missions = (function () {
                 created_at: new Date().toISOString()
             });
         } catch (e) {
-            console.error('[Missions] Failed to award merits:', e);
+            console.error('[Missions] Error creando merit_contribution:', e);
         }
     }
 
