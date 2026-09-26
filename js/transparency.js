@@ -1187,8 +1187,11 @@ const LBW_Transparency = (() => {
                 <label style="display:block;font-size:0.78rem;color:var(--color-text-secondary);margin-bottom:0.3rem;">npub o hex del donante <span style="color:#ff6b6b;">*</span></label>
                 <input id="c2pAwardZapNpub" type="text" placeholder="npub1... o hex pubkey" style="width:100%;box-sizing:border-box;padding:0.65rem 0.75rem;border-radius:8px;border:1px solid var(--color-border);background:var(--color-bg-dark);color:var(--color-text-primary);font-size:0.82rem;font-family:monospace;margin-bottom:0.75rem;">
                 ` : ''}
-                <label style="display:block;font-size:0.78rem;color:var(--color-text-secondary);margin-bottom:0.3rem;">Méritos a emitir <span style="font-size:0.7rem;">(categoría Económica)</span></label>
-                <input id="c2pAwardZapAmt" type="number" value="${amountSats||0}" min="1" style="width:100%;box-sizing:border-box;padding:0.65rem 0.75rem;border-radius:8px;border:1px solid var(--color-border);background:var(--color-bg-dark);color:var(--color-text-primary);font-size:1rem;margin-bottom:0.75rem;">
+                <label style="display:block;font-size:0.78rem;color:var(--color-text-secondary);margin-bottom:0.3rem;">Sats a convertir <span style="font-size:0.7rem;">(categoría Económica, peso × 0.01)</span></label>
+                <input id="c2pAwardZapAmt" type="number" value="${amountSats||0}" min="1"
+                    oninput="const p=document.getElementById('c2pAwardZapPreview');if(p){const m=Math.round((+this.value||0)*0.01);p.textContent='→ '+m.toLocaleString('es-ES')+' méritos';}"
+                    style="width:100%;box-sizing:border-box;padding:0.65rem 0.75rem;border-radius:8px;border:1px solid var(--color-border);background:var(--color-bg-dark);color:var(--color-text-primary);font-size:1rem;margin-bottom:0.3rem;">
+                <div id="c2pAwardZapPreview" style="font-size:0.82rem;color:#CE93D8;font-weight:700;margin-bottom:0.75rem;">→ ${Math.round((amountSats||0)*0.01).toLocaleString('es-ES')} méritos</div>
                 <label style="display:block;font-size:0.78rem;color:var(--color-text-secondary);margin-bottom:0.3rem;">Razón</label>
                 <input id="c2pAwardZapReason" type="text" value="${hasZap ? '⚡ Zap Lightning verificado' : '⚡ Aportación Lightning verificada'}" maxlength="120" style="width:100%;box-sizing:border-box;padding:0.65rem 0.75rem;border-radius:8px;border:1px solid var(--color-border);background:var(--color-bg-dark);color:var(--color-text-primary);font-size:0.9rem;margin-bottom:1.25rem;">
                 <div style="display:flex;gap:0.75rem;justify-content:flex-end;">
@@ -1237,7 +1240,8 @@ const LBW_Transparency = (() => {
             try { awarded = JSON.parse(localStorage.getItem('c2p_awarded_zaps') || '[]'); } catch (_e) {}
             awarded.push(zapKey);
             try { localStorage.setItem('c2p_awarded_zaps', JSON.stringify(awarded.slice(-500))); } catch (_e) {}
-            showNotification(`✅ ${amount.toLocaleString('es-ES')} méritos emitidos a ${_shortNpub(senderPubkey)}.`, 'success');
+            const meritosEmitidos = Math.round(amount * 0.01);
+            showNotification(`✅ ${meritosEmitidos.toLocaleString('es-ES')} méritos emitidos a ${_shortNpub(senderPubkey)} (${amount.toLocaleString('es-ES')} sats × 0.01).`, 'success');
             await renderWalletPanel();
         } catch (err) {
             showNotification('Error al emitir méritos: ' + err.message, 'error');
