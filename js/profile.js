@@ -422,6 +422,11 @@ function updateProfileDisplay() {
 
     // [C2P FASE 2] Update XP display
     updateXPDisplay(meritData);
+
+    // Historial de méritos en perfil
+    if (typeof C2P_Treasury !== 'undefined') {
+        C2P_Treasury.renderXpInto('xpHistorialContainer');
+    }
     
     // FORCE update citizenship badge (override any DB value)
     const citizenshipBadge = document.getElementById('profileCitizenship');

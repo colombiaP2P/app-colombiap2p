@@ -1235,12 +1235,38 @@ const LBW_Transparency = (() => {
         document.getElementById('c2pAwardZapDialog')?.remove();
 
         try {
+            const meritosEmitidos = Math.round(amount * 0.01);
+
+            // Idempotencia: verificar si ya existe xp_transaction para este pago
+            const pb = typeof C2P_PB !== 'undefined' ? C2P_PB.getClient() : null;
+            if (pb) {
+                const existing = await pb.collection('xp_transactions')
+                    .getFirstListItem(`user_pubkey="${senderPubkey}" && source="economica" && ref_id="${zapKey}"`).catch(() => null);
+                if (existing) {
+                    showNotification('Ya se emitieron méritos para este pago.', 'info');
+                    return;
+                }
+            }
+
             await LBW_Merits.awardMerit(senderPubkey, amount, 'economica', reason);
+
+            // Registro en PocketBase para historial XP del destinatario
+            if (pb) {
+                try {
+                    await pb.collection('xp_transactions').create({
+                        user_pubkey: senderPubkey,
+                        amount: meritosEmitidos,
+                        reason,
+                        source: 'economica',
+                        ref_id: zapKey,
+                    });
+                } catch (_e) {}
+            }
+
             let awarded = [];
             try { awarded = JSON.parse(localStorage.getItem('c2p_awarded_zaps') || '[]'); } catch (_e) {}
             awarded.push(zapKey);
             try { localStorage.setItem('c2p_awarded_zaps', JSON.stringify(awarded.slice(-500))); } catch (_e) {}
-            const meritosEmitidos = Math.round(amount * 0.01);
             showNotification(`✅ ${meritosEmitidos.toLocaleString('es-ES')} méritos emitidos a ${_shortNpub(senderPubkey)} (${amount.toLocaleString('es-ES')} sats × 0.01).`, 'success');
             await renderWalletPanel();
         } catch (err) {

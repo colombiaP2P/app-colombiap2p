@@ -4,11 +4,12 @@
 const C2P_Treasury = (function () {
 
     const SOURCE_LABEL = {
-        evento:  { icon: '📅', label: 'Evento' },
-        mision:  { icon: '🎯', label: 'Misión' },
-        racha:   { icon: '🔥', label: 'Racha' },
-        referido:{ icon: '👥', label: 'Referido' },
-        manual:  { icon: '⚙️', label: 'Manual' },
+        evento:   { icon: '📅', label: 'Evento' },
+        mision:   { icon: '🎯', label: 'Misión' },
+        racha:    { icon: '🔥', label: 'Racha' },
+        referido: { icon: '👥', label: 'Referido' },
+        manual:   { icon: '⚙️', label: 'Manual' },
+        economica:{ icon: '💰', label: 'Aportación económica' },
     };
 
     function _getPB() {
