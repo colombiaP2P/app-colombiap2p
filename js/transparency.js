@@ -1260,7 +1260,10 @@ const LBW_Transparency = (() => {
                         source: 'economica',
                         ref_id: zapKey,
                     });
-                } catch (_e) {}
+                } catch (pbErr) {
+                    console.error('[Treasury] Error creando xp_transaction:', pbErr);
+                    showNotification('Méritos Nostr emitidos, pero falló el registro en historial: ' + pbErr.message, 'warning');
+                }
             }
 
             let awarded = [];
