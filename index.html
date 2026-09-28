@@ -2977,6 +2977,30 @@
                             <span class="citizenship-value" id="citizenshipCity">-</span>
                         </div>
                     </div>
+
+                    <!-- NIP-05 Identity -->
+                    <div id="nip05Section" style="margin-top:1rem;padding-top:1rem;border-top:1px solid var(--color-border);">
+                        <div style="font-size:0.78rem;font-weight:700;color:var(--color-text-secondary);text-transform:uppercase;letter-spacing:0.07em;margin-bottom:0.65rem;">🆔 Identidad Nostr</div>
+                        <div id="nip05Display" style="display:none;align-items:center;gap:0.6rem;flex-wrap:wrap;">
+                            <span style="font-family:var(--font-mono);font-size:0.88rem;color:var(--color-gold);font-weight:600;" id="nip05Value"></span>
+                            <button onclick="navigator.clipboard.writeText(document.getElementById('nip05Value').textContent).then(()=>showNotification('Copiado ✓','success'))" style="font-size:0.72rem;padding:0.2rem 0.6rem;border-radius:6px;background:rgba(229,185,92,0.12);border:1px solid rgba(229,185,92,0.3);color:var(--color-gold);cursor:pointer;">📋 Copiar</button>
+                        </div>
+                        <div id="nip05Form" style="display:none;">
+                            <p style="font-size:0.78rem;color:var(--color-text-secondary);margin-bottom:0.65rem;">Crea tu identidad verificada <strong>usuario@colombiap2p.com</strong> para ser reconocido en la red Nostr.</p>
+                            <div style="display:flex;align-items:center;gap:0.4rem;flex-wrap:wrap;">
+                                <input id="nip05UsernameInput" type="text" placeholder="tunombre" maxlength="30"
+                                    style="flex:1;min-width:120px;padding:0.55rem 0.75rem;border-radius:8px;border:1px solid var(--color-border);background:var(--color-bg-dark);color:var(--color-text-primary);font-size:0.88rem;font-family:var(--font-mono);"
+                                    oninput="this.value=this.value.toLowerCase().replace(/[^a-z0-9_-]/g,'')">
+                                <span style="font-size:0.82rem;color:var(--color-text-secondary);white-space:nowrap;">@colombiap2p.com</span>
+                                <button onclick="claimNip05()" id="nip05ClaimBtn" style="padding:0.55rem 1rem;border-radius:8px;background:linear-gradient(135deg,var(--color-teal),var(--color-teal-dark,#1a4a55));border:none;color:white;font-weight:700;font-size:0.82rem;cursor:pointer;white-space:nowrap;">Reclamar</button>
+                            </div>
+                            <p id="nip05Hint" style="font-size:0.7rem;color:var(--color-text-secondary);margin-top:0.4rem;">3–30 caracteres. Solo letras, números, guión y guión bajo.</p>
+                        </div>
+                        <div id="nip05Locked" style="display:none;font-size:0.78rem;color:var(--color-text-secondary);">
+                            🔒 Necesitas al menos <strong>100 Méritos</strong> (nivel Plebeyo) para reclamar una identidad.
+                        </div>
+                        <div id="nip05Loading" style="font-size:0.78rem;color:var(--color-text-secondary);">Cargando…</div>
+                    </div>
                 </div>
 
 
@@ -3220,7 +3244,7 @@
     <script src="js/c2p-pocketbase.js?v=1"></script>
     <script src="js/c2p-eventos.js?v=9"></script>
     <script src="js/c2p-rachas.js?v=12"></script>
-    <script src="js/profile.js?v=c2p-23"></script>
+    <script src="js/profile.js?v=c2p-24"></script>
     <script src="js/nwc.js?v=secA1-1"></script>
     <script src="js/wallet.js?v=secA1-5"></script>
 

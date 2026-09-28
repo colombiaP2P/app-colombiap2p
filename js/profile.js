@@ -427,6 +427,9 @@ function updateProfileDisplay() {
     if (typeof C2P_Treasury !== 'undefined') {
         C2P_Treasury.renderXpInto('xpHistorialContainer');
     }
+
+    // Estado NIP-05
+    loadNip05Status(pubKey, merits);
     
     // FORCE update citizenship badge (override any DB value)
     const citizenshipBadge = document.getElementById('profileCitizenship');
@@ -1053,5 +1056,92 @@ window._loadLud16OnProfile = function() {
 };
 window.drawGaugeCanvas = drawGaugeCanvas;
 window.gaugeAnimate = gaugeAnimate;
+
+// ── NIP-05 Identity ───────────────────────────────────────────
+async function loadNip05Status(pubkey, totalMerits) {
+    const elLoading = document.getElementById('nip05Loading');
+    const elDisplay = document.getElementById('nip05Display');
+    const elForm    = document.getElementById('nip05Form');
+    const elLocked  = document.getElementById('nip05Locked');
+    if (!elLoading) return;
+
+    const hide = (...els) => els.forEach(e => e && (e.style.display = 'none'));
+    const show = (el, d='block') => el && (el.style.display = d);
+
+    try {
+        const pb = (typeof C2P_PB !== 'undefined') ? C2P_PB.getClient() : null;
+        if (!pb || !pubkey) { hide(elLoading); return; }
+
+        const result = await pb.collection('nip05_identities')
+            .getFirstListItem(`pubkey="${pubkey}" && active=true`).catch(() => null);
+
+        hide(elLoading);
+
+        if (result) {
+            const val = document.getElementById('nip05Value');
+            if (val) val.textContent = result.username + '@colombiap2p.com';
+            show(elDisplay, 'flex');
+        } else if (totalMerits >= 100) {
+            show(elForm);
+        } else {
+            show(elLocked);
+        }
+    } catch (_) {
+        hide(elLoading);
+    }
+}
+
+async function claimNip05() {
+    const input  = document.getElementById('nip05UsernameInput');
+    const btn    = document.getElementById('nip05ClaimBtn');
+    const hint   = document.getElementById('nip05Hint');
+    const username = (input?.value || '').trim();
+
+    if (!username || !/^[a-z0-9_-]{3,30}$/.test(username)) {
+        if (hint) { hint.textContent = '⚠️ 3–30 caracteres. Solo letras, números, guión y guión bajo.'; hint.style.color = '#ff6b6b'; }
+        return;
+    }
+
+    const pubkey = (typeof LBW_Nostr !== 'undefined' && LBW_Nostr.isLoggedIn())
+        ? LBW_Nostr.getPubkey() : '';
+    if (!pubkey) { showNotification('Inicia sesión primero.', 'error'); return; }
+
+    btn.disabled = true;
+    btn.textContent = 'Registrando…';
+    if (hint) { hint.textContent = ''; hint.style.color = ''; }
+
+    try {
+        const res = await fetch('/api/nip05/register', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ pubkey, username }),
+        });
+        const data = await res.json();
+
+        if (!res.ok) {
+            showNotification(data.error || 'Error al registrar', 'error');
+            btn.disabled = false;
+            btn.textContent = 'Reclamar';
+            return;
+        }
+
+        showNotification('✅ Identidad creada: ' + data.identity, 'success');
+
+        // Actualizar UI sin recargar
+        const elForm    = document.getElementById('nip05Form');
+        const elDisplay = document.getElementById('nip05Display');
+        const elVal     = document.getElementById('nip05Value');
+        if (elForm) elForm.style.display = 'none';
+        if (elVal) elVal.textContent = data.identity;
+        if (elDisplay) elDisplay.style.display = 'flex';
+
+    } catch (e) {
+        showNotification('Error de red: ' + e.message, 'error');
+        btn.disabled = false;
+        btn.textContent = 'Reclamar';
+    }
+}
+
+window.claimNip05 = claimNip05;
 
 })(); // End IIFE

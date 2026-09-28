@@ -1261,7 +1261,7 @@ const LBW_Transparency = (() => {
                         ref_id: zapKey,
                     });
                 } catch (pbErr) {
-                    console.error('[Treasury] Error creando xp_transaction:', pbErr);
+                    console.error('[Treasury] Error creando xp_transaction:', pbErr, pbErr?.data);
                     showNotification('Méritos Nostr emitidos, pero falló el registro en historial: ' + pbErr.message, 'warning');
                 }
             }
