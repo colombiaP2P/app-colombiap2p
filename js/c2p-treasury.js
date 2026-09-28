@@ -67,6 +67,7 @@ const C2P_Treasury = (function () {
             const result = await pb.collection('xp_transactions').getList(page, XP_PAGE_SIZE, {
                 filter: `user_pubkey = "${pubkey}"`,
                 sort: '-created',
+                requestKey: null,
             });
 
             const { items, totalItems, totalPages } = result;
