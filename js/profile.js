@@ -432,7 +432,7 @@ function updateProfileDisplay() {
     const _nip05Pubkey = (typeof LBW_Nostr !== 'undefined' && LBW_Nostr.isLoggedIn())
         ? LBW_Nostr.getPubkey()
         : (currentUser?.pubkey || currentUser?.publicKey || '');
-    loadNip05Status(_nip05Pubkey, merits);
+    loadNip05Status(_nip05Pubkey);
     
     // FORCE update citizenship badge (override any DB value)
     const citizenshipBadge = document.getElementById('profileCitizenship');
@@ -1061,7 +1061,7 @@ window.drawGaugeCanvas = drawGaugeCanvas;
 window.gaugeAnimate = gaugeAnimate;
 
 // ── NIP-05 Identity ───────────────────────────────────────────
-async function loadNip05Status(pubkey, totalMerits) {
+async function loadNip05Status(pubkey) {
     const elLoading = document.getElementById('nip05Loading');
     const elDisplay = document.getElementById('nip05Display');
     const elForm    = document.getElementById('nip05Form');
@@ -1071,20 +1071,33 @@ async function loadNip05Status(pubkey, totalMerits) {
     const hide = (...els) => els.forEach(e => e && (e.style.display = 'none'));
     const show = (el, d='block') => el && (el.style.display = d);
 
+    show(elLoading);
+    hide(elDisplay, elForm, elLocked);
+
     try {
         const pb = (typeof C2P_PB !== 'undefined') ? C2P_PB.getClient() : null;
         if (!pb || !pubkey) { hide(elLoading); return; }
 
-        const result = await pb.collection('nip05_identities')
-            .getFirstListItem(`pubkey="${pubkey}" && active=true`).catch(() => null);
+        // Consultar NIP-05 e XP en paralelo
+        const [nip05Result, xpResult] = await Promise.all([
+            pb.collection('nip05_identities')
+                .getFirstListItem(`pubkey="${pubkey}" && active=true`).catch(() => null),
+            pb.collection('xp_transactions')
+                .getList(1, 1, { filter: `user_pubkey="${pubkey}"` }).catch(() => ({ totalItems: 0 })),
+        ]);
+
+        // Méritos Nostr + PB
+        const nostrMerits = (typeof getUnifiedMerits === 'function') ? (getUnifiedMerits().nostrMerits || 0) : 0;
+        const pbHasXP     = xpResult.totalItems > 0;
+        const hasEnough   = nostrMerits >= 100 || pbHasXP;
 
         hide(elLoading);
 
-        if (result) {
+        if (nip05Result) {
             const val = document.getElementById('nip05Value');
-            if (val) val.textContent = result.username + '@colombiap2p.com';
+            if (val) val.textContent = nip05Result.username + '@colombiap2p.com';
             show(elDisplay, 'flex');
-        } else if (totalMerits >= 100) {
+        } else if (hasEnough) {
             show(elForm);
         } else {
             show(elLocked);
@@ -1146,5 +1159,6 @@ async function claimNip05() {
 }
 
 window.claimNip05 = claimNip05;
+window.loadNip05Status = loadNip05Status;
 
 })(); // End IIFE
