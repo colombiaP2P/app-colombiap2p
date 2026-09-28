@@ -429,7 +429,10 @@ function updateProfileDisplay() {
     }
 
     // Estado NIP-05
-    loadNip05Status(pubKey, merits);
+    const _nip05Pubkey = (typeof LBW_Nostr !== 'undefined' && LBW_Nostr.isLoggedIn())
+        ? LBW_Nostr.getPubkey()
+        : (currentUser?.pubkey || currentUser?.publicKey || '');
+    loadNip05Status(_nip05Pubkey, merits);
     
     // FORCE update citizenship badge (override any DB value)
     const citizenshipBadge = document.getElementById('profileCitizenship');
