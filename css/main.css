@@ -3407,12 +3407,17 @@
         .form-select, .form-input {
             width: 100%;
             padding: 0.875rem;
-            background: rgba(44, 95, 111, 0.3);
+            background: #1a2e38;
             border: 1px solid rgba(229, 185, 92, 0.3);
             border-radius: 8px;
             color: var(--color-text-primary);
             font-size: 1rem;
             transition: all 0.3s ease;
+        }
+
+        .form-select option {
+            background: #1a2e38;
+            color: var(--color-text-primary);
         }
 
         .form-select:focus, .form-input:focus {
