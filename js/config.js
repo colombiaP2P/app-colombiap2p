@@ -70,9 +70,9 @@ async function updateIdentitiesCounter() {
         const pb = (typeof C2P_PB !== 'undefined') ? C2P_PB.getClient() : null;
         if (!pb) throw new Error('PocketBase no disponible');
 
-        // user_streaks tiene un registro por usuario activo
-        const result = await pb.collection('user_streaks').getList(1, 1);
-        const realCount = result.totalItems;
+        // Pubkeys únicas con algún mérito recibido (xp_transactions)
+        const all = await pb.collection('xp_transactions').getFullList({ fields: 'user_pubkey' });
+        const realCount = new Set(all.map(r => r.user_pubkey).filter(Boolean)).size;
         const displayCount = realCount + IDENTITIES_BASE_OFFSET;
         const currentValue = parseInt(counter.textContent) || 0;
         animateCounter(counter, currentValue, displayCount, 1500);
