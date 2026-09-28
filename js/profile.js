@@ -568,10 +568,6 @@ function updateProfileDisplay() {
         : Math.max(1, Math.floor((Date.now() - new Date(userProfile.registrationDate).getTime()) / 86400000));
     document.getElementById('statMemberSince').textContent = daysActive;
     
-    // Update citizenship details (auto-calculated)
-    document.getElementById('citizenshipType').textContent = `${citizenship.icon} Nv.${citizenship.level} — ${citizenship.title}`;
-    document.getElementById('citizenshipCity').textContent = userProfile.city || 'No registrada';
-    
     // Update activity counts (from meritData.activity)
     const act = meritData.activity;
     document.getElementById('activityPosts').textContent = act.posts;
