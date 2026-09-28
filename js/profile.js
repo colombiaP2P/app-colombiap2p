@@ -404,6 +404,16 @@ function updateProfileDisplay() {
     
     // Update profile header
     document.getElementById('profileName').textContent = currentUser.name;
+
+    // Cargar avatar desde perfil Nostr si el elemento aún muestra el placeholder
+    const _avatarEl = document.getElementById('profileAvatar');
+    if (_avatarEl && !userProfile.avatarUrl) {
+        const _p = (typeof LBW_Nostr !== 'undefined' && LBW_Nostr.isLoggedIn()) ? LBW_Nostr.getProfile() : null;
+        if (_p && _p.picture) {
+            _avatarEl.src = _p.picture;
+            userProfile.avatarUrl = _p.picture;
+        }
+    }
     
     // Calculate merits for citizenship level
     // [v2.0] Unified merits: Nostr + min(activity, 300)
