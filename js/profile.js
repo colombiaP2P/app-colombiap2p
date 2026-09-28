@@ -745,6 +745,12 @@ function showCitizenshipModal() {
         profSelect.innerHTML = LBW_Professions.renderOptionsHtml(currentCode);
         if (profSpecialty) profSpecialty.value = currentSpecialty;
     }
+
+    // Cargar estado NIP-05 en el modal
+    const _modalNip05Pubkey = (typeof LBW_Nostr !== 'undefined' && LBW_Nostr.isLoggedIn())
+        ? LBW_Nostr.getPubkey()
+        : (currentUser?.pubkey || currentUser?.publicKey || '');
+    if (_modalNip05Pubkey) loadNip05Status(_modalNip05Pubkey);
 }
 
 function closeCitizenshipModal() {
@@ -989,6 +995,18 @@ function _updateLud16Display(lud16) {
     }
 }
 
+function _updateNip05PassportDisplay(identity) {
+    const display = document.getElementById('profileNip05Display');
+    const value   = document.getElementById('profileNip05Value');
+    if (!display || !value) return;
+    if (identity) {
+        value.textContent = identity;
+        display.style.display = 'block';
+    } else {
+        display.style.display = 'none';
+    }
+}
+
 // ── Mute personal — render de la lista en perfil ────────────────────
 // Llamado al entrar en la sección de perfil y desde nostr-bridge.muteUser/
 // unmuteUser para refrescar tras cambios. Resuelve cada pubkey via
@@ -1094,9 +1112,11 @@ async function loadNip05Status(pubkey) {
         hide(elLoading);
 
         if (nip05Result) {
+            const identity = nip05Result.username + '@colombiap2p.com';
             const val = document.getElementById('nip05Value');
-            if (val) val.textContent = nip05Result.username + '@colombiap2p.com';
+            if (val) val.textContent = identity;
             show(elDisplay, 'flex');
+            _updateNip05PassportDisplay(identity);
         } else if (hasEnough) {
             show(elForm);
         } else {
@@ -1150,6 +1170,7 @@ async function claimNip05() {
         if (elForm) elForm.style.display = 'none';
         if (elVal) elVal.textContent = data.identity;
         if (elDisplay) elDisplay.style.display = 'flex';
+        _updateNip05PassportDisplay(data.identity);
 
     } catch (e) {
         showNotification('Error de red: ' + e.message, 'error');
