@@ -378,8 +378,10 @@ async function openApp(appName) {
         switchChatTab('private');
         markAsRead('chat');
     } else if (appName === 'gobernanza') {
-        showSection('gobernanzaSection'); // Shows the menu with 2 options
+        openSubApp('gobernanza-proposals');
         markAsRead('gobernanza');
+    } else if (appName === 'meritos') {
+        openSubApp('merits');
     } else if (appName === 'perfil') {
         showSection('profileSection');
         // Load fresh data first, then update profile with accurate stats
@@ -425,8 +427,9 @@ function openSubApp(subAppName) {
     }
 }
 
+// El hub de Gobernanza se eliminó: Gobernanza y Méritos están en el menú principal
 function backToGobernanzaMenu() {
-    showSection('gobernanzaSection');
+    backToMenu();
 }
 
 function backToMenu() {
@@ -482,6 +485,10 @@ function showSection(sectionId) {
         } catch (e) {}
     }
 
+    // Secciones eliminadas (ej. el antiguo hub gobernanzaSection) pueden seguir
+    // en history.state tras recargar: caer al menú en vez de lanzar error.
+    if (!document.getElementById(sectionId)) sectionId = 'mainMenuSection';
+
     document.querySelectorAll('.section').forEach(s => s.classList.remove('active'));
     document.getElementById(sectionId).classList.add('active');
     window.scrollTo(0, 0);
@@ -508,14 +515,9 @@ function showSection(sectionId) {
     // Configurar el botón de volver en el header según la sección activa
     const backBtn = document.getElementById('headerBackBtn');
     if (backBtn) {
-        const backToGobernanza = ['gobernanzaProposalsSection', 'meritsSection', 'delegationsSection'];
         const noBack = ['mainMenuSection', 'registrationSection'];
         if (noBack.includes(sectionId)) {
             backBtn.classList.add('hidden');
-        } else if (backToGobernanza.includes(sectionId)) {
-            backBtn.classList.remove('hidden');
-            backBtn.textContent = '← Volver a Gobernanza';
-            backBtn.onclick = () => backToGobernanzaMenu();
         } else {
             backBtn.classList.remove('hidden');
             backBtn.textContent = '← Volver al Menú';

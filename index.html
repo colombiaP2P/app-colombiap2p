@@ -370,12 +370,19 @@
                         <div class="app-description">Tareas y recompensas</div>
                     </div>
 
-                    <!-- 6. Méritos y Gobernanza -->
+                    <!-- 4. Gobernanza -->
                     <div class="app-card" onclick="openApp('gobernanza')" id="app-gobernanza">
                         <span class="app-badge hidden" id="badge-gobernanza">0</span>
-                        <div class="app-icon">⭐</div>
+                        <div class="app-icon">🏛️</div>
+                        <div class="app-name">Gobernanza</div>
+                        <div class="app-description">Propuestas y votaciones</div>
+                    </div>
+
+                    <!-- 5. Méritos -->
+                    <div class="app-card" onclick="openApp('meritos')">
+                        <div class="app-icon">🏅</div>
                         <div class="app-name">Méritos</div>
-                        <div class="app-description">Reputación y gobernanza</div>
+                        <div class="app-description">Sistema de recompensas</div>
                     </div>
 
                     <!-- 7. Comunidad / Chat -->
@@ -1579,42 +1586,10 @@
             </div>
         </section>
 
-        <!-- Gobernanza Menu Section -->
-        <section class="section" id="gobernanzaSection">
-            <div class="chat-section">
-                <button class="back-btn" onclick="backToMenu()">← Volver al Menú</button>
-                
-                <h2 style="color: var(--color-gold); margin-bottom: 1rem; text-align: center;">🏛️ Gobernanza y Méritos</h2>
-                <p style="color: var(--color-text-secondary); margin-bottom: 3rem; text-align: center; font-size: 0.95rem;">
-                    Sistema de decisiones colectivas y reconocimiento de méritos
-                </p>
-
-                <div class="apps-grid" style="max-width: 600px; margin: 0 auto;">
-                    <!-- Gobernanza -->
-                    <div class="app-card" onclick="openSubApp('gobernanza-proposals')">
-                        <div class="app-icon">🏛️</div>
-                        <div class="app-name">Gobernanza</div>
-                        <div class="app-description">Propuestas y Votaciones</div>
-                    </div>
-
-                    <!-- Méritos C2P -->
-                    <div class="app-card" onclick="openSubApp('merits')">
-                        <div class="app-icon">🏅</div>
-                        <div class="app-name">Méritos</div>
-                        <div class="app-description">Sistema de Recompensas</div>
-                    </div>
-
-                    <!-- Delegación de Voto — oculta FASE 8, no funcional en v1 -->
-                    <div class="app-card" onclick="openSubApp('delegations')" style="display:none;">
-                    </div>
-                </div>
-            </div>
-        </section>
-
         <!-- Gobernanza Proposals Section -->
         <section class="section" id="gobernanzaProposalsSection">
             <div class="chat-section">
-                <button class="back-btn" onclick="backToGobernanzaMenu()">← Volver a Gobernanza</button>
+                <button class="back-btn" onclick="backToMenu()">← Volver al Menú</button>
                 
                 <h2 style="color: var(--color-gold); margin-bottom: 0.5rem;">🏛️ Gobernanza Descentralizada</h2>
                 <p style="color: var(--color-text-secondary); margin-bottom: 2rem; font-size: 0.95rem;">
@@ -1741,7 +1716,7 @@
         <!-- Delegations Section (Liquid Democracy) -->
         <section class="section" id="delegationsSection">
             <div class="chat-section">
-                <button class="back-btn" onclick="backToGobernanzaMenu()">← Volver a Gobernanza</button>
+                <button class="back-btn" onclick="backToMenu()">← Volver al Menú</button>
 
                 <h2 style="color: var(--color-gold); margin-bottom: 0.5rem;">🗳️ Delegación de Voto</h2>
                 <p style="color: var(--color-text-secondary); margin-bottom: 2rem; font-size: 0.95rem;">
@@ -1845,7 +1820,7 @@
         <!-- [C2P FASE 8] Méritos C2P Section -->
         <section class="section" id="meritsSection">
             <div class="chat-section">
-                <button class="back-btn" onclick="backToGobernanzaMenu()">← Volver a Gobernanza</button>
+                <button class="back-btn" onclick="backToMenu()">← Volver al Menú</button>
                 
                 <h2 style="color: var(--color-bitcoin); margin-bottom: 0.5rem; text-align: center;">⭐ Méritos ColombiaP2P</h2>
                 <p style="color: var(--color-text-secondary); margin-bottom: 1.5rem; text-align: center; font-size: 0.9rem;">
@@ -3174,7 +3149,7 @@
     <script src="js/lbw-professions.js?v=profession-1"></script>
     <script src="js/config.js?v=c2p-4"></script>
     <script src="js/auth.js?v=m12-2"></script>
-    <script src="js/ui.js?v=c2p-4"></script>
+    <script src="js/ui.js?v=c2p-5"></script>
     <!-- SOS Functions -->
     <script>
         function selectSOSType(type) {
