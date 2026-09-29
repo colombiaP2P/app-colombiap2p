@@ -196,7 +196,7 @@ const LBW_Governance = (() => {
             ['image', image],
             ['t', 'lbw-governance'],
             ['t', 'lbw-community'],
-            ['client', 'LiberBit World']
+            ['client', 'ColombiaP2P']
         ];
         for (const p of moderators) {
             tags.push(['p', p, '', 'moderator']);
@@ -397,7 +397,27 @@ const LBW_Governance = (() => {
         } catch (e) {}
     }
 
+    // [C2P] Namespace propio de gobernanza (tags c2p-*, solo relay.colombiap2p.com).
+    // La caché anterior contenía propuestas heredadas de LiberBit World que ya no
+    // existen en nuestro relay: se purga una vez por navegador.
+    const GOV_NAMESPACE     = 'c2p-v1';
+    const GOV_NAMESPACE_KEY = 'c2p_governance_ns';
+
+    function _purgeLegacyCache() {
+        try {
+            if (localStorage.getItem(GOV_NAMESPACE_KEY) === GOV_NAMESPACE) return;
+            [STORAGE_KEY, ALL_VOTES_STORAGE_KEY, RESULTS_STORAGE_KEY].forEach(k => localStorage.removeItem(k));
+            Object.keys(localStorage)
+                .filter(k => k.startsWith(VOTES_STORAGE_KEY))
+                .forEach(k => localStorage.removeItem(k));
+            localStorage.setItem(GOV_NAMESPACE_KEY, GOV_NAMESPACE);
+            console.log('[Governance] 🧹 Caché de gobernanza heredada purgada');
+        } catch (e) {}
+    }
+
     function _loadFromStorage() {
+        _purgeLegacyCache();
+
         // Proposals
         try {
             const raw = localStorage.getItem(STORAGE_KEY);
@@ -537,10 +557,10 @@ const LBW_Governance = (() => {
             ['expires', String(expiresAt)],
             ['created', String(nowSecs)],
             ['proposal_number', String(proposalNumber)],
-            ['t', 'lbw-governance'],
-            ['t', 'lbw-proposal'],
-            ['t', `lbw-${category}`],
-            ['client', 'LiberBit World']
+            ['t', 'c2p-governance'],
+            ['t', 'c2p-proposal'],
+            ['t', `c2p-${category}`],
+            ['client', 'ColombiaP2P']
         ];
         if (requireAdmission) tags.push(['admission_required', 'true']);
 
@@ -614,9 +634,9 @@ const LBW_Governance = (() => {
         const tags = [
             ['e', proposalEventId],
             ['d', proposalDTag],
-            ['t', 'lbw-governance'],
-            ['t', 'lbw-vote'],
-            ['client', 'LiberBit World']
+            ['t', 'c2p-governance'],
+            ['t', 'c2p-vote'],
+            ['client', 'ColombiaP2P']
         ];
 
         const result = await LBW_Nostr.publishEvent({ kind: KIND.VOTE, content: option.trim(), tags });
@@ -780,9 +800,9 @@ const LBW_Governance = (() => {
             ['e', proposalEventId],
             ['d', proposalDTag],
             ['vote_type', 'admission'],
-            ['t', 'lbw-governance'],
-            ['t', 'lbw-admission'],
-            ['client', 'LiberBit World']
+            ['t', 'c2p-governance'],
+            ['t', 'c2p-admission'],
+            ['client', 'ColombiaP2P']
         ];
         const result = await LBW_Nostr.publishEvent({ kind: KIND.VOTE, content: d, tags });
         if (!result.event?.id) throw new Error('Error registrando voto de admisión.');
@@ -870,19 +890,19 @@ const LBW_Governance = (() => {
         if (!proposal) throw new Error('Propuesta vacía');
         const number = proposal.proposalNumber || 0;
         if (!number) throw new Error('Propuesta sin proposal_number');
-        const communityDTag = 'lbw-prp-' + String(number).padStart(3, '0');
+        const communityDTag = 'c2p-prp-' + String(number).padStart(3, '0');
         const proposalATag = `${KIND.PROPOSAL}:${proposal.pubkey}:${proposal.dTag}`;
         const tags = [
             ['d', communityDTag],
             ['name', formatProposalNumber(number) + ' — ' + (proposal.title || '').substring(0, 120)],
             ['description', 'Debate de la propuesta ' + formatProposalNumber(number) + ' en LiberBit World. Ver detalles + votar en la app.'],
             ['p', proposal.pubkey, '', 'moderator'],
-            ['t', 'lbw-debate'],
-            ['t', 'lbw-governance'],
+            ['t', 'c2p-debate'],
+            ['t', 'c2p-governance'],
             ['t', communityDTag],
             ['e', proposal.id || '', '', 'root'],
             ['a', proposalATag, '', 'root'],
-            ['client', 'LiberBit World']
+            ['client', 'ColombiaP2P']
         ];
         // Si tenemos la paraguas LBW cacheada, enlazamos esta community
         // como hija mediante un segundo `a`-tag con marker 'parent'. NIP-72
@@ -932,14 +952,14 @@ const LBW_Governance = (() => {
     function _subscribeCommunities() {
         if (_communitySub) return;
         _communitySub = LBW_Nostr.subscribe(
-            { kinds: [KIND.COMMUNITY], '#t': ['lbw-governance'], limit: 500 },
+            { kinds: [KIND.COMMUNITY], '#t': ['c2p-governance'], limit: 500 },
             (event) => {
                 try {
                     const g = name => (event.tags.find(t => t[0] === name) || [])[1] || '';
                     const cDTag = g('d');
-                    if (!cDTag || !cDTag.startsWith('lbw-prp-')) return;
+                    if (!cDTag || !cDTag.startsWith('c2p-prp-')) return;
                     // Buscar la propuesta correspondiente por proposal_number
-                    const num = parseInt(cDTag.replace('lbw-prp-', ''), 10);
+                    const num = parseInt(cDTag.replace('c2p-prp-', ''), 10);
                     if (!num) return;
                     let matched = null;
                     _proposals.forEach(p => { if (p.proposalNumber === num) matched = p; });
@@ -980,7 +1000,7 @@ const LBW_Governance = (() => {
         if (_sub) return _sub;
 
         _sub = LBW_Nostr.subscribe(
-            { kinds: [KIND.PROPOSAL], '#t': ['lbw-proposal'], limit: 100 },
+            { kinds: [KIND.PROPOSAL], '#t': ['c2p-proposal'], limit: 100 },
             (event) => {
                 const proposal = _parseProposal(event);
                 if (!proposal) return;
@@ -1015,7 +1035,7 @@ const LBW_Governance = (() => {
     // ── Subscribe Result Events (kind 31010) ─────────────────
     function _subscribeResultEvents() {
         _resultSub = LBW_Nostr.subscribe(
-            { kinds: [KIND.RESULT], '#t': ['lbw-governance'], limit: 200 },
+            { kinds: [KIND.RESULT], '#t': ['c2p-governance'], limit: 200 },
             (event) => {
                 // [SEC-23] Result events must come from a Genesis signer.
                 _validateAndProcessResultEvent(event);
@@ -1114,7 +1134,7 @@ const LBW_Governance = (() => {
     // ── Subscribe Execution Events (kind 31011 + 31012) ──────
     function _subscribeExecutionEvents() {
         _execSub = LBW_Nostr.subscribe(
-            { kinds: [KIND.EXECUTION, KIND.EXEC_VERIFY], '#t': ['lbw-governance'], limit: 100 },
+            { kinds: [KIND.EXECUTION, KIND.EXEC_VERIFY], '#t': ['c2p-governance'], limit: 100 },
             (event) => {
                 if (event.kind === KIND.EXECUTION) {
                     const exec = _parseExecution(event);
@@ -1333,9 +1353,9 @@ const LBW_Governance = (() => {
             ['total-votes', String(calc.total_votes)],
             ['delegated-count', String(calc.delegated_count || 0)],
             ['quorum-met', String(calc.quorum_met)],
-            ['t', 'lbw-governance'],
-            ['t', 'lbw-result'],
-            ['client', 'LiberBit World']
+            ['t', 'c2p-governance'],
+            ['t', 'c2p-result'],
+            ['client', 'ColombiaP2P']
         ];
 
         const result = await LBW_Nostr.publishEvent({ kind: KIND.RESULT, content, tags });
@@ -1632,9 +1652,9 @@ const LBW_Governance = (() => {
             ['d', dTag],
             ['e', proposal.id],
             ['status', 'in_execution'],
-            ['t', 'lbw-governance'],
-            ['t', 'lbw-execution'],
-            ['client', 'LiberBit World']
+            ['t', 'c2p-governance'],
+            ['t', 'c2p-execution'],
+            ['client', 'ColombiaP2P']
         ];
 
         const result = await LBW_Nostr.publishEvent({ kind: KIND.EXECUTION, content, tags });
@@ -1683,9 +1703,9 @@ const LBW_Governance = (() => {
             ['e', exec.eventId || proposal.id],
             ['p', proposal.pubkey], // author
             ['status', 'executed'],
-            ['t', 'lbw-governance'],
-            ['t', 'lbw-exec-verify'],
-            ['client', 'LiberBit World']
+            ['t', 'c2p-governance'],
+            ['t', 'c2p-exec-verify'],
+            ['client', 'ColombiaP2P']
         ];
 
         const result = await LBW_Nostr.publishEvent({ kind: KIND.EXEC_VERIFY, content, tags });
@@ -1805,7 +1825,7 @@ const LBW_Governance = (() => {
         _fetchingVotes = true;
 
         LBW_Nostr.subscribe(
-            { kinds: [KIND.VOTE], authors: [pubkey], '#t': ['lbw-vote'], limit: 100 },
+            { kinds: [KIND.VOTE], authors: [pubkey], '#t': ['c2p-vote'], limit: 100 },
             (event) => {
                 const dTagTag = event.tags.find(t => t[0] === 'd');
                 const proposalDTag = dTagTag ? dTagTag[1] : null;

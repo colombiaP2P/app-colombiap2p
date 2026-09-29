@@ -44,6 +44,11 @@ const LBW_Nostr = (() => {
 
     const SYSTEM_ALL_RELAYS = [...SYSTEM_PRIVATE_RELAYS, ...SYSTEM_PUBLIC_RELAYS];
 
+    // GOVERNANCE: propuestas, votos, delegaciones, resultados y ejecución viven
+    // SOLO en el relay propio. Así no se mezclan con propuestas de otras
+    // comunidades (p.ej. LiberBit) publicadas en relays públicos.
+    const GOVERNANCE_RELAYS = ['wss://relay.colombiap2p.com'];
+
     // ── NIP-65 User Relay State ──────────────────────────────
     // When user publishes kind 10002, these override system defaults.
     let _userReadRelays = [];   // URLs the user reads from
@@ -161,7 +166,19 @@ const LBW_Nostr = (() => {
         EVENT_KINDS.COMMUNITY          // 34550 — NIP-72 community per PRP
     ]);
 
+    const GOVERNANCE_KINDS = new Set([
+        EVENT_KINDS.LBW_PROPOSAL,       // 31000
+        EVENT_KINDS.LBW_VOTE,           // 31001
+        EVENT_KINDS.LBW_DELEGATE,       // 31004
+        EVENT_KINDS.LBW_RESULT,         // 31010
+        EVENT_KINDS.LBW_EXECUTION,      // 31011
+        EVENT_KINDS.LBW_EXEC_VERIFY     // 31012
+    ]);
+
     function _getRelaysForKind(kind) {
+        // Gobernanza → solo relay propio, aun en Privacy Strict y sin conexión previa
+        if (GOVERNANCE_KINDS.has(kind)) return [...GOVERNANCE_RELAYS];
+
         const connectedAll = Object.keys(_relayStatusMap).filter(u => _relayStatusMap[u] === 'connected');
         const connectedPrivate = connectedAll.filter(u => SYSTEM_PRIVATE_RELAYS.includes(u));
         const connectedPublic = connectedAll.filter(u => !SYSTEM_PRIVATE_RELAYS.includes(u));
@@ -1613,7 +1630,7 @@ const LBW_Nostr = (() => {
                 ['d', dTag], ['title', proposal.title],
                 ['category', proposal.category || 'general'], ['status', 'active'],
                 ['expires', String(proposal.expiresAt || Math.floor(Date.now() / 1000) + 7 * 86400)],
-                ['t', 'lbw-governance'], ['t', 'lbw-proposal'], ['client', 'LiberBit World']
+                ['t', 'c2p-governance'], ['t', 'c2p-proposal'], ['client', 'ColombiaP2P']
             ]
         });
     }
@@ -1621,7 +1638,7 @@ const LBW_Nostr = (() => {
     async function publishVote(proposalEventId, option) {
         return publishEvent({
             kind: EVENT_KINDS.LBW_VOTE, content: option,
-            tags: [['e', proposalEventId], ['t', 'lbw-governance'], ['t', 'lbw-vote'], ['client', 'LiberBit World']]
+            tags: [['e', proposalEventId], ['t', 'c2p-governance'], ['t', 'c2p-vote'], ['client', 'ColombiaP2P']]
         });
     }
 

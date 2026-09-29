@@ -216,8 +216,8 @@ const LBW_Transparency = (() => {
             const [chat, market, props, votes] = await Promise.all([
                 LBW_Store.getEventsByKind(1,     { limit: 1000, tags: { t: ['colombiap2p', 'c2p', 'bitcoin'] } }).catch(() => []),
                 LBW_Store.getEventsByKind(30402, { limit: 1000, tags: { t: ['colombiap2p-market', 'c2p-market'] } }).catch(() => []),
-                LBW_Store.getEventsByKind(31000, { limit: 1000, tags: { t: ['lbw-proposal'] } }).catch(() => []),
-                LBW_Store.getEventsByKind(31001, { limit: 1000, tags: { t: ['lbw-governance'] } }).catch(() => [])
+                LBW_Store.getEventsByKind(31000, { limit: 1000, tags: { t: ['c2p-proposal'] } }).catch(() => []),
+                LBW_Store.getEventsByKind(31001, { limit: 1000, tags: { t: ['c2p-governance'] } }).catch(() => [])
             ]);
             (chat || []).forEach(e => {
                 const hasTag = e.tags && e.tags.some(t => t[0] === 't' && (t[1] === 'colombiap2p' || t[1] === 'c2p' || t[1] === 'bitcoin'));
