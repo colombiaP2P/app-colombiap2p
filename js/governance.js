@@ -149,6 +149,8 @@ async function loadProposals() {
                 updateGovStats();
                 displayProposals();
             });
+            // Al abrir la sección, reabrir las subs por si murieron (reconexión del relay)
+            if (typeof LBW_Governance.resync === 'function') LBW_Governance.resync(true);
         }
 
         allProposals = (typeof LBW_Governance !== 'undefined')

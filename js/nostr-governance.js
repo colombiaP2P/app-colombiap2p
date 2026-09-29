@@ -2023,6 +2023,37 @@ const LBW_Governance = (() => {
     function _startStatusTimer() {
         if (_statusTimer) return;
         _statusTimer = setInterval(() => { try { _refreshAllStatuses(); } catch (e) {} }, 30000);
+        _installResyncTriggers();
+    }
+
+    // ── Resync ───────────────────────────────────────────────
+    // nostr-tools no reabre las suscripciones cuando el WebSocket del relay
+    // se cae y reconecta: quedan muertas en silencio. Como la gobernanza
+    // vive solo en relay.colombiap2p.com, una sub muerta = no ver nada.
+    // resync() cierra y reabre las subs de gobernanza (mantiene callbacks
+    // y estado). Lo que ya se procesó lo descarta el dedup global.
+    let _lastResync = 0;
+    let _resyncTimer = null;
+
+    function resync(force) {
+        const now = Date.now();
+        if (!force && now - _lastResync < 10000) return;   // anti-ráfaga
+        _lastResync = now;
+        [_sub, _resultSub, _execSub, _deletionSub, _allVotesSub].forEach(s => {
+            if (s) { try { LBW_Nostr.unsubscribe(s); } catch (e) {} }
+        });
+        _sub = _resultSub = _execSub = _deletionSub = _allVotesSub = null;
+        subscribeProposals();
+    }
+
+    function _installResyncTriggers() {
+        if (_resyncTimer) return;
+        _resyncTimer = setInterval(() => { try { resync(); } catch (e) {} }, 120000);
+        document.addEventListener('visibilitychange', () => {
+            if (document.visibilityState === 'visible') { try { resync(); } catch (e) {} }
+        });
+        window.addEventListener('online', () => { try { resync(true); } catch (e) {} });
+        window.addEventListener('nostr-auth-success', () => { try { resync(true); } catch (e) {} });
     }
 
     // Procesa un voto kind:31001 marcado como admisión. Mantiene la
@@ -2295,7 +2326,7 @@ const LBW_Governance = (() => {
         publishProposal, closeProposal, publishVote,
         deleteProposal, canDeleteProposal, isGovAdmin,
         publishExecution, verifyExecution,
-        subscribeProposals, subscribeVotes, unsubscribeAll, unsubscribeVotes,
+        subscribeProposals, subscribeVotes, unsubscribeAll, unsubscribeVotes, resync,
         getProposal, getAllProposals, getActiveProposals, getClosedProposals,
         getResult, getExecution, getResults,
         getMyVote, getVotesForProposal, getStats, getTimeLeft,
