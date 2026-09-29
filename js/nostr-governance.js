@@ -250,6 +250,14 @@ const LBW_Governance = (() => {
         return !!(data && data.total >= 3000);
     }
 
+    // Autoridad de gobernanza: Génesis (≥3000 méritos) o admin C2P.
+    // Mientras la comunidad no tenga Génesis, los admins cubren sus
+    // funciones de control: admitir PRPs, firmar resultados, verificar
+    // ejecuciones. NO afecta al poder de voto (sigue siendo por méritos).
+    function _isGovAuthority(pubkey) {
+        return _isGenesis(pubkey) || isGovAdmin(pubkey);
+    }
+
     // ── Proposal Categories ──────────────────────────────────
     const CATEGORIES = {
         referendum:  { label: 'Referéndum',  emoji: '🗳️', description: 'Consulta vinculante a toda la comunidad' },
@@ -799,7 +807,7 @@ const LBW_Governance = (() => {
             if (!prev || v.created_at > prev.created_at) lastByPubkey.set(v.pubkey, v);
         }
         for (const v of lastByPubkey.values()) {
-            if (!_isGenesis(v.pubkey)) continue;     // filtro estricto
+            if (!_isGovAuthority(v.pubkey)) continue;     // filtro estricto
             seenGenesis.add(v.pubkey);
             const dec = (v.option || '').toLowerCase();
             if (dec === 'yes' || dec === 'sí' || dec === 'si') yes++;
@@ -878,8 +886,8 @@ const LBW_Governance = (() => {
     async function publishAdmissionVote(proposalEventId, proposalDTag, decision) {
         if (!LBW_Nostr.isLoggedIn()) throw new Error('Login requerido.');
         const myPubkey = LBW_Nostr.getPubkey();
-        if (!_isGenesis(myPubkey)) {
-            throw new Error('Solo los ciudadanos Génesis pueden votar admisión.');
+        if (!_isGovAuthority(myPubkey)) {
+            throw new Error('Solo los ciudadanos Génesis o admins pueden votar admisión.');
         }
         const d = (decision || '').toLowerCase();
         if (d !== 'yes' && d !== 'no') throw new Error('Decisión inválida (yes/no).');
@@ -959,7 +967,7 @@ const LBW_Governance = (() => {
         const myPubkey = LBW_Nostr.getPubkey();
         if (!myPubkey) return;
         const iAmAuthor = (myPubkey === proposal.pubkey);
-        const iAmGenesis = _isGenesis(myPubkey);
+        const iAmGenesis = _isGovAuthority(myPubkey);
         if (!iAmAuthor && !iAmGenesis) return;
 
         try {
@@ -1152,13 +1160,7 @@ const LBW_Governance = (() => {
 
         // Trust check on the SIGNER, not on the JSON `calculatedBy` field
         // (which is attacker-controllable).
-        let issuerTotal = 0;
-        if (typeof LBW_Merits !== 'undefined' && LBW_Merits.getUserMerits) {
-            const issuerData = LBW_Merits.getUserMerits(event.pubkey);
-            issuerTotal = issuerData ? issuerData.total : 0;
-        }
-
-        if (issuerTotal < 3000) {
+        if (!_isGovAuthority(event.pubkey)) {
             // Issuer status unknown or insufficient — park for later.
             // Their merits may simply not have arrived from the relay yet.
             if (_pendingResultEvents.length < PENDING_RESULT_CAP) {
@@ -1398,14 +1400,19 @@ const LBW_Governance = (() => {
         console.log(`[Governance] ✅ Recálculo completo para: ${dTag}`);
     }
 
-    // Check if a result event already exists on relay
+    // Check if a result event already exists on relay.
+    // Solo cuenta si lo firmó una autoridad (Génesis/admin): un resultado de
+    // cualquier otro usuario se descarta en SEC-23 y no debe bloquear el nuestro.
     async function _checkResultExists(dTag) {
         return new Promise(resolve => {
             const timeout = setTimeout(() => resolve(false), 3000);
             let found = false;
             const sub = LBW_Nostr.subscribe(
-                { kinds: [KIND.RESULT], '#d': [dTag], limit: 1 },
-                () => { if (!found) { found = true; clearTimeout(timeout); resolve(true); } },
+                { kinds: [KIND.RESULT], '#d': [dTag], limit: 20 },
+                (event) => {
+                    if (found || !_isGovAuthority(event.pubkey)) return;
+                    found = true; clearTimeout(timeout); resolve(true);
+                },
                 () => { clearTimeout(timeout); if (!found) resolve(false); }
             );
             setTimeout(() => { try { LBW_Nostr.unsubscribe(sub); } catch (e) {} }, 3500);
@@ -1415,6 +1422,8 @@ const LBW_Governance = (() => {
     // ── Publish Result ───────────────────────────────────────
     async function _publishResultForProposal(dTag) {
         if (!LBW_Nostr.isLoggedIn()) return;
+        // Solo Génesis/admin firman resultados (los demás serían descartados por SEC-23)
+        if (!_isGovAuthority(LBW_Nostr.getPubkey())) return;
         if (_results.has(dTag)) return;
 
         const proposal = _proposals.get(dTag);
@@ -1774,9 +1783,9 @@ const LBW_Governance = (() => {
     async function verifyExecution(dTag) {
         if (!LBW_Nostr.isLoggedIn()) throw new Error('Login requerido.');
 
-        // Must be a Génesis
-        if (typeof LBW_Merits !== 'undefined' && !LBW_Merits.isGovernor()) {
-            throw new Error('Solo los Génesis pueden verificar ejecuciones.');
+        // Must be a Génesis or C2P admin
+        if (!_isGovAuthority(LBW_Nostr.getPubkey())) {
+            throw new Error('Solo los Génesis o admins pueden verificar ejecuciones.');
         }
 
         const proposal = _proposals.get(dTag);
@@ -1837,6 +1846,8 @@ const LBW_Governance = (() => {
         const g = name => (event.tags.find(t => t[0] === name) || [])[1] || '';
         const dTag = g('d');
         if (!dTag) return;
+        // Solo un Génesis o admin puede verificar una ejecución
+        if (!_isGovAuthority(event.pubkey)) return;
         const proposal = _proposals.get(dTag);
         if (proposal) {
             proposal.status = 'executed';
@@ -2161,7 +2172,8 @@ const LBW_Governance = (() => {
         publishAdmissionVote, getCommunity, getCommunityATag,
         // NIP-72 umbrella community (lbw-community)
         UMBRELLA, getUmbrellaCommunity, getUmbrellaATag, publishUmbrellaCommunity,
-        isGenesis: _isGenesis
+        isGenesis: _isGenesis,
+        isGovAuthority: _isGovAuthority
     };
 })();
 

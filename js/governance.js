@@ -377,7 +377,7 @@ function _renderAdmissionBlock(nostrP) {
     const adm = LBW_Governance.getAdmissionStatus(nostrP.dTag);
     const myVote = LBW_Governance.getMyAdmissionVote(nostrP.dTag);
     const myPubkey = (typeof LBW_Nostr !== 'undefined' && LBW_Nostr.isLoggedIn()) ? LBW_Nostr.getPubkey() : null;
-    const iAmGenesis = myPubkey ? LBW_Governance.isGenesis(myPubkey) : false;
+    const iAmGenesis = myPubkey ? LBW_Governance.isGovAuthority(myPubkey) : false;
 
     const yesPct = adm.totalVotes > 0 ? Math.round((adm.yes / adm.totalVotes) * 100) : 0;
     const noPct  = adm.totalVotes > 0 ? Math.round((adm.no  / adm.totalVotes) * 100) : 0;
@@ -523,7 +523,7 @@ async function showProposalDetail(proposalIdentifier) {
     const nostrP = proposal._nostrOriginal;
     const pubKey = LBW_Nostr.isLoggedIn() ? LBW_Nostr.getPubkey() : '';
     const isAuthor = pubKey === proposal.author_id;
-    const isGovernor = typeof LBW_Merits !== 'undefined' && LBW_Merits.isGovernor();
+    const isGovernor = !!(pubKey && LBW_Governance.isGovAuthority(pubKey));
     const canDelete = !!(nostrP && pubKey && LBW_Governance.canDeleteProposal &&
         LBW_Governance.canDeleteProposal(nostrP.dTag, pubKey));
 
@@ -681,8 +681,9 @@ function _renderResultSection(result, proposal) {
     if (quorumFailed) {
         const dTagId = proposal.dTag || proposal.id;
         const myVote = typeof LBW_Governance !== 'undefined' ? LBW_Governance.getMyVote(dTagId) : null;
-        const isGov = typeof LBW_Merits !== 'undefined' && LBW_Merits.isGovernor();
-        if (typeof LBW_Nostr !== 'undefined' && LBW_Nostr.isLoggedIn()) {
+        const myPk = (typeof LBW_Nostr !== 'undefined' && LBW_Nostr.isLoggedIn()) ? LBW_Nostr.getPubkey() : null;
+        const isGov = !!(myPk && LBW_Governance.isGovAuthority(myPk));
+        if (isGov) {
             recalcSection = `
                 <div style="margin-top:1rem;padding-top:1rem;border-top:1px solid rgba(250,173,20,0.3);">
                     <div style="font-size:0.82rem;color:var(--color-text-secondary);margin-bottom:0.5rem;">
