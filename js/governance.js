@@ -41,7 +41,34 @@ function _applyAdmissionStatus(p) {
     return p;
 }
 
+// Duración de prueba (15 min) — solo admins C2P, para probar el flujo completo
+const TEST_DURATION_VALUE = '15m';
+const TEST_DURATION_SECS = 15 * 60;
+
+function _isGovAdminUser() {
+    const pk = (typeof LBW_Nostr !== 'undefined' && LBW_Nostr.isLoggedIn()) ? LBW_Nostr.getPubkey() : null;
+    return !!(pk && typeof LBW_Governance !== 'undefined' && LBW_Governance.isGovAdmin(pk));
+}
+
+function _syncTestDurationOption() {
+    const sel = document.getElementById('proposalDuration');
+    if (!sel) return;
+    const opt = sel.querySelector(`option[value="${TEST_DURATION_VALUE}"]`);
+    if (_isGovAdminUser()) {
+        if (!opt) {
+            const o = document.createElement('option');
+            o.value = TEST_DURATION_VALUE;
+            o.textContent = '15 minutos (prueba · solo admin)';
+            sel.insertBefore(o, sel.firstChild);
+        }
+    } else if (opt) {
+        if (sel.value === TEST_DURATION_VALUE) sel.value = '7';
+        opt.remove();
+    }
+}
+
 function showNewProposalForm() {
+    _syncTestDurationOption();
     document.getElementById('newProposalForm').style.display = 'block';
     document.getElementById('newProposalForm').scrollIntoView({ behavior: 'smooth' });
     updateProposalFormFields();
@@ -72,14 +99,22 @@ async function submitProposal() {
     const category = document.getElementById('proposalType').value;
     const title = document.getElementById('proposalTitle').value.trim();
     const description = document.getElementById('proposalDescription').value.trim();
-    const durationDays = parseInt(document.getElementById('proposalDuration').value);
+    const durationValue = document.getElementById('proposalDuration').value;
 
     if (!title || !description) {
         showNotification('Complete título y descripción', 'error');
         return;
     }
 
-    const data = { title, description, category, durationSecs: durationDays * 86400 };
+    let durationSecs;
+    if (durationValue === TEST_DURATION_VALUE) {
+        if (!_isGovAdminUser()) { showNotification('La duración de prueba es solo para admins', 'error'); return; }
+        durationSecs = TEST_DURATION_SECS;
+    } else {
+        durationSecs = (parseInt(durationValue) || 7) * 86400;
+    }
+
+    const data = { title, description, category, durationSecs };
 
     if (category === 'budget') {
         const ba = document.getElementById('budgetAmount');
@@ -153,7 +188,9 @@ function _nostrProposalToLegacy(p) {
         title: p.title,
         description: p.description,
         status: p.status,
-        ends_at: p.expiresAt ? new Date(p.expiresAt * 1000).toISOString() : null,
+        // Con admisión, la votación cierra en votingEndsAt (cuenta desde la admisión)
+        ends_at: (p.requireAdmission ? p.votingEndsAt : p.expiresAt)
+            ? new Date((p.requireAdmission ? p.votingEndsAt : p.expiresAt) * 1000).toISOString() : null,
         created_at: new Date(p.createdAt * 1000).toISOString(),
         budget_amount: p.budget?.amount || null,
         candidates: p.candidates || [],
@@ -1012,7 +1049,8 @@ function getTimeLeft(endTime) {
     const hours = Math.floor((diff % 86400000) / 3600000);
     if (days > 0) return `${days} día${days > 1 ? 's' : ''}`;
     if (hours > 0) return `${hours} hora${hours > 1 ? 's' : ''}`;
-    return 'Menos de 1 hora';
+    const minutes = Math.ceil(diff / 60000);
+    return `${minutes} minuto${minutes > 1 ? 's' : ''}`;
 }
 
 function updateVoteResultsInModal(proposalDTag) {

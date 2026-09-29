@@ -724,9 +724,11 @@ const LBW_Governance = (() => {
             if (proposal.requireAdmission && !isAdmitted(proposalDTag)) {
                 throw new Error('Esta propuesta aún no ha sido admitida por los Génesis. Espera a que se admita para votar.');
             }
+            _refreshProposalStatus(proposal);
             if (proposal.status !== 'active') throw new Error('La propuesta ya no está activa.');
             const nowSecs = Math.floor(Date.now() / 1000);
-            if (proposal.expiresAt && nowSecs > proposal.expiresAt) throw new Error('El periodo de votación ha expirado.');
+            const endsAt = _votingEndsAt(proposal);
+            if (endsAt && nowSecs > endsAt) throw new Error('El periodo de votación ha expirado.');
             if (proposal.options && !proposal.options.includes(option)) throw new Error(`Opción "${option}" no válida.`);
         }
 
@@ -819,7 +821,25 @@ const LBW_Governance = (() => {
         const majorityReached = totalVotes > 0 && (yes / totalVotes) > ADMISSION.MAJORITY_FRACTION;
 
         let status = 'pending';
-        if (quorumMet && majorityReached) status = 'admitted';
+        // Momento de admisión = primer voto (en orden cronológico) con el que
+        // se alcanzaron quórum y mayoría. Votos posteriores no lo mueven.
+        let admittedAt = 0;
+        if (quorumMet && majorityReached) {
+            status = 'admitted';
+            const ordered = [...lastByPubkey.values()]
+                .filter(v => seenGenesis.has(v.pubkey))
+                .sort((a, b) => a.created_at - b.created_at);
+            let y = 0, n = 0;
+            for (const v of ordered) {
+                const dec = (v.option || '').toLowerCase();
+                if (dec === 'no') n++; else y++;
+                if (y + n >= ADMISSION.MIN_GENESIS_VOTES && y / (y + n) > ADMISSION.MAJORITY_FRACTION) {
+                    admittedAt = v.created_at;
+                    break;
+                }
+            }
+            if (!admittedAt) admittedAt = ordered.length ? ordered[ordered.length - 1].created_at : 0;
+        }
         else if (quorumMet && !majorityReached && no > yes) status = 'rejected';
 
         // Expiración: si han pasado más de EXPIRES_SECS desde la creación
@@ -837,7 +857,7 @@ const LBW_Governance = (() => {
         }
 
         return {
-            status, yes, no, totalVotes,
+            status, yes, no, totalVotes, admittedAt,
             genesisVoters: seenGenesis.size,
             threshold: ADMISSION.MIN_GENESIS_VOTES,
             majorityReached, quorumMet
@@ -867,6 +887,53 @@ const LBW_Governance = (() => {
             minutes: Math.floor((remaining % 3600) / 60),
             expired: false
         };
+    }
+
+    // ── Ventana de votación y estado efectivo ────────────────
+    // Con admisión, la votación dura lo mismo que eligió el autor
+    // (expires - created) pero cuenta DESDE la admisión, no desde la
+    // creación: si no, el tiempo de admisión se comería la votación.
+    function _votingEndsAt(p) {
+        if (!p) return 0;
+        if (!p.requireAdmission) return p.expiresAt || 0;
+        const adm = getAdmissionStatus(p.dTag);
+        if (adm.status !== 'admitted' || !adm.admittedAt) return 0;
+        const createdAt = p.createdAt || p.created_at || 0;
+        const duration = Math.max(0, (p.expiresAt || 0) - createdAt);
+        return adm.admittedAt + duration;
+    }
+
+    const FINAL_STATUSES = ['approved', 'rejected', 'quorum_failed', 'in_execution', 'executed', 'closed'];
+
+    // Recalcula pending_admission → active → expired según admisión y
+    // reloj. Devuelve true si el estado cambió.
+    function _refreshProposalStatus(p) {
+        if (!p || !p.requireAdmission) return false;
+        if (FINAL_STATUSES.includes(p.status)) return false;
+        const prev = p.status;
+        const endsAt = _votingEndsAt(p);
+        p.votingEndsAt = endsAt || null;
+        if (!endsAt) {
+            p.status = 'pending_admission';
+        } else if (Math.floor(Date.now() / 1000) <= endsAt) {
+            p.status = 'active';
+        } else {
+            const r = _results.get(p.dTag);
+            p.status = r ? (r.approved ? 'approved' : (r.quorum_met === false ? 'quorum_failed' : 'rejected'))
+                         : 'expired';
+            if (!r) _scheduleResultCalc(p.dTag);
+        }
+        return p.status !== prev;
+    }
+
+    function _refreshAllStatuses() {
+        let changed = false;
+        _proposals.forEach(p => { if (_refreshProposalStatus(p)) changed = true; });
+        if (changed) {
+            _persistToStorage();
+            _onProposalCallbacks.forEach(cb => { try { cb(null, 'status'); } catch (e) {} });
+        }
+        return changed;
     }
 
     // Atajo: ¿la propuesta es visible / debate abierto / votación abierta?
@@ -1101,6 +1168,8 @@ const LBW_Governance = (() => {
         if (!_communitySub) _subscribeCommunities();
         if (!_umbrellaSub) _subscribeUmbrellaCommunity();
         if (!_deletionSub) _subscribeDeletions();
+        if (!_allVotesSub) _subscribeAllVotes();
+        _startStatusTimer();
 
         if (_sub) return _sub;
 
@@ -1113,6 +1182,7 @@ const LBW_Governance = (() => {
                 const existing = _proposals.get(proposal.dTag);
                 if (existing && existing.created_at >= proposal.created_at) return;
                 _proposals.set(proposal.dTag, proposal);
+                _refreshProposalStatus(proposal);
                 _persistToStorage();
                 _onProposalCallbacks.forEach(cb => { try { cb(proposal, existing ? 'updated' : 'new'); } catch (e) {} });
 
@@ -1491,8 +1561,17 @@ const LBW_Governance = (() => {
     // a quorum could be claimed with just one Génesis's vote regardless
     // of their share. This refactor restores the canonical model.
     function _calculateWeightedResult(dTag) {
-        const votes = _votes.get(dTag) || [];
         const proposal = _proposals.get(dTag);
+        // Solo cuentan los votos emitidos dentro de la ventana de votación
+        // (desde la admisión hasta el cierre).
+        let votes = _votes.get(dTag) || [];
+        if (proposal && proposal.requireAdmission) {
+            const adm = getAdmissionStatus(dTag);
+            const endsAt = _votingEndsAt(proposal);
+            if (adm.admittedAt && endsAt) {
+                votes = votes.filter(v => v.created_at >= adm.admittedAt && v.created_at <= endsAt);
+            }
+        }
         const category = proposal?.category || 'referendum';
 
         if (votes.length === 0) {
@@ -1881,39 +1960,69 @@ const LBW_Governance = (() => {
 
         const sub = LBW_Nostr.subscribe(
             { kinds: [KIND.VOTE], '#e': [proposalEventId], limit: 500 },
-            (event) => {
-                // Distinguir votos de admisión (Génesis-only) de votos
-                // temáticos. Tag ['vote_type','admission'] = admission.
-                // Sin tag o vote_type=proposal = voto temático (legacy).
-                const voteType = (event.tags.find(t => t[0] === 'vote_type') || [])[1] || 'proposal';
-                if (voteType === 'admission') {
-                    _ingestAdmissionVote(event, proposalDTag);
-                    return;
-                }
-
-                const vote = _parseVote(event, proposalDTag);
-                if (!vote) return;
-
-                if (!_votes.has(proposalDTag)) _votes.set(proposalDTag, []);
-                const existing = _votes.get(proposalDTag);
-                const idx = existing.findIndex(v => v.pubkey === vote.pubkey);
-                if (idx >= 0) {
-                    if (vote.created_at > existing[idx].created_at) existing[idx] = vote;
-                    else return;
-                } else {
-                    existing.push(vote);
-                }
-
-                if (vote.pubkey === LBW_Nostr.getPubkey()) {
-                    _myVotes.set(proposalDTag, { option: vote.option, eventId: vote.id, created_at: vote.created_at });
-                }
-                _persistVotesToStorage();
-                _onVoteCallbacks.forEach(cb => { try { cb(vote, proposalDTag); } catch (e) {} });
-            }
+            (event) => _handleVoteEvent(event, proposalDTag)
         );
 
         _voteSubs[proposalDTag] = sub;
         return sub;
+    }
+
+    // Procesa un kind:31001 (admisión o temático) para una propuesta.
+    function _handleVoteEvent(event, proposalDTag) {
+        if (!proposalDTag || _deleted.has(proposalDTag)) return;
+        // Distinguir votos de admisión (Génesis-only) de votos
+        // temáticos. Tag ['vote_type','admission'] = admission.
+        // Sin tag o vote_type=proposal = voto temático (legacy).
+        const voteType = (event.tags.find(t => t[0] === 'vote_type') || [])[1] || 'proposal';
+        if (voteType === 'admission') {
+            _ingestAdmissionVote(event, proposalDTag);
+            _refreshAllStatuses();
+            return;
+        }
+
+        const vote = _parseVote(event, proposalDTag);
+        if (!vote) return;
+
+        if (!_votes.has(proposalDTag)) _votes.set(proposalDTag, []);
+        const existing = _votes.get(proposalDTag);
+        const idx = existing.findIndex(v => v.pubkey === vote.pubkey);
+        if (idx >= 0) {
+            if (vote.created_at > existing[idx].created_at) existing[idx] = vote;
+            else return;
+        } else {
+            existing.push(vote);
+        }
+
+        if (vote.pubkey === LBW_Nostr.getPubkey()) {
+            _myVotes.set(proposalDTag, { option: vote.option, eventId: vote.id, created_at: vote.created_at });
+        }
+        _persistVotesToStorage();
+        _onVoteCallbacks.forEach(cb => { try { cb(vote, proposalDTag); } catch (e) {} });
+    }
+
+    // Una sola suscripción para TODOS los votos de gobernanza (admisión +
+    // temáticos). Sin esto, la admisión solo se conocía al abrir el detalle
+    // de cada PRP y el paso pending → active → expired nunca ocurría solo.
+    let _allVotesSub = null;
+    let _statusTimer = null;
+
+    function _subscribeAllVotes() {
+        _allVotesSub = LBW_Nostr.subscribe(
+            { kinds: [KIND.VOTE], '#t': ['c2p-governance'], limit: 2000 },
+            (event) => {
+                let dTag = (event.tags.find(t => t[0] === 'd') || [])[1];
+                if (!dTag) {
+                    const eId = (event.tags.find(t => t[0] === 'e') || [])[1];
+                    for (const [d, p] of _proposals) { if (p.id === eId) { dTag = d; break; } }
+                }
+                _handleVoteEvent(event, dTag);
+            }
+        );
+    }
+
+    function _startStatusTimer() {
+        if (_statusTimer) return;
+        _statusTimer = setInterval(() => { try { _refreshAllStatuses(); } catch (e) {} }, 30000);
     }
 
     // Procesa un voto kind:31001 marcado como admisión. Mantiene la
@@ -2093,6 +2202,8 @@ const LBW_Governance = (() => {
         if (_resultSub) { LBW_Nostr.unsubscribe(_resultSub); _resultSub = null; }
         if (_execSub) { LBW_Nostr.unsubscribe(_execSub); _execSub = null; }
         if (_deletionSub) { LBW_Nostr.unsubscribe(_deletionSub); _deletionSub = null; }
+        if (_allVotesSub) { LBW_Nostr.unsubscribe(_allVotesSub); _allVotesSub = null; }
+        if (_statusTimer) { clearInterval(_statusTimer); _statusTimer = null; }
         Object.values(_voteSubs).forEach(s => { try { LBW_Nostr.unsubscribe(s); } catch (e) {} });
         _voteSubs = {};
         _onProposalCallbacks = [];
@@ -2115,13 +2226,18 @@ const LBW_Governance = (() => {
     }
 
     // ── Getters ──────────────────────────────────────────────
-    function getProposal(dTag) { return _proposals.get(dTag) || null; }
+    function getProposal(dTag) {
+        const p = _proposals.get(dTag) || null;
+        if (p) _refreshProposalStatus(p);   // silencioso: sin callbacks (evita bucles con la UI)
+        return p;
+    }
     function getResult(dTag) { return _results.get(dTag) || null; }
     function getExecution(dTag) { return _executions.get(dTag) || null; }
     function getMyVote(dTag) { return _myVotes.get(dTag) || null; }
     function getVotesForProposal(dTag) { return _votes.get(dTag) || []; }
 
     function getAllProposals() {
+        _proposals.forEach(p => _refreshProposalStatus(p));   // silencioso
         return [..._proposals.values()].sort((a, b) => b.created_at - a.created_at);
     }
     function getActiveProposals() { return getAllProposals().filter(p => p.status === 'active'); }
