@@ -524,6 +524,8 @@ async function showProposalDetail(proposalIdentifier) {
     const pubKey = LBW_Nostr.isLoggedIn() ? LBW_Nostr.getPubkey() : '';
     const isAuthor = pubKey === proposal.author_id;
     const isGovernor = typeof LBW_Merits !== 'undefined' && LBW_Merits.isGovernor();
+    const canDelete = !!(nostrP && pubKey && LBW_Governance.canDeleteProposal &&
+        LBW_Governance.canDeleteProposal(nostrP.dTag, pubKey));
 
     if (nostrP) {
         LBW_Governance.subscribeVotes(nostrP.id, nostrP.dTag, () => {
@@ -644,6 +646,13 @@ async function showProposalDetail(proposalIdentifier) {
                 ${/* EXECUTION SECTION */ _renderExecutionSection(proposal, execution, isAuthor, isGovernor)}
 
                 ${/* MERIT INFO */ _renderMeritInfo(proposal, result, myVote, isAuthor)}
+
+                ${/* DELETE (autor o admin C2P) */ canDelete ? `
+                    <div style="margin-top:1.5rem;padding-top:1.25rem;border-top:1px solid var(--color-border);text-align:center;">
+                        <button class="btn" data-lbw-action="deleteProposal" data-dtag="${escapeHtml(proposal.dTag)}" style="background:rgba(255,77,79,0.12);border:1px solid #ff4d4f;color:#ff4d4f;padding:0.6rem 1.25rem;">🗑️ Eliminar propuesta</button>
+                        <div style="font-size:0.75rem;color:var(--color-text-secondary);margin-top:0.5rem;">${isAuthor ? 'Eres el autor de esta propuesta.' : 'Acción de administrador.'} Se ocultará para toda la comunidad.</div>
+                    </div>
+                ` : ''}
             </div>
         </div>
     `;
@@ -920,6 +929,23 @@ async function submitExecVerification(proposalDTag) {
     }
 }
 
+async function deleteGovProposal(dTag) {
+    const p = LBW_Governance.getProposal(dTag);
+    if (!p) return;
+    const label = p.proposalNumber ? LBW_Governance.formatProposalNumber(p.proposalNumber) + ' · ' : '';
+    if (!confirm(`¿Eliminar la propuesta "${label}${p.title}"?\n\nSe ocultará para toda la comunidad y no se puede deshacer.`)) return;
+    try {
+        await LBW_Governance.deleteProposal(dTag);
+        document.querySelectorAll('.modal.active').forEach(m => { if (!m.id) m.remove(); });
+        updateGovStats();
+        displayProposals();
+        showNotification('Propuesta eliminada', 'success');
+    } catch (err) {
+        console.error('[Gov] Error eliminando propuesta:', err);
+        showNotification('Error: ' + err.message, 'error');
+    }
+}
+
 async function activateProposal(proposalId) {
     showNotification('Las propuestas Nostr se activan automáticamente al publicarse ✅', 'success');
     displayProposals();
@@ -1068,6 +1094,9 @@ function updateVoteResultsInModal(proposalDTag) {
                 case 'admitProposal':
                     e.stopPropagation();   // No abrir detail al clicar
                     admitProposal(el.dataset.dtag, el.dataset.eid, el.dataset.decision);
+                    break;
+                case 'deleteProposal':
+                    deleteGovProposal(el.dataset.dtag);
                     break;
                 case 'publishUmbrellaCommunity':
                     e.stopPropagation();

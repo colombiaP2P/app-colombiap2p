@@ -403,6 +403,101 @@ const LBW_Governance = (() => {
     const GOV_NAMESPACE     = 'c2p-v1';
     const GOV_NAMESPACE_KEY = 'c2p_governance_ns';
 
+    // ── Eliminación de propuestas (NIP-09, kind 5) ───────────
+    // El autor borra su propuesta con un kind:5 (el relay lo respeta).
+    // Los admins C2P también pueden: el relay no borra eventos ajenos, pero
+    // este cliente oculta la propuesta al ver el kind:5 firmado por un admin.
+    const GOV_ADMIN_PUBKEYS = [
+        '2479ef8e78d635cb40054f1e1a3895b13d67b36b2326b2a1d68df7b989b4cac0', // colbitcoin
+        '51cfd8f59cd6c8e7699e5b8e3cfed94967c780939877f78e16da995107f432b9', // admin
+    ];
+    const DELETED_STORAGE_KEY = 'c2p_governance_deleted';
+    let _deleted = new Set();   // dTags eliminados
+    let _deletionSub = null;
+
+    function isGovAdmin(pubkey) {
+        return !!pubkey && GOV_ADMIN_PUBKEYS.includes(pubkey);
+    }
+
+    function canDeleteProposal(dTag, pubkey) {
+        const p = _proposals.get(dTag);
+        if (!p || !pubkey) return false;
+        return p.pubkey === pubkey || isGovAdmin(pubkey);
+    }
+
+    function _loadDeleted() {
+        try {
+            const raw = localStorage.getItem(DELETED_STORAGE_KEY);
+            if (raw) JSON.parse(raw).forEach(d => _deleted.add(d));
+        } catch (e) {}
+    }
+
+    function _markDeleted(dTag) {
+        if (_deleted.has(dTag)) return false;
+        _deleted.add(dTag);
+        try { localStorage.setItem(DELETED_STORAGE_KEY, JSON.stringify([..._deleted])); } catch (e) {}
+        const existed = _proposals.delete(dTag);
+        _votes.delete(dTag);
+        _results.delete(dTag);
+        _persistToStorage();
+        _persistVotesToStorage();
+        _persistResults();
+        if (existed) {
+            _onProposalCallbacks.forEach(cb => { try { cb(null, 'deleted'); } catch (e) {} });
+        }
+        return true;
+    }
+
+    // Aplica un kind:5. Referencias válidas:
+    //   ['a', '31000:<pubkey>:<dTag>'] — firmante = pubkey del a-tag, o admin
+    //   ['e', '<eventId>']            — firmante = autor de esa propuesta, o admin
+    function _applyDeletionEvent(event) {
+        const signer = event.pubkey;
+        const signerIsAdmin = isGovAdmin(signer);
+        (event.tags || []).forEach(t => {
+            if (t[0] === 'a' && typeof t[1] === 'string') {
+                const [kind, author, dTag] = t[1].split(':');
+                if (kind !== String(KIND.PROPOSAL) || !dTag) return;
+                if (signer === author || signerIsAdmin) _markDeleted(dTag);
+            } else if (t[0] === 'e') {
+                for (const [dTag, p] of _proposals) {
+                    if (p.id === t[1] && (p.pubkey === signer || signerIsAdmin)) _markDeleted(dTag);
+                }
+            }
+        });
+    }
+
+    function _subscribeDeletions() {
+        _deletionSub = LBW_Nostr.subscribe(
+            { kinds: [5], '#k': [String(KIND.PROPOSAL)], limit: 500 },
+            (event) => { try { _applyDeletionEvent(event); } catch (e) {} },
+            null,
+            LBW_Nostr.GOVERNANCE_RELAYS
+        );
+    }
+
+    async function deleteProposal(dTag, reason) {
+        if (!LBW_Nostr.isLoggedIn()) throw new Error('Login requerido.');
+        const p = _proposals.get(dTag);
+        if (!p) throw new Error('Propuesta no encontrada.');
+        const me = LBW_Nostr.getPubkey();
+        if (!canDeleteProposal(dTag, me)) throw new Error('Solo el autor o un admin puede eliminar esta propuesta.');
+
+        const result = await LBW_Nostr.publishEvent({
+            kind: 5,
+            content: (reason || '').trim(),
+            tags: [
+                ['e', p.id],
+                ['a', `${KIND.PROPOSAL}:${p.pubkey}:${dTag}`],
+                ['k', String(KIND.PROPOSAL)],
+                ['client', 'ColombiaP2P']
+            ]
+        }, LBW_Nostr.GOVERNANCE_RELAYS);
+
+        _markDeleted(dTag);
+        return result;
+    }
+
     function _purgeLegacyCache() {
         try {
             if (localStorage.getItem(GOV_NAMESPACE_KEY) === GOV_NAMESPACE) return;
@@ -417,6 +512,7 @@ const LBW_Governance = (() => {
 
     function _loadFromStorage() {
         _purgeLegacyCache();
+        _loadDeleted();
 
         // Proposals
         try {
@@ -425,7 +521,7 @@ const LBW_Governance = (() => {
                 const data = JSON.parse(raw);
                 const now = Math.floor(Date.now() / 1000);
                 Object.entries(data).forEach(([dTag, proposal]) => {
-                    if (!_proposals.has(dTag)) {
+                    if (!_proposals.has(dTag) && !_deleted.has(dTag)) {
                         if (proposal.status === 'active' && proposal.expiresAt && now > proposal.expiresAt) {
                             proposal.status = 'expired';
                         }
@@ -996,6 +1092,7 @@ const LBW_Governance = (() => {
         if (!_execSub) _subscribeExecutionEvents();
         if (!_communitySub) _subscribeCommunities();
         if (!_umbrellaSub) _subscribeUmbrellaCommunity();
+        if (!_deletionSub) _subscribeDeletions();
 
         if (_sub) return _sub;
 
@@ -1004,6 +1101,7 @@ const LBW_Governance = (() => {
             (event) => {
                 const proposal = _parseProposal(event);
                 if (!proposal) return;
+                if (_deleted.has(proposal.dTag)) return;
                 const existing = _proposals.get(proposal.dTag);
                 if (existing && existing.created_at >= proposal.created_at) return;
                 _proposals.set(proposal.dTag, proposal);
@@ -1964,6 +2062,7 @@ const LBW_Governance = (() => {
         if (_sub) { LBW_Nostr.unsubscribe(_sub); _sub = null; }
         if (_resultSub) { LBW_Nostr.unsubscribe(_resultSub); _resultSub = null; }
         if (_execSub) { LBW_Nostr.unsubscribe(_execSub); _execSub = null; }
+        if (_deletionSub) { LBW_Nostr.unsubscribe(_deletionSub); _deletionSub = null; }
         Object.values(_voteSubs).forEach(s => { try { LBW_Nostr.unsubscribe(s); } catch (e) {} });
         _voteSubs = {};
         _onProposalCallbacks = [];
@@ -2048,6 +2147,7 @@ const LBW_Governance = (() => {
     return {
         KIND, CATEGORIES, DEFAULT_OPTIONS, DURATIONS, MERIT_CONFIG, ADMISSION,
         publishProposal, closeProposal, publishVote,
+        deleteProposal, canDeleteProposal, isGovAdmin,
         publishExecution, verifyExecution,
         subscribeProposals, subscribeVotes, unsubscribeAll, unsubscribeVotes,
         getProposal, getAllProposals, getActiveProposals, getClosedProposals,

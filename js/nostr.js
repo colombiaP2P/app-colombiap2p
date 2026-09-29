@@ -1679,7 +1679,7 @@ const LBW_Nostr = (() => {
     return {
         // Relay config (backward compat aliases + new)
         PRIVATE_RELAYS, PUBLIC_RELAYS, ALL_RELAYS,
-        SYSTEM_PRIVATE_RELAYS, SYSTEM_PUBLIC_RELAYS, SYSTEM_ALL_RELAYS,
+        SYSTEM_PRIVATE_RELAYS, SYSTEM_PUBLIC_RELAYS, SYSTEM_ALL_RELAYS, GOVERNANCE_RELAYS,
         EVENT_KINDS,
         getRelaysForKind,
 
