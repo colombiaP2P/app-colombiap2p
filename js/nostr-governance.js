@@ -1442,6 +1442,7 @@ const LBW_Governance = (() => {
             winner: calc.winner,
             approved: calc.approved || false,
             weighted_votes: calc.weighted,
+            weighting: calc.weighting || 'merits',
             total_votes: calc.total_votes,
             voter_count: calc.voter_count,
             delegated_count: calc.delegated_count || 0,
@@ -1544,7 +1545,8 @@ const LBW_Governance = (() => {
             // Voters with no merits in the ledger contribute 0 power but
             // still count toward voter_count for transparency.
 
-            if (bloc === 'Gobernanza') genesisVoted = true;
+            // [C2P fase inicial] El voto de un admin también cumple el quórum
+            if (bloc === 'Gobernanza' || isGovAdmin(vote.pubkey)) genesisVoted = true;
 
             weighted[vote.option] = (weighted[vote.option] || 0) + weight;
             voterCount++;
@@ -1601,17 +1603,33 @@ const LBW_Governance = (() => {
         // option is 0.49, which by definition cannot win a referendum.
         const quorum_met = genesisVoted;
 
+        // [C2P fase inicial] Si ningún votante tiene méritos en el ledger,
+        // todos pesan 0 y el ganador sería arbitrario. En ese caso se cuenta
+        // 1 persona = 1 voto (solo votos directos). Con méritos, ponderado.
+        let weighting = 'merits';
+        const totalWeight = Object.values(weighted).reduce((s, w) => s + w, 0);
+        if (totalWeight <= 0) {
+            weighting = 'one_person_one_vote';
+            for (const k in weighted) delete weighted[k];
+            for (const pk in voteByPubkey) {
+                const opt = voteByPubkey[pk];
+                weighted[opt] = (weighted[opt] || 0) + 1;
+            }
+        }
+
         if (!quorum_met) {
             return {
                 quorum_met: false, winner: null, approved: false,
-                weighted, total_votes: votes.length, voter_count: voterCount,
+                weighted, weighting, total_votes: votes.length, voter_count: voterCount,
                 delegated_count: delegatedCount, delegated_pubkeys: delegatedPubkeys
             };
         }
 
-        // Determine winner: option with highest accumulated power
+        // Determine winner: option with highest accumulated power.
+        // Empate en primer lugar → sin ganador (no se aprueba).
         const sorted = Object.entries(weighted).sort((a, b) => b[1] - a[1]);
-        const winner = sorted[0]?.[0] || null;
+        const tied = sorted.length > 1 && sorted[0][1] === sorted[1][1];
+        const winner = tied ? null : (sorted[0]?.[0] || null);
 
         // Determine if approved
         let approved = false;
@@ -1624,7 +1642,7 @@ const LBW_Governance = (() => {
         }
 
         return {
-            quorum_met: true, winner, approved, weighted,
+            quorum_met: true, winner, approved, weighted, weighting,
             total_votes: votes.length, voter_count: voterCount,
             delegated_count: delegatedCount, delegated_pubkeys: delegatedPubkeys
         };
@@ -2029,6 +2047,7 @@ const LBW_Governance = (() => {
                 winner: parsed.winner || g('winner') || null,
                 approved: parsed.approved || false,
                 weighted_votes: parsed.weighted_votes || {},
+                weighting: parsed.weighting || 'merits',
                 total_votes: parsed.total_votes || parseInt(g('total-votes')) || 0,
                 delegated_count: parsed.delegated_count || parseInt(g('delegated-count')) || 0,
                 calculated_at: parsed.calculated_at || event.created_at,

@@ -629,7 +629,7 @@ async function showProposalDetail(proposalIdentifier) {
                         // Propuesta cerrada: mostrar resultados ponderados por méritos (el verdadero resultado)
                         return `
                             <h3 style="color:var(--color-gold);margin-bottom:0.5rem;">Resultados Finales</h3>
-                            <div style="font-size:0.78rem;color:var(--color-text-secondary);margin-bottom:1rem;">Ponderados por méritos C2P · ${proposalVotes.length} voto${proposalVotes.length !== 1 ? 's' : ''} emitido${proposalVotes.length !== 1 ? 's' : ''}</div>
+                            <div style="font-size:0.78rem;color:var(--color-text-secondary);margin-bottom:1rem;">${_weightingLabel(result)} · ${proposalVotes.length} voto${proposalVotes.length !== 1 ? 's' : ''} emitido${proposalVotes.length !== 1 ? 's' : ''}</div>
                             ${displayWeightedVoteResults(result.weighted_votes)}
                         `;
                     } else {
@@ -671,10 +671,12 @@ function _renderResultSection(result, proposal) {
     const icon = approved ? '✅' : quorumFailed ? '⚠️' : '❌';
     const label = approved ? 'APROBADA' : quorumFailed ? 'SIN QUÓRUM' : 'RECHAZADA';
     const detail = quorumFailed
-        ? 'No hubo participación de Génesis. La propuesta no puede aprobarse sin quórum de Gobernanza.'
+        ? 'No votó ningún Génesis ni admin. La propuesta no puede aprobarse sin quórum de Gobernanza.'
         : approved
-            ? `La opción <strong>"${escapeHtml(result.winner)}"</strong> ganó con ${result.total_votes} votos ponderados.`
-            : `La opción <strong>"${escapeHtml(result.winner)}"</strong> fue la más votada (propuesta rechazada).`;
+            ? `La opción <strong>"${escapeHtml(result.winner)}"</strong> ganó con ${result.total_votes} voto${result.total_votes !== 1 ? 's' : ''} ${result.weighting === 'one_person_one_vote' ? '(1 persona = 1 voto)' : 'ponderados'}.`
+            : result.winner
+                ? `La opción <strong>"${escapeHtml(result.winner)}"</strong> fue la más votada (propuesta rechazada).`
+                : 'Empate entre las opciones más votadas (propuesta rechazada).';
 
     // Recalculate button: only shown when quorum failed AND current user has voted as Génesis
     let recalcSection = '';
@@ -700,7 +702,7 @@ function _renderResultSection(result, proposal) {
 
     const weightedBreakdown = result.weighted_votes && Object.keys(result.weighted_votes).length > 0
         ? `<div style="margin-top:1rem;">
-            <div style="font-size:0.8rem;color:var(--color-text-secondary);margin-bottom:0.5rem;">Votación ponderada por méritos:</div>
+            <div style="font-size:0.8rem;color:var(--color-text-secondary);margin-bottom:0.5rem;">${_weightingLabel(result)}:</div>
             ${Object.entries(result.weighted_votes)
                 .sort((a, b) => b[1] - a[1])
                 .map(([opt, weight]) => {
@@ -975,6 +977,13 @@ function displayVoteResults(proposalVotes, results) {
     }).join('');
 }
 
+// Etiqueta del método de conteo del resultado oficial
+function _weightingLabel(result) {
+    return result && result.weighting === 'one_person_one_vote'
+        ? '1 persona = 1 voto (fase inicial, sin méritos)'
+        : 'Ponderados por méritos C2P';
+}
+
 // Muestra resultados ponderados por méritos C2P (para propuestas cerradas con resultado oficial)
 function displayWeightedVoteResults(weightedVotes) {
     if (!weightedVotes || Object.keys(weightedVotes).length === 0) return '';
@@ -1028,7 +1037,7 @@ function updateVoteResultsInModal(proposalDTag) {
         if (isClosed && hasWeighted) {
             innerHtml = `
                 <h3 style="color:var(--color-gold);margin-bottom:0.5rem;">Resultados Finales</h3>
-                <div style="font-size:0.78rem;color:var(--color-text-secondary);margin-bottom:1rem;">Ponderados por méritos C2P · ${proposalVotes.length} voto${proposalVotes.length !== 1 ? 's' : ''} emitido${proposalVotes.length !== 1 ? 's' : ''}</div>
+                <div style="font-size:0.78rem;color:var(--color-text-secondary);margin-bottom:1rem;">${_weightingLabel(result)} · ${proposalVotes.length} voto${proposalVotes.length !== 1 ? 's' : ''} emitido${proposalVotes.length !== 1 ? 's' : ''}</div>
                 ${displayWeightedVoteResults(result.weighted_votes)}
             `;
         } else {
