@@ -237,6 +237,8 @@ const LBW_Governance = (() => {
     //
     // Backward compat: propuestas legacy (sin tag admission_required)
     // se tratan como admitidas sin gate. Solo las nuevas llevan el tag.
+    const ADMISSION_D_SUFFIX = ':admission';
+
     const ADMISSION = {
         MIN_GENESIS_VOTES: 2,           // quórum mínimo: ≥2 Génesis
         MAJORITY_FRACTION: 0.5,         // >50% yes para admitir
@@ -969,7 +971,10 @@ const LBW_Governance = (() => {
 
         const tags = [
             ['e', proposalEventId],
-            ['d', proposalDTag],
+            // kind 31001 es reemplazable por (autor, d): el voto de admisión
+            // necesita su propio d, o el voto temático del mismo autor lo borra.
+            ['d', proposalDTag + ADMISSION_D_SUFFIX],
+            ['proposal', proposalDTag],
             ['vote_type', 'admission'],
             ['t', 'c2p-governance'],
             ['t', 'c2p-admission'],
@@ -1150,8 +1155,12 @@ const LBW_Governance = (() => {
             const timeout = setTimeout(() => resolve(false), 3000);
             let found = false;
             const sub = LBW_Nostr.subscribe(
-                { kinds: [KIND.VOTE], authors: [pubkey], '#e': [proposalEventId], limit: 1 },
-                () => { if (!found) { found = true; clearTimeout(timeout); resolve(true); } },
+                { kinds: [KIND.VOTE], authors: [pubkey], '#e': [proposalEventId], limit: 5 },
+                (event) => {
+                    // Los votos de admisión no cuentan como voto temático
+                    if ((event.tags.find(t => t[0] === 'vote_type') || [])[1] === 'admission') return;
+                    if (!found) { found = true; clearTimeout(timeout); resolve(true); }
+                },
                 () => { clearTimeout(timeout); if (!found) resolve(false); }
             );
             setTimeout(() => { try { LBW_Nostr.unsubscribe(sub); } catch (e) {} }, 3500);
@@ -2010,7 +2019,9 @@ const LBW_Governance = (() => {
         _allVotesSub = LBW_Nostr.subscribe(
             { kinds: [KIND.VOTE], '#t': ['c2p-governance'], limit: 2000 },
             (event) => {
-                let dTag = (event.tags.find(t => t[0] === 'd') || [])[1];
+                let dTag = (event.tags.find(t => t[0] === 'proposal') || [])[1]
+                        || (event.tags.find(t => t[0] === 'd') || [])[1];
+                if (dTag && dTag.endsWith(ADMISSION_D_SUFFIX)) dTag = dTag.slice(0, -ADMISSION_D_SUFFIX.length);
                 if (!dTag) {
                     const eId = (event.tags.find(t => t[0] === 'e') || [])[1];
                     for (const [d, p] of _proposals) { if (p.id === eId) { dTag = d; break; } }
