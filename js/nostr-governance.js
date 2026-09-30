@@ -1775,7 +1775,8 @@ const LBW_Governance = (() => {
                         category: 'responsabilidad',
                         amount: meritConfig.amount,
                         currency: 'LBWM',
-                        evidence: [resultEventId, dTag]
+                        evidence: [resultEventId, dTag],
+                        ref: `gov-vote:${dTag}`
                     });
                 } catch (e) {
                     if (e.message?.includes('requiere al menos')) {
@@ -1785,7 +1786,8 @@ const LBW_Governance = (() => {
                             category: 'productiva',
                             amount: MERIT_CONFIG.VOTE_COMMUNITY.amount,
                             currency: 'LBWM',
-                            evidence: [resultEventId, dTag]
+                            evidence: [resultEventId, dTag],
+                            ref: `gov-vote:${dTag}`
                         });
                     } else throw e;
                 }
@@ -1795,7 +1797,8 @@ const LBW_Governance = (() => {
                     category,
                     amount: meritConfig.amount,
                     currency: 'LBWM',
-                    evidence: [resultEventId, dTag]
+                    evidence: [resultEventId, dTag],
+                    ref: `gov-vote:${dTag}`
                 });
             }
             console.log(`[Governance] 🏅 Méritos de votación reclamados: ${meritConfig.amount} ${meritConfig.category} para ${pubkey.substring(0, 8)}`);
@@ -1832,7 +1835,8 @@ const LBW_Governance = (() => {
                 category: meritConfig.category,
                 amount: meritConfig.amount,
                 currency: 'LBWM',
-                evidence: [proposal.id, dTag]
+                evidence: [proposal.id, dTag],
+                ref: `gov-author:${dTag}`
             });
             console.log(`[Governance] 🏅 Méritos de autor reclamados: ${meritConfig.amount} (propuesta ${result.approved ? 'aprobada' : 'rechazada'})`);
             if (typeof showNotification === 'function') {
@@ -1931,20 +1935,24 @@ const LBW_Governance = (() => {
         _onProposalCallbacks.forEach(cb => { try { cb(proposal, 'executed'); } catch (e) {} });
 
         // Award execution merits to author (Génesis can call awardMerit directly)
+        let meritAwarded = false, meritError = null;
         try {
             await LBW_Merits.awardMerit(
                 proposal.pubkey,
                 MERIT_CONFIG.EXEC_VERIFIED.amount,
                 MERIT_CONFIG.EXEC_VERIFIED.category,
-                `Ejecución verificada de propuesta: "${proposal.title}"`
+                `Ejecución verificada de propuesta: "${proposal.title}"`,
+                `gov-exec:${dTag}`
             );
+            meritAwarded = true;
             console.log(`[Governance] 🏅 Méritos de ejecución otorgados al autor: ${MERIT_CONFIG.EXEC_VERIFIED.amount}`);
         } catch (err) {
+            meritError = err.message;
             console.warn('[Governance] Error otorgando méritos de ejecución:', err.message);
         }
 
         console.log(`[Governance] ✅ Ejecución verificada: ${dTag}`);
-        return result;
+        return { ...result, meritAwarded, meritError };
     }
 
     // ── Handle Exec Verification from Relay ──────────────────

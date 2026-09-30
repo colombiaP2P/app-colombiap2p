@@ -1248,7 +1248,7 @@ const LBW_Transparency = (() => {
                 }
             }
 
-            await LBW_Merits.awardMerit(senderPubkey, amount, 'economica', reason);
+            await LBW_Merits.awardMerit(senderPubkey, amount, 'economica', reason, `zap:${zapKey}`);
 
             // Registro en PocketBase para historial XP del destinatario
             if (pb) {

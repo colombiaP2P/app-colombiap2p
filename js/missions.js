@@ -241,7 +241,7 @@ const LBW_Missions = (function () {
         // 1. Publicar evento Nostr kind:31002 — actualiza el gauge del destinatario
         if (typeof LBW_Merits !== 'undefined' && LBW_Merits.awardMerit) {
             try {
-                await LBW_Merits.awardMerit(recipientPubkey, amount, cat, reason);
+                await LBW_Merits.awardMerit(recipientPubkey, amount, cat, reason, `mision:${mission.id}`);
             } catch (e) {
                 console.error('[Missions] Error publicando mérito Nostr:', e);
             }

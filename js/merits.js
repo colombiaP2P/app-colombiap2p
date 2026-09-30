@@ -967,7 +967,8 @@ async function verifyDeposit(contribId) {
 
         await LBW_Merits.awardMerit(
             contrib.pubkey, contrib.amount, contrib.category,
-            '👑 Verificado por Génesis'
+            '👑 Verificado por Génesis',
+            `contrib:${contrib.id}`
         );
 
         showNotification('✅ Aportación verificada. Méritos emitidos.', 'success');
@@ -1024,8 +1025,8 @@ async function rejectDeposit(contribId) {
                 ['e', contribId],
                 ['p', contrib.pubkey],
                 ['status', 'rejected'],
-                ['t', 'lbw-merits'],
-                ['t', 'lbw-reject'],
+                ['t', 'c2p-merits'],
+                ['t', 'c2p-reject'],
                 ['client', 'ColombiaP2P']
             ]
         });

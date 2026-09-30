@@ -32,6 +32,27 @@ const LBW_Merits = (() => {
         SNAPSHOT: 31005    // Periodic leaderboard snapshot
     };
 
+    // [C2P Fase 0] Lanza error si ningún relay aceptó el evento. Antes los
+    // llamadores mostraban "méritos otorgados" aunque no se publicara nada.
+    function _requirePublished(result, label) {
+        const ok = (result && result.results || []).filter(r => r.success === true);
+        if (!result || !result.event || ok.length === 0) {
+            throw new Error(`No se pudo publicar ${label} en el relay. Revisa tu conexión y vuelve a intentar.`);
+        }
+        return result;
+    }
+
+    // [C2P Fase 0] Identificador d único y estable. kind 31002/31003 son
+    // reemplazables por (autor, d): dos eventos con el mismo d se pisan.
+    // Con `ref` (origen:referencia) el d es determinista → re-emitir el mismo
+    // mérito reemplaza en vez de duplicar. Sin ref, se añade un sufijo aleatorio.
+    function _makeDTag(prefix, recipientPubkey, ref) {
+        const who = (recipientPubkey || '').substring(0, 16);
+        if (ref) return `${prefix}:${String(ref).substring(0, 120)}:${who}`;
+        const rand = Math.random().toString(36).slice(2, 8);
+        return `${prefix}-${who.substring(0, 8)}-${Math.floor(Date.now() / 1000)}-${rand}`;
+    }
+
     // ── Merit Categories (v2.0) ────────────────────────────────
     // 4 categories with fixed weights. Merit = Cᵢ × wᵢ
     const CATEGORIES = {
@@ -155,7 +176,21 @@ const LBW_Merits = (() => {
         } catch (e) { console.warn('[Merits] Contribs storage save error:', e); }
     }
 
+    // [C2P Fase 0] Namespace propio (tags c2p-*, solo relay.colombiap2p.com):
+    // la caché anterior tenía eventos lbw-* de relays públicos. Purga única.
+    const MERITS_NS = 'c2p-v1';
+    const MERITS_NS_KEY = 'c2p_merits_ns';
+    function _purgeLegacyMeritsCache() {
+        try {
+            if (localStorage.getItem(MERITS_NS_KEY) === MERITS_NS) return;
+            [MERITS_STORAGE_KEY, ALL_MERITS_STORAGE_KEY, CONTRIBS_STORAGE_KEY].forEach(k => localStorage.removeItem(k));
+            localStorage.setItem(MERITS_NS_KEY, MERITS_NS);
+            console.log('[Merits] 🧹 Caché de méritos heredada purgada');
+        } catch (e) {}
+    }
+
     function _loadMeritsFromStorage() {
+        _purgeLegacyMeritsCache();
         try {
             // [transparency-1] Cargar la lista plana global primero.
             const rawAll = localStorage.getItem(ALL_MERITS_STORAGE_KEY);
@@ -271,7 +306,7 @@ const LBW_Merits = (() => {
         }
 
         const nowSecs = Math.floor(Date.now() / 1000);
-        const dTag = `contrib-${pubkey.substring(0, 8)}-${nowSecs}`;
+        const dTag = _makeDTag('contrib', pubkey, data.ref);
 
         // Calculate merit points: amount × category weight
         const amount = parseFloat(data.amount) || 0;
@@ -299,16 +334,16 @@ const LBW_Merits = (() => {
             ['category', data.category],
             ['weight', String(weight)],
             ['status', status],
-            ['t', 'lbw-merits'],
-            ['t', 'lbw-contrib'],
-            ['client', 'LiberBit World']
+            ['t', 'c2p-merits'],
+            ['t', 'c2p-contrib'],
+            ['client', 'ColombiaP2P']
         ];
 
-        const result = await LBW_Nostr.publishEvent({
+        const result = _requirePublished(await LBW_Nostr.publishEvent({
             kind: KIND.CONTRIB,
             content,
             tags
-        });
+        }), 'la contribución');
 
         console.log(`[Merits] 📝 Contribución: ${meritPoints} méritos [${data.category}] peso=${weight}`);
         return { ...result, dTag, meritPoints, weight };
@@ -316,7 +351,9 @@ const LBW_Merits = (() => {
 
     // ── Award Merit (Génesis-only) ──────────────────────────
     // [v2.1] FIXED: Added Génesis validation to prevent unauthorized merit emission
-    async function awardMerit(recipientPubkey, amount, category, reason) {
+    // ref (opcional): 'origen:referencia' único del hecho que genera el mérito
+    // (ej. 'gov-exec:<dTag>', 'zap:<id>', 'mision:<id>') → evita duplicados.
+    async function awardMerit(recipientPubkey, amount, category, reason, ref) {
         if (!LBW_Nostr.isLoggedIn()) throw new Error('Login requerido.');
         if (!recipientPubkey) throw new Error('Destinatario requerido.');
         if (!amount || amount <= 0) throw new Error('Cantidad debe ser positiva.');
@@ -339,7 +376,7 @@ const LBW_Merits = (() => {
         }
 
         const nowSecs = Math.floor(Date.now() / 1000);
-        const dTag = `merit-${recipientPubkey.substring(0, 8)}-${nowSecs}`;
+        const dTag = _makeDTag('merit', recipientPubkey, ref);
 
         const content = JSON.stringify({
             reason: reason || '',
@@ -355,16 +392,16 @@ const LBW_Merits = (() => {
             ['category', category],
             ['reason', reason || ''],
             ['awarded-by', pubkey],
-            ['t', 'lbw-merits'],
-            ['t', 'lbw-merit-award'],
-            ['client', 'LiberBit World']
+            ['t', 'c2p-merits'],
+            ['t', 'c2p-merit-award'],
+            ['client', 'ColombiaP2P']
         ];
 
-        const result = await LBW_Nostr.publishEvent({
+        const result = _requirePublished(await LBW_Nostr.publishEvent({
             kind: KIND.MERIT,
             content,
             tags
-        });
+        }), 'el mérito');
 
         console.log(`[Merits] 🏅 Merit award: ${amount} → ${recipientPubkey.substring(0, 8)} [${category}]`);
         return result;
@@ -396,16 +433,16 @@ const LBW_Merits = (() => {
 
         const tags = [
             ['d', dTag],
-            ['t', 'lbw-merits'],
-            ['t', 'lbw-snapshot'],
-            ['client', 'LiberBit World']
+            ['t', 'c2p-merits'],
+            ['t', 'c2p-snapshot'],
+            ['client', 'ColombiaP2P']
         ];
 
-        const result = await LBW_Nostr.publishEvent({
+        const result = _requirePublished(await LBW_Nostr.publishEvent({
             kind: KIND.SNAPSHOT,
             content,
             tags
-        });
+        }), 'el snapshot');
 
         console.log(`[Merits] 📊 Snapshot publicado: ${leaderboard.length} participantes`);
         return result;
@@ -553,7 +590,7 @@ const LBW_Merits = (() => {
             const sub = LBW_Nostr.subscribe(
                 { kinds: [KIND.MERIT], authors: [founderHex], limit: 20 },
                 (event) => {
-                    const isBootstrap = event.tags.some(t => t[0] === 't' && t[1] === 'lbw-bootstrap');
+                    const isBootstrap = event.tags.some(t => t[0] === 't' && t[1] === 'c2p-bootstrap');
                     if (isBootstrap && !found) {
                         found = true;
                         clearTimeout(timeout);
@@ -577,7 +614,7 @@ const LBW_Merits = (() => {
                 { kinds: [KIND.MERIT], authors: [founderHex], limit: 50 },
                 (event) => {
                     const hasLbwTag = event.tags && event.tags.some(
-                        t => t[0] === 't' && (t[1] === 'lbw-merits' || t[1] === 'lbw-bootstrap' || t[1] === 'lbw-merit-award')
+                        t => t[0] === 't' && (t[1] === 'c2p-merits' || t[1] === 'c2p-bootstrap' || t[1] === 'c2p-merit-award')
                     );
                     if (!hasLbwTag) return;
                     // [SEC-22] Even relay-filtered author lookups go through
@@ -639,7 +676,7 @@ const LBW_Merits = (() => {
             (event) => {
                 // Client-side tag filter: only process LBW merit events
                 const hasLbwTag = event.tags && event.tags.some(
-                    t => t[0] === 't' && (t[1] === 'lbw-merits' || t[1] === 'lbw-bootstrap' || t[1] === 'lbw-merit-award')
+                    t => t[0] === 't' && (t[1] === 'c2p-merits' || t[1] === 'c2p-bootstrap' || t[1] === 'c2p-merit-award')
                 );
                 if (!hasLbwTag) return;
                 // [SEC-22] All merit events must pass issuer validation.
@@ -659,7 +696,7 @@ const LBW_Merits = (() => {
         _subContribs = LBW_Nostr.subscribe(
             {
                 kinds: [KIND.CONTRIB],
-                '#t': ['lbw-contrib'],
+                '#t': ['c2p-contrib'],
                 limit: 500
             },
             (event) => {
@@ -697,7 +734,7 @@ const LBW_Merits = (() => {
         _subSnapshots = LBW_Nostr.subscribe(
             {
                 kinds: [KIND.SNAPSHOT],
-                '#t': ['lbw-snapshot'],
+                '#t': ['c2p-snapshot'],
                 limit: 5
             },
             (event) => {
@@ -1316,17 +1353,17 @@ const LBW_Merits = (() => {
             ['category', 'fundacional'],
             ['reason', reason || 'Bootstrap fundacional'],
             ['awarded-by', pubkey],
-            ['t', 'lbw-merits'],
-            ['t', 'lbw-merit-award'],
-            ['t', 'lbw-bootstrap'],
-            ['client', 'LiberBit World']
+            ['t', 'c2p-merits'],
+            ['t', 'c2p-merit-award'],
+            ['t', 'c2p-bootstrap'],
+            ['client', 'ColombiaP2P']
         ];
 
-        const result = await LBW_Nostr.publishEvent({
+        const result = _requirePublished(await LBW_Nostr.publishEvent({
             kind: KIND.MERIT,
             content,
             tags
-        });
+        }), 'los méritos fundacionales');
 
         console.log(`[Merits] 🏗️ Bootstrap fundacional: ${amount} méritos → ${founderPubkey.substring(0, 8)}`);
         return { ...result, dTag, amount, bootstrapped: true };

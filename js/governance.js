@@ -960,8 +960,12 @@ async function submitExecVerification(proposalDTag) {
     if (btn) { btn.disabled = true; btn.innerHTML = '⏳ Verificando...'; }
 
     try {
-        await LBW_Governance.verifyExecution(proposalDTag);
-        showNotification('🏆 ¡Ejecución verificada! Se han otorgado 50 méritos al autor.', 'success');
+        const res = await LBW_Governance.verifyExecution(proposalDTag);
+        if (res && res.meritAwarded) {
+            showNotification('🏆 ¡Ejecución verificada! Se emitieron 50 méritos al autor.', 'success');
+        } else {
+            showNotification('✅ Ejecución verificada, pero no se pudieron emitir los méritos al autor: ' + (res?.meritError || 'error desconocido'), 'warning');
+        }
         const modal = document.querySelector('.modal.active');
         if (modal) modal.remove();
         setTimeout(displayProposals, 500);
