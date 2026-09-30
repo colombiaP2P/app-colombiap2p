@@ -604,7 +604,12 @@ const LBW_Nostr = (() => {
                 _subLimitHits[url] = (_subLimitHits[url] || 0) + 1;
                 if (!_subLimitTimer[url]) {
                     _subLimitTimer[url] = setTimeout(() => {
-                        console.warn(`[Nostr] ⚠️ ${url} rechazó ${_subLimitHits[url]} suscripción(es) por el límite de concurrentes. Diagnóstico: LBW_Nostr.debugSubscriptions()`);
+                        // Comparar lo que nostr-tools tiene abierto en esa conexión
+                        // con lo que cuenta el limitador: si difieren, hay subs que
+                        // no pasan por LBW_Nostr.subscribe (pool directo).
+                        const enConexion = relay.openSubs ? relay.openSubs.size : '?';
+                        const enLimitador = _relaySubCount[_normRelayUrl(url)] || 0;
+                        console.warn(`[Nostr] ⚠️ ${url} rechazó ${_subLimitHits[url]} suscripción(es) por el límite de concurrentes. Abiertas en la conexión: ${enConexion} · contadas por el limitador: ${enLimitador}. Diagnóstico: LBW_Nostr.debugSubscriptions()`);
                         _subLimitHits[url] = 0;
                         _subLimitTimer[url] = null;
                     }, 10000);
