@@ -583,6 +583,7 @@ const LBW_Nostr = (() => {
                 out[url] = { total, porFiltro: Object.entries(groups).sort((a, b) => b[1] - a[1]).map(([f, n]) => `${n}× ${f}`) };
             });
         } catch (e) { out.error = e.message; }
+        out._limitador = { maxPorRelay: MAX_SUBS_PER_RELAY, abiertas: { ..._relaySubCount }, enCola: _subQueue.length };
         console.warn('[Nostr] Suscripciones abiertas:', JSON.stringify(out, null, 2));
         return out;
     }
@@ -775,6 +776,8 @@ const LBW_Nostr = (() => {
     function disconnectAll() {
         _activeSubs.forEach(sub => { try { sub.close(); } catch (e) {} });
         _activeSubs = [];
+        _subQueue = [];
+        _relaySubCount = {};
         if (_pool) {
             try { _pool.close(ALL_RELAYS); } catch (e) {}
             _pool = null;
@@ -919,7 +922,45 @@ const LBW_Nostr = (() => {
     // Lo ya recibido lo descarta el dedup global (_seenEvents).
     const SUB_REOPEN_MAX_RETRIES = 20;
 
+    // [C2P] Limitador por relay. nostr-rs-relay admite 32 subs concurrentes
+    // por conexión y, al superarlo, solo manda un NOTICE (la sub queda muda).
+    // Varios módulos abren consultas puntuales en ráfaga (una por tarjeta del
+    // marketplace, por autor, etc.). En vez de corregir cada módulo, aquí se
+    // limita: si algún relay destino ya tiene MAX_SUBS_PER_RELAY abiertas, la
+    // sub espera en cola y se abre cuando otra se cierra.
+    const MAX_SUBS_PER_RELAY = 28;   // margen bajo el límite de 32
+    let _relaySubCount = {};         // url → subs abiertas por esta app
+    let _subQueue = [];              // [{ handle, urls, start }]
+
+    function _canOpenOn(urls) {
+        return urls.every(u => (_relaySubCount[u] || 0) < MAX_SUBS_PER_RELAY);
+    }
+    function _acquireSlots(handle, urls) {
+        urls.forEach(u => { _relaySubCount[u] = (_relaySubCount[u] || 0) + 1; });
+        handle.held = urls;
+    }
+    function _releaseSlots(handle) {
+        if (!handle.held) return;
+        handle.held.forEach(u => { _relaySubCount[u] = Math.max(0, (_relaySubCount[u] || 0) - 1); });
+        handle.held = null;
+        _drainSubQueue();
+    }
+    function _drainSubQueue() {
+        for (let i = 0; i < _subQueue.length;) {
+            const q = _subQueue[i];
+            if (q.handle.closed) { _subQueue.splice(i, 1); continue; }
+            if (_canOpenOn(q.urls)) { _subQueue.splice(i, 1); q.start(); }
+            else i++;
+        }
+    }
+
+    // Sin duplicados: SYSTEM_ALL_RELAYS repite damus/nos.lol (están en la lista
+    // privada y en la pública) y cada sub contaba doble en el limitador.
     function _resolveTargetRelays(filterArr, relayUrls) {
+        return [...new Set(_resolveTargetRelaysRaw(filterArr, relayUrls))];
+    }
+
+    function _resolveTargetRelaysRaw(filterArr, relayUrls) {
         if (relayUrls) return relayUrls;
         const kinds = filterArr[0]?.kinds;
         if (kinds && kinds.length > 0) {
@@ -937,10 +978,12 @@ const LBW_Nostr = (() => {
         const handle = {
             closed: false,
             inner: null,
+            held: null,
             retries: 0,
             close() {
                 this.closed = true;
                 try { if (this.inner) this.inner.close(); } catch (e) {}
+                _releaseSlots(this);
             }
         };
 
@@ -948,6 +991,13 @@ const LBW_Nostr = (() => {
             if (handle.closed) return;
             const pool = _getPool();
             const targetRelays = _resolveTargetRelays(filterArr, relayUrls);
+
+            // Cupo por relay: si no hay hueco, esperar en cola
+            if (!_canOpenOn(targetRelays)) {
+                _subQueue.push({ handle, urls: targetRelays, start: open });
+                return;
+            }
+            _acquireSlots(handle, targetRelays);
             // Hook de NOTICE/AUTH en conexiones que no pasan por connectToRelays
             // (p.ej. la dedicada de gobernanza/méritos). Idempotente.
             targetRelays.forEach(url => {
@@ -986,6 +1036,7 @@ const LBW_Nostr = (() => {
                         if (onEose) onEose();
                     },
                     onclose: (reasons) => {
+                        _releaseSlots(handle);
                         if (handle.closed) return;
                         if (handle.retries >= SUB_REOPEN_MAX_RETRIES) {
                             console.warn('[Nostr] Suscripción abandonada tras reintentos:', reasons);
