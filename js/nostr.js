@@ -47,7 +47,13 @@ const LBW_Nostr = (() => {
     // GOVERNANCE_RELAYS: gobernanza (propuestas, votos, resultados, ejecución)
     // y méritos (31002/31003/31005) viven SOLO en el relay propio. Así no se
     // mezclan con eventos de otras comunidades (p.ej. LiberBit) en relays públicos.
-    const GOVERNANCE_RELAYS = ['wss://relay.colombiap2p.com'];
+    //
+    // Conexión DEDICADA: el relay limita a 32 subs concurrentes por conexión y
+    // el resto de la app (chat, perfiles, marketplace…) agota ese cupo en la
+    // conexión principal. El query ?c2p=core hace que nostr-tools abra un
+    // WebSocket aparte (normalizeURL conserva el query) con su propio cupo.
+    // Es el mismo relay: los eventos se publican y leen en la misma base.
+    const GOVERNANCE_RELAYS = ['wss://relay.colombiap2p.com/?c2p=core'];
 
     // ── NIP-65 User Relay State ──────────────────────────────
     // When user publishes kind 10002, these override system defaults.
@@ -905,6 +911,11 @@ const LBW_Nostr = (() => {
             if (handle.closed) return;
             const pool = _getPool();
             const targetRelays = _resolveTargetRelays(filterArr, relayUrls);
+            // Hook de NOTICE/AUTH en conexiones que no pasan por connectToRelays
+            // (p.ej. la dedicada de gobernanza/méritos). Idempotente.
+            targetRelays.forEach(url => {
+                if (!SYSTEM_ALL_RELAYS.includes(url)) _setupAuthForRelay(url);
+            });
 
             handle.inner = pool.subscribeMany(
                 targetRelays,
@@ -1277,27 +1288,75 @@ const LBW_Nostr = (() => {
         return result;
     }
 
-    async function fetchUserProfile(pubkey) {
+    // [C2P] Perfiles por LOTES. Antes cada llamada abría su propia sub
+    // (avatar-fix, sidebar de DMs y sync piden un perfil por autor, en
+    // paralelo): un chat con 60 autores = 60 subs simultáneas, y el relay
+    // propio solo admite 32 por conexión. Ahora las peticiones que llegan en
+    // una ventana de 150 ms se agrupan en un REQ con authors:[…] (máx. 100),
+    // con caché en memoria (positiva 10 min, negativa 2 min).
+    const PROFILE_BATCH_WINDOW_MS = 150;
+    const PROFILE_BATCH_MAX = 100;
+    const PROFILE_TTL_OK_MS = 10 * 60 * 1000;
+    const PROFILE_TTL_MISS_MS = 2 * 60 * 1000;
+    const _profileQueue = new Map();      // pubkey → [resolve]
+    const _profileMemCache = new Map();   // pubkey → { profile, ts }
+    let _profileBatchTimer = null;
+
+    function fetchUserProfile(pubkey) {
+        if (!pubkey) return Promise.resolve(null);
+        const cached = _profileMemCache.get(pubkey);
+        if (cached) {
+            const ttl = cached.profile ? PROFILE_TTL_OK_MS : PROFILE_TTL_MISS_MS;
+            if (Date.now() - cached.ts < ttl) return Promise.resolve(cached.profile);
+        }
         return new Promise(resolve => {
-            // [C2P] Consulta puntual: la sub se cierra SIEMPRE (evento, EOSE o
-            // timeout). Antes solo se cerraba si había perfil; cada usuario sin
-            // kind:0 dejaba una sub abierta y agotaba el cupo de 32 del relay.
-            let sub = null;
-            const done = () => setTimeout(() => { try { unsubscribe(sub); } catch (e) {} }, 0);
-            const timeout = setTimeout(() => { resolve(null); done(); }, 6000);
-            let found = false;
-            sub = subscribe(
-                { kinds: [0], authors: [pubkey], limit: 1 },
-                event => {
-                    if (found) return;
-                    found = true;
-                    clearTimeout(timeout);
-                    try { resolve(JSON.parse(event.content)); } catch (e) { resolve(null); }
-                    done();
-                },
-                () => { clearTimeout(timeout); if (!found) resolve(null); done(); }
-            );
+            if (!_profileQueue.has(pubkey)) _profileQueue.set(pubkey, []);
+            _profileQueue.get(pubkey).push(resolve);
+            if (!_profileBatchTimer) _profileBatchTimer = setTimeout(_flushProfileBatch, PROFILE_BATCH_WINDOW_MS);
         });
+    }
+
+    function _flushProfileBatch() {
+        _profileBatchTimer = null;
+        const entries = [..._profileQueue.entries()];
+        _profileQueue.clear();
+        for (let i = 0; i < entries.length; i += PROFILE_BATCH_MAX) {
+            _fetchProfileChunk(new Map(entries.slice(i, i + PROFILE_BATCH_MAX)));
+        }
+    }
+
+    function _fetchProfileChunk(waiting) {
+        const newest = new Map();   // pubkey → evento kind:0 más reciente
+        let sub = null;
+        let finished = false;
+
+        const parse = ev => { try { return JSON.parse(ev.content); } catch (e) { return null; } };
+        const settle = (pk, profile) => {
+            _profileMemCache.set(pk, { profile, ts: Date.now() });
+            (waiting.get(pk) || []).forEach(r => { try { r(profile); } catch (e) {} });
+            waiting.delete(pk);
+        };
+        const finish = () => {
+            if (finished) return;
+            finished = true;
+            clearTimeout(timeout);
+            [...waiting.keys()].forEach(pk => settle(pk, null));
+            // Actualizar caché con la versión más nueva recibida de cualquier relay
+            newest.forEach((ev, pk) => _profileMemCache.set(pk, { profile: parse(ev), ts: Date.now() }));
+            setTimeout(() => { try { unsubscribe(sub); } catch (e) {} }, 0);
+        };
+        const timeout = setTimeout(finish, 6000);
+
+        sub = subscribe(
+            { kinds: [0], authors: [...waiting.keys()] },
+            ev => {
+                const prev = newest.get(ev.pubkey);
+                if (!prev || ev.created_at > prev.created_at) newest.set(ev.pubkey, ev);
+                // Responder en cuanto llega el primer perfil (como antes)
+                if (waiting.has(ev.pubkey)) settle(ev.pubkey, parse(ev));
+            },
+            finish
+        );
     }
 
     // ── Community Chat (Kind 1) ──────────────────────────────
