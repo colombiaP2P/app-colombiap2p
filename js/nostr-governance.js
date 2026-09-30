@@ -324,7 +324,6 @@ const LBW_Governance = (() => {
     const VOTES_STORAGE_KEY     = 'lbw_governance_myvotes';
     const ALL_VOTES_STORAGE_KEY = 'lbw_governance_allvotes';
     const RESULTS_STORAGE_KEY   = 'lbw_governance_results';
-    const MERIT_CLAIMED_KEY     = 'lbw_governance_merit_claimed';
 
     // ── Proposal Numbering ───────────────────────────────────
     // Each proposal carries a permanent sequential number (PRP-001, PRP-002…)
@@ -1272,8 +1271,12 @@ const LBW_Governance = (() => {
         _onResultCallbacks.forEach(cb => { try { cb(result); } catch (e) {} });
         _onProposalCallbacks.forEach(cb => { try { cb(proposal, 'result'); } catch (e) {} });
 
-        // Auto-claim voting merits for current user
-        _autoClaimVotingMerits(result.dTag, result);
+        // [C2P Fase 2] Los méritos de gobernanza los emite el servidor (Emisor
+        // ColombiaP2P) tras validar el resultado en el relay. Solo resultados
+        // recientes, para no disparar peticiones por propuestas antiguas.
+        if (result.calculated_at && Date.now() / 1000 - result.calculated_at < GOV_MERITS_MAX_AGE_SECS) {
+            _requestGovernanceMerits(result.dTag);
+        }
 
         console.log(`[Governance] 📊 Resultado recibido: ${result.dTag} → ${result.approved ? 'APROBADA' : result.quorum_met === false ? 'SIN QUORUM' : 'RECHAZADA'}`);
     }
@@ -1731,115 +1734,46 @@ const LBW_Governance = (() => {
         };
     }
 
-    // ── Auto-Claim Voting Merits ──────────────────────────────
-    async function _autoClaimVotingMerits(dTag, result) {
-        if (!LBW_Nostr.isLoggedIn()) return;
-        const pubkey = LBW_Nostr.getPubkey();
-        const claimKey = `${MERIT_CLAIMED_KEY}_vote_${dTag}_${pubkey.substring(0, 12)}`;
+    // ── Méritos de gobernanza (Fase 2) ────────────────────────
+    // Antes cada cliente publicaba sus propias solicitudes kind:31003
+    // (pending_vote) que nadie aprobaba. Ahora se pide al endpoint del
+    // Emisor, que lee del relay la propuesta, el resultado, los votos y la
+    // verificación de ejecución, y emite los 31002 que falten (idempotente).
+    const GOV_MERITS_ENDPOINT = '/api/merits/governance';
+    const GOV_MERITS_REQ_KEY = 'c2p_gov_merits_req';
+    const GOV_MERITS_RETRY_MS = 6 * 3600 * 1000;       // una petición por propuesta cada 6 h
+    const GOV_MERITS_MAX_AGE_SECS = 30 * 86400;        // solo resultados de los últimos 30 días
 
-        // Already claimed?
-        if (localStorage.getItem(claimKey)) return;
-
-        // Did this user vote on this proposal?
-        const myVote = _myVotes.get(dTag);
-        if (!myVote) return;
-
-        // Determine merit tier
-        let meritConfig = MERIT_CONFIG.VOTE_COMMUNITY;
-        if (typeof LBW_Merits !== 'undefined') {
-            const userData = LBW_Merits.getUserMerits(pubkey);
-            const bloc = userData?.level?.bloc || 'Comunidad';
-            if (bloc === 'Ciudadanía' || bloc === 'Gobernanza') {
-                meritConfig = MERIT_CONFIG.VOTE_SENIOR;
-            }
-        }
-
-        // Mark as claimed before attempting (prevents duplicates on error)
-        localStorage.setItem(claimKey, '1');
+    async function _requestGovernanceMerits(dTag, force = false) {
+        if (!dTag) return null;
+        let log = {};
+        try { log = JSON.parse(localStorage.getItem(GOV_MERITS_REQ_KEY) || '{}'); } catch (e) {}
+        if (!force && Date.now() - (log[dTag] || 0) < GOV_MERITS_RETRY_MS) return null;
+        log[dTag] = Date.now();
+        try { localStorage.setItem(GOV_MERITS_REQ_KEY, JSON.stringify(log)); } catch (e) {}
 
         try {
-            const proposal = _proposals.get(dTag);
-            const resultEventId = result.eventId || dTag;
-            let category = meritConfig.category;
-
-            // Responsabilidad requires 1000+ in other categories — try it, fallback to productiva
-            if (category === 'responsabilidad') {
-                try {
-                    await LBW_Merits.submitContribution({
-                        description: `Participación en votación de gobernanza: "${proposal?.title || dTag}"`,
-                        category: 'responsabilidad',
-                        amount: meritConfig.amount,
-                        currency: 'LBWM',
-                        evidence: [resultEventId, dTag],
-                        ref: `gov-vote:${dTag}`
-                    });
-                } catch (e) {
-                    if (e.message?.includes('requiere al menos')) {
-                        // Fallback to productiva
-                        await LBW_Merits.submitContribution({
-                            description: `Participación en votación de gobernanza: "${proposal?.title || dTag}"`,
-                            category: 'productiva',
-                            amount: MERIT_CONFIG.VOTE_COMMUNITY.amount,
-                            currency: 'LBWM',
-                            evidence: [resultEventId, dTag],
-                            ref: `gov-vote:${dTag}`
-                        });
-                    } else throw e;
-                }
-            } else {
-                await LBW_Merits.submitContribution({
-                    description: `Participación en votación de gobernanza: "${proposal?.title || dTag}"`,
-                    category,
-                    amount: meritConfig.amount,
-                    currency: 'LBWM',
-                    evidence: [resultEventId, dTag],
-                    ref: `gov-vote:${dTag}`
-                });
-            }
-            console.log(`[Governance] 🏅 Méritos de votación reclamados: ${meritConfig.amount} ${meritConfig.category} para ${pubkey.substring(0, 8)}`);
-            if (typeof showNotification === 'function') {
-                showNotification(`🏅 +${meritConfig.amount} méritos reclamados por participar en la votación`, 'success');
-            }
-        } catch (err) {
-            console.warn('[Governance] Error reclamando méritos de votación:', err.message);
-            localStorage.removeItem(claimKey); // Allow retry
-        }
-
-        // Also claim author merits if current user is the proposal author
-        await _autoClaimAuthorMerits(dTag, result);
-    }
-
-    // ── Auto-Claim Author Merits ─────────────────────────────
-    async function _autoClaimAuthorMerits(dTag, result) {
-        if (!LBW_Nostr.isLoggedIn()) return;
-        const pubkey = LBW_Nostr.getPubkey();
-        const proposal = _proposals.get(dTag);
-        if (!proposal || proposal.pubkey !== pubkey) return;
-
-        const claimKey = `${MERIT_CLAIMED_KEY}_author_${dTag}_${pubkey.substring(0, 12)}`;
-        if (localStorage.getItem(claimKey)) return;
-
-        if (result.quorum_met === false) return; // No merits for quorum failure
-
-        const meritConfig = result.approved ? MERIT_CONFIG.AUTHOR_APPROVED : MERIT_CONFIG.AUTHOR_REJECTED;
-        localStorage.setItem(claimKey, '1');
-
-        try {
-            await LBW_Merits.submitContribution({
-                description: `Propuesta de gobernanza ${result.approved ? 'aprobada' : 'rechazada'}: "${proposal.title}"`,
-                category: meritConfig.category,
-                amount: meritConfig.amount,
-                currency: 'LBWM',
-                evidence: [proposal.id, dTag],
-                ref: `gov-author:${dTag}`
+            const res = await fetch(GOV_MERITS_ENDPOINT, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ dTag })
             });
-            console.log(`[Governance] 🏅 Méritos de autor reclamados: ${meritConfig.amount} (propuesta ${result.approved ? 'aprobada' : 'rechazada'})`);
-            if (typeof showNotification === 'function') {
-                showNotification(`🏅 +${meritConfig.amount} méritos por tu propuesta ${result.approved ? 'aprobada ✅' : 'rechazada'}`, result.approved ? 'success' : 'info');
+            const body = await res.json().catch(() => ({}));
+            if (!res.ok) throw new Error(body.error || ('HTTP ' + res.status));
+
+            const me = LBW_Nostr.isLoggedIn() ? LBW_Nostr.getPubkey() : null;
+            const mine = (body.issued || []).filter(i => i.recipient === me);
+            if (mine.length > 0 && typeof showNotification === 'function') {
+                const total = mine.reduce((sum, i) => sum + (i.amount || 0), 0);
+                showNotification(`🏅 +${total} méritos de gobernanza acreditados`, 'success');
             }
+            console.log(`[Governance] 🏅 Méritos de gobernanza ${dTag}: ${(body.issued || []).length} emitidos, ${(body.skipped || []).length} ya existían`);
+            return body;
         } catch (err) {
-            console.warn('[Governance] Error reclamando méritos de autor:', err.message);
-            localStorage.removeItem(claimKey);
+            console.warn('[Governance] No se pudieron solicitar los méritos de gobernanza:', err.message);
+            // Permitir reintento en la próxima carga
+            try { delete log[dTag]; localStorage.setItem(GOV_MERITS_REQ_KEY, JSON.stringify(log)); } catch (e) {}
+            return null;
         }
     }
 
@@ -1929,21 +1863,15 @@ const LBW_Governance = (() => {
         _persistToStorage();
         _onProposalCallbacks.forEach(cb => { try { cb(proposal, 'executed'); } catch (e) {} });
 
-        // Award execution merits to author (Génesis can call awardMerit directly)
+        // [C2P Fase 2] El mérito de ejecución lo emite el servidor (Emisor)
         let meritAwarded = false, meritError = null;
-        try {
-            await LBW_Merits.awardMerit(
-                proposal.pubkey,
-                MERIT_CONFIG.EXEC_VERIFIED.amount,
-                MERIT_CONFIG.EXEC_VERIFIED.category,
-                `Ejecución verificada de propuesta: "${proposal.title}"`,
-                `gov-exec:${dTag}`
-            );
-            meritAwarded = true;
-            console.log(`[Governance] 🏅 Méritos de ejecución otorgados al autor: ${MERIT_CONFIG.EXEC_VERIFIED.amount}`);
-        } catch (err) {
-            meritError = err.message;
-            console.warn('[Governance] Error otorgando méritos de ejecución:', err.message);
+        const meritRes = await _requestGovernanceMerits(dTag, true);
+        if (meritRes) {
+            const isExec = i => (i.ref || '').startsWith('gov-exec:');
+            meritAwarded = (meritRes.issued || []).some(isExec) || (meritRes.skipped || []).some(isExec);
+            if (!meritAwarded) meritError = meritRes.pending || 'el servidor aún no ve la verificación; se reintentará';
+        } else {
+            meritError = 'no se pudo contactar con el emisor de méritos';
         }
 
         console.log(`[Governance] ✅ Ejecución verificada: ${dTag}`);
@@ -2338,7 +2266,7 @@ const LBW_Governance = (() => {
         getResult, getExecution, getResults,
         getMyVote, getVotesForProposal, getStats, getTimeLeft,
         reset, reloadMyVotes, fetchMyVotes,
-        recalculateResult, formatProposalNumber,
+        recalculateResult, formatProposalNumber, requestGovernanceMerits: _requestGovernanceMerits,
         // Admission gate (NIP-72)
         requiresAdmission, getAdmissionStatus, getAdmissionTimeLeft,
         isAdmitted, isCommunityArchived, getMyAdmissionVote,

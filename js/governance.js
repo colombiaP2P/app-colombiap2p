@@ -848,13 +848,15 @@ function _renderMeritInfo(proposal, result, myVote, isAuthor) {
 
     if (myVote) {
         // Determine what merits they'd get/got
+        // Misma regla que api/merits/governance.js: senior si ≥800 méritos y
+        // ≥1000 fuera de responsabilidad (requisito de esa categoría)
         let meritLabel = `+${mc.VOTE_COMMUNITY.amount} Productiva`;
         if (typeof LBW_Merits !== 'undefined') {
-            const pubkey = LBW_Nostr.getPubkey();
-            const userData = LBW_Merits.getUserMerits(pubkey);
-            const bloc = userData?.level?.bloc || 'Comunidad';
-            if (bloc === 'Ciudadanía' || bloc === 'Gobernanza') {
-                meritLabel = `+${mc.VOTE_SENIOR.amount} Responsabilidad (1.2×)`;
+            const userData = LBW_Merits.getUserMerits(LBW_Nostr.getPubkey());
+            const total = userData?.total || 0;
+            const other = total - (userData?.byCategory?.responsabilidad || 0);
+            if (total >= 800 && other >= 1000) {
+                meritLabel = `+${mc.VOTE_SENIOR.amount} Responsabilidad`;
             }
         }
         lines.push(`🗳️ Méritos por votar: ${meritLabel}`);
@@ -866,7 +868,7 @@ function _renderMeritInfo(proposal, result, myVote, isAuthor) {
     }
 
     if (isAuthor && ['approved', 'in_execution'].includes(proposal.status)) {
-        lines.push(`🏆 Méritos por ejecución verificada: +${mc.EXEC_VERIFIED.amount} Productiva (pendiente verificación de Génesis)`);
+        lines.push(`🏆 Méritos por ejecución verificada: +${mc.EXEC_VERIFIED.amount} Productiva (se acreditan cuando un Génesis verifique la ejecución)`);
     }
 
     if (lines.length === 0) return '';
@@ -875,7 +877,7 @@ function _renderMeritInfo(proposal, result, myVote, isAuthor) {
         <div style="background:rgba(255,193,7,0.08);border:1px solid rgba(255,193,7,0.25);border-radius:12px;padding:1.25rem;margin-top:1.5rem;">
             <div style="font-size:0.8rem;color:var(--color-gold);font-weight:600;margin-bottom:0.75rem;letter-spacing:0.05em;">MÉRITOS C2P</div>
             ${lines.map(l => `<div style="color:var(--color-text-secondary);font-size:0.88rem;margin-bottom:0.4rem;">${l}</div>`).join('')}
-            <div style="font-size:0.78rem;color:var(--color-text-secondary);margin-top:0.5rem;opacity:0.7;">Los méritos requieren verificación de un Génesis para acreditarse.</div>
+            <div style="font-size:0.78rem;color:var(--color-text-secondary);margin-top:0.5rem;opacity:0.7;">El Emisor ColombiaP2P los acredita automáticamente al publicarse el resultado. Consúltalos en tu Pasaporte.</div>
         </div>
     `;
 }
