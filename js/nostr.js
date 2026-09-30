@@ -560,6 +560,27 @@ const LBW_Nostr = (() => {
     // NIP-42, no es un bug.
     const _subLimitHits = {};
     const _subLimitTimer = {};
+    const _subLimitPeak = {};
+    const _subLimitPeakDetail = {};
+
+    // Resume REQ vivos por forma de filtro (kinds + tags + nº de autores)
+    function _groupLiveReqs(live) {
+        const groups = {};
+        live.forEach(({ filters, t }) => {
+            const key = JSON.stringify((filters || []).map(f => {
+                const g = { kinds: f.kinds };
+                Object.keys(f).filter(k => k[0] === '#').forEach(k => { g[k] = f[k].length > 3 ? `[${f[k].length}]` : f[k]; });
+                if (f.authors) g.authors = f.authors.length;
+                if (f.ids) g.ids = f.ids.length;
+                return g;
+            }));
+            if (!groups[key]) groups[key] = { n: 0, oldestSecs: 0 };
+            groups[key].n++;
+            groups[key].oldestSecs = Math.max(groups[key].oldestSecs, Math.round((Date.now() - t) / 1000));
+        });
+        return Object.entries(groups).sort((a, b) => b[1].n - a[1].n)
+            .map(([f, g]) => `${g.n}× (hace ${g.oldestSecs}s) ${f}`);
+    }
 
     // Diagnóstico: suscripciones abiertas por relay (según nostr-tools) y
     // agrupadas por filtro, para localizar qué módulo agota el cupo de 32.
@@ -580,6 +601,7 @@ const LBW_Nostr = (() => {
                     groups[key] = (groups[key] || 0) + 1;
                 });
                 const total = relay.openSubs ? relay.openSubs.size : 0;
+                if (relay._c2pLive) out[url + ' (vista relay)'] = { reqVivos: relay._c2pLive.size, porFiltro: _groupLiveReqs(relay._c2pLive) };
                 out[url] = { total, porFiltro: Object.entries(groups).sort((a, b) => b[1] - a[1]).map(([f, n]) => `${n}× ${f}`) };
             });
         } catch (e) { out.error = e.message; }
@@ -595,6 +617,34 @@ const LBW_Nostr = (() => {
         catch (e) { return; }   // relay caído, no es crítico
         if (!relay || relay._lbwAuthHooked) return;
         relay._lbwAuthHooked = true;
+
+        // Diagnóstico: REQ vivos según lo que la app ENVÍA por el WebSocket
+        // (REQ añade, CLOSE quita, CLOSED del relay quita). Es la vista del
+        // relay, no la de nostr-tools. Se siembra con las subs ya abiertas.
+        const live = new Map();   // subId → { filters, t }
+        relay._c2pLive = live;
+        try {
+            (relay.openSubs ? [...relay.openSubs.values()] : []).forEach(sub => {
+                live.set(sub.id, { filters: sub.filters, t: Date.now() });
+            });
+        } catch (e) {}
+        // Al caerse la conexión el relay olvida todas las subs: vaciar el registro
+        const prevOnclose = relay.onclose;
+        relay.onclose = () => { live.clear(); try { if (prevOnclose) prevOnclose(); } catch (e) {} };
+        const origSend = relay.send.bind(relay);
+        relay.send = (msg) => {
+            try {
+                if (typeof msg === 'string') {
+                    if (msg.startsWith('["REQ"')) {
+                        const arr = JSON.parse(msg);
+                        live.set(arr[1], { filters: arr.slice(2), t: Date.now() });
+                    } else if (msg.startsWith('["CLOSE"')) {
+                        live.delete(JSON.parse(msg)[1]);
+                    }
+                }
+            } catch (e) {}
+            return origSend(msg);
+        };
         // El relay (nostr-rs-relay) limita a 32 subs concurrentes por conexión.
         // Al superarlo NO cierra la sub: solo manda un NOTICE, y nostr-tools lo
         // ignora → la sub queda abierta pero muda. Lo hacemos visible.
@@ -602,6 +652,11 @@ const LBW_Nostr = (() => {
             if (/maximum concurrent subscription/i.test(String(msg))) {
                 // Agrupar: un solo aviso cada 10 s con el número de rechazos
                 _subLimitHits[url] = (_subLimitHits[url] || 0) + 1;
+                // Guardar la vista del relay en el pico de la ráfaga
+                if (live.size > (_subLimitPeak[url] || 0)) {
+                    _subLimitPeak[url] = live.size;
+                    _subLimitPeakDetail[url] = _groupLiveReqs(live);
+                }
                 if (!_subLimitTimer[url]) {
                     _subLimitTimer[url] = setTimeout(() => {
                         // Comparar lo que nostr-tools tiene abierto en esa conexión
@@ -609,7 +664,10 @@ const LBW_Nostr = (() => {
                         // no pasan por LBW_Nostr.subscribe (pool directo).
                         const enConexion = relay.openSubs ? relay.openSubs.size : '?';
                         const enLimitador = _relaySubCount[_normRelayUrl(url)] || 0;
-                        console.warn(`[Nostr] ⚠️ ${url} rechazó ${_subLimitHits[url]} suscripción(es) por el límite de concurrentes. Abiertas en la conexión: ${enConexion} · contadas por el limitador: ${enLimitador}. Diagnóstico: LBW_Nostr.debugSubscriptions()`);
+                        console.warn(`[Nostr] ⚠️ ${url} rechazó ${_subLimitHits[url]} suscripción(es) por el límite de concurrentes. Abiertas en la conexión: ${enConexion} · contadas por el limitador: ${enLimitador} · REQ vivos enviados al relay (máx. en la ráfaga): ${_subLimitPeak[url] || '?'}. Diagnóstico: LBW_Nostr.debugSubscriptions()`);
+                        if (_subLimitPeakDetail[url]) console.warn('[Nostr] REQ vivos en el momento del rechazo (por filtro):', _subLimitPeakDetail[url]);
+                        _subLimitPeak[url] = 0;
+                        _subLimitPeakDetail[url] = null;
                         _subLimitHits[url] = 0;
                         _subLimitTimer[url] = null;
                     }, 10000);
