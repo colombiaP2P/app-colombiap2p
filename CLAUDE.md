@@ -69,7 +69,7 @@ c2p-stats.js          → Estadísticas comunitarias (C2P_Stats)
 - `LBW_Media` — subida de imágenes multi-proveedor + fallback URLs.
 - `LBW_DM` — mensajes directos cifrados (NIP-04/44).
 - `LBW_Governance` — propuestas (kind 31000) y votos (kind 31001).
-- `LBW_Merits` — méritos C2PM (kinds 31002-31005); SEC-22 valida emisor.
+- `LBW_Merits` — méritos C2PM (kinds 31002-31005), solo en `relay.colombiap2p.com` con tags `c2p-*`. Un 31002 vale si lo firma un emisor de `TRUSTED_ISSUERS` (dentro de su ventana `from`/`until`) o un Génesis (≥3000); revocación vía kind:5 del emisor. La clave privada del emisor vive en Vercel (`C2P_ISSUER_NSEC`) / `~/.config/colombiap2p/issuer-key.json`, nunca en el repo; `scripts/merits-issuer/issuer.mjs` firma bootstrap y revocaciones.
 - `LBW_Delegations` — delegación de voto (NIP-26-style). **Oculta en UI** (`display:none`) — código preservado para reactivación futura.
 - `LBW_Reviews` — NIP-85 reviews.
 - `LBW_MarketPay` — flujo de pago Lightning en marketplace.

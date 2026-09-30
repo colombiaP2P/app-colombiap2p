@@ -1,0 +1,10 @@
+{
+  "name": "c2p-merits-issuer",
+  "private": true,
+  "type": "module",
+  "description": "Herramienta del Emisor ColombiaP2P: firma méritos kind:31002 (bootstrap fundacional) y revocaciones kind:5 con la clave del emisor de confianza.",
+  "dependencies": {
+    "nostr-tools": "2.7.2",
+    "ws": "^8.18.0"
+  }
+}

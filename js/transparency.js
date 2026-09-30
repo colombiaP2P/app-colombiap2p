@@ -342,7 +342,7 @@ const LBW_Transparency = (() => {
                                 <span style="background:rgba(13,23,30,0.6);padding:0.25rem 0.6rem;border-radius:14px;">📋 ${a.proposals||0} propuestas</span>
                             </div>
                             <div style="font-size:0.7rem;color:var(--color-text-secondary);opacity:0.75;margin-top:0.5rem;line-height:1.4;">
-                                Cada acción cuenta 10 pts (cap ${u.activityCap||300} pts). Esta cifra se calcula en tu cliente — no se publica como evento Nostr y por eso solo se ve la tuya, no la de otros usuarios. Las emisiones formales kind:31002 de los Génesis sí son públicas y aparecen abajo.
+                                Cada acción cuenta ${u.activityPerAction||2} pts (cap ${u.activityCap||210} pts). Esta cifra se calcula en tu cliente — no se publica como evento Nostr y por eso solo se ve la tuya, no la de otros usuarios. Las emisiones formales kind:31002 de los Génesis sí son públicas y aparecen abajo.
                             </div>
                         </div>
                     `;

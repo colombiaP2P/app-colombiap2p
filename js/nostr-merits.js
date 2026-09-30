@@ -120,6 +120,30 @@ const LBW_Merits = (() => {
     const FOUNDER_NPUB = 'npub172vh56w30sgev82c09lfujswr4u2djcd5w9vcj79qrmyk9jd459swvrkf5';
     const FOUNDER_BOOTSTRAP_AMOUNT = 3000; // Minimum for Génesis status
 
+    // ── [C2P Fase 1] Emisores de confianza ───────────────────
+    // Un kind:31002 es válido si lo firma:
+    //   (a) un emisor de confianza, con created_at dentro de [from, until), o
+    //   (b) un Génesis (≥3000 méritos válidos).
+    // `until` permite retirar o rotar un emisor sin invalidar su historial:
+    // lo emitido antes de `until` sigue valiendo, lo posterior se rechaza.
+    // La clave privada del emisor vive solo en el servidor (Vercel env
+    // C2P_ISSUER_NSEC); aquí solo va la pública.
+    const TRUSTED_ISSUERS = [
+        {
+            pubkey: '3bc79e0e001e8f48a9df3b50169b9571740f0ff5aeb352582875e642cfb04126',
+            label: 'Emisor ColombiaP2P',
+            from: 1790726400,   // 2026-09-30 00:00 UTC
+            until: null         // null = vigente
+        }
+    ];
+
+    function isTrustedIssuer(pubkey, createdAt) {
+        const ts = createdAt || Math.floor(Date.now() / 1000);
+        return TRUSTED_ISSUERS.some(i =>
+            i.pubkey === pubkey && ts >= i.from && (i.until == null || ts < i.until)
+        );
+    }
+
     // ── Internal State ───────────────────────────────────────
     let _merits = new Map();
     // [transparency-1] Lista plana global de TODOS los méritos aceptados,
@@ -178,7 +202,7 @@ const LBW_Merits = (() => {
 
     // [C2P Fase 0] Namespace propio (tags c2p-*, solo relay.colombiap2p.com):
     // la caché anterior tenía eventos lbw-* de relays públicos. Purga única.
-    const MERITS_NS = 'c2p-v1';
+    const MERITS_NS = 'c2p-v2';   // v2: modelo de emisores de confianza (Fase 1)
     const MERITS_NS_KEY = 'c2p_merits_ns';
     function _purgeLegacyMeritsCache() {
         try {
@@ -392,6 +416,7 @@ const LBW_Merits = (() => {
             ['category', category],
             ['reason', reason || ''],
             ['awarded-by', pubkey],
+            ...(ref ? [['origin', String(ref).split(':')[0]], ['ref', String(ref)]] : []),
             ['t', 'c2p-merits'],
             ['t', 'c2p-merit-award'],
             ['client', 'ColombiaP2P']
@@ -662,8 +687,9 @@ const LBW_Merits = (() => {
             } catch(e) {}
         }
 
-        // Auto-bootstrap founder if needed (async, non-blocking)
-        _autoBootstrapIfFounder();
+        // [C2P Fase 1] Ya no hay auto-bootstrap del fundador de LiberBit: los
+        // méritos fundacionales los emite el emisor de confianza.
+        _subscribeRevocations();
 
         _subMerits = LBW_Nostr.subscribe(
             {
@@ -760,9 +786,10 @@ const LBW_Merits = (() => {
 
     // ── Unsubscribe ──────────────────────────────────────────
     function unsubscribeAll() {
-        [_subMerits, _subContribs, _subSnapshots].forEach(s => {
+        [_subMerits, _subContribs, _subSnapshots, _subRevocations].forEach(s => {
             if (s) try { LBW_Nostr.unsubscribe(s); } catch (e) {}
         });
+        _subRevocations = null;
         _subMerits = null;
         _subContribs = null;
         _subSnapshots = null;
@@ -790,6 +817,8 @@ const LBW_Merits = (() => {
                 category: _normalizeCategory(g('category')),
                 reason: g('reason') || parsed.reason || '',
                 awardedBy: g('awarded-by') || parsed.awardedBy || event.pubkey,
+                signer: event.pubkey,   // firmante verificado (awarded-by es solo informativo)
+                origin: g('origin') || '',
                 created_at: event.created_at,
                 source: 'award'
             };
@@ -882,29 +911,29 @@ const LBW_Merits = (() => {
 
         const merit = _parseMerit(event);
         if (!merit) return;
+        if (_isRevoked(event.pubkey, merit.dTag)) return;
 
         const issuer = event.pubkey;  // verified signer (already passed verifyEvent)
 
-        // Foundational bootstrap: only the founder, only to themselves.
-        if (merit.category === 'fundacional') {
-            const founderHex = _getFounderHex();
-            if (!founderHex || issuer !== founderHex || merit.pubkey !== founderHex) {
-                console.warn('[SEC-22] Merit fundacional rechazado — emisor no autorizado:',
-                    issuer.substring(0, 12));
-                return;
-            }
+        // (a) Emisor de confianza: vale cualquier categoría, incluida fundacional.
+        if (isTrustedIssuer(issuer, event.created_at)) {
             _processMerit(merit);
-            _drainPendingMerits();   // founder is now Genesis → re-evaluate buffer
+            _drainPendingMerits();   // el destinatario pudo volverse Génesis
             return;
         }
 
-        // Regular merit award: issuer must already be Genesis.
+        // Fundacional: solo la emite un emisor de confianza.
+        if (merit.category === 'fundacional') {
+            console.warn('[SEC-22] Mérito fundacional rechazado — emisor no autorizado:', issuer.substring(0, 12));
+            return;
+        }
+
+        // (b) Génesis: firmante con ≥3000 méritos válidos.
         const issuerData = _merits.get(issuer);
         const issuerTotal = issuerData ? issuerData.total : 0;
 
         if (issuerTotal >= 3000) {
             _processMerit(merit);
-            // Recipient may have just crossed 3000 → could authorize buffered events
             const recipientData = _merits.get(merit.pubkey);
             if (recipientData && recipientData.total >= 3000) {
                 _drainPendingMerits();
@@ -912,15 +941,68 @@ const LBW_Merits = (() => {
             return;
         }
 
-        // Issuer not yet known to be Genesis: park the event.
-        // It may become valid later if the issuer's own merit events
-        // arrive from a slower relay.
+        // Firmante aún no reconocido como Génesis: aparcar. Puede volverse
+        // válido cuando lleguen los méritos del propio firmante.
         if (_pendingMeritEvents.length < PENDING_MERIT_CAP) {
             _pendingMeritEvents.push({ event, merit });
         } else {
             console.warn('[SEC-22] Pending merit buffer full — dropping event from',
                 issuer.substring(0, 12));
         }
+    }
+
+    // ── [C2P Fase 1] Revocación de méritos ───────────────────
+    // Un kind:5 (NIP-09) con ['a', '31002:<firmante>:<d>'] revoca ese mérito si
+    // lo firma un emisor de confianza o el propio firmante del mérito.
+    const REVOKED_STORAGE_KEY = 'c2p_merits_revoked';
+    let _revoked = new Set();   // '<firmante>:<d>'
+    let _subRevocations = null;
+    try { (JSON.parse(localStorage.getItem(REVOKED_STORAGE_KEY) || '[]')).forEach(k => _revoked.add(k)); } catch (e) {}
+
+    function _isRevoked(signer, dTag) {
+        return !!dTag && _revoked.has(`${signer}:${dTag}`);
+    }
+
+    function _applyRevocation(event) {
+        const revoker = event.pubkey;
+        let changed = false;
+        (event.tags || []).forEach(t => {
+            if (t[0] !== 'a' || typeof t[1] !== 'string') return;
+            const [kind, signer, ...rest] = t[1].split(':');
+            const dTag = rest.join(':');   // el d puede contener ':'
+            if (kind !== String(KIND.MERIT) || !signer || !dTag) return;
+            if (!(isTrustedIssuer(revoker, event.created_at) || revoker === signer)) return;
+            const key = `${signer}:${dTag}`;
+            if (_revoked.has(key)) return;
+            _revoked.add(key);
+            changed = true;
+            _merits.forEach((userData) => {
+                const idx = userData.records.findIndex(r => r.dTag === dTag && r.signer === signer);
+                if (idx === -1) return;
+                const r = userData.records[idx];
+                userData.total -= r.amount;
+                userData.byCategory[r.category] = (userData.byCategory[r.category] || 0) - r.amount;
+                userData.records.splice(idx, 1);
+                userData.level = getCitizenshipLevel(userData.total);
+            });
+            _allMerits = _allMerits.filter(m => !(m.dTag === dTag && m.signer === signer));
+        });
+        if (changed) {
+            try { localStorage.setItem(REVOKED_STORAGE_KEY, JSON.stringify([..._revoked])); } catch (e) {}
+            _leaderboard = [];
+            _persistMeritsToStorage();
+            _onMeritCallbacks.forEach(cb => { try { cb(null, 'revoked'); } catch (e) {} });
+        }
+    }
+
+    function _subscribeRevocations() {
+        if (_subRevocations) return;
+        _subRevocations = LBW_Nostr.subscribe(
+            { kinds: [5], '#k': [String(KIND.MERIT)], limit: 500 },
+            (event) => { try { _applyRevocation(event); } catch (e) {} },
+            null,
+            LBW_Nostr.GOVERNANCE_RELAYS
+        );
     }
 
     // Re-evaluate parked merit events. Called whenever a new issuer
@@ -955,7 +1037,7 @@ const LBW_Merits = (() => {
             if (existingFlatIdx === -1) {
                 const flatEntry = {
                     id, dTag: dTag || '', recipient: pubkey,
-                    issuer: merit.awardedBy || '', amount,
+                    issuer: merit.awardedBy || '', signer: merit.signer || '', amount,
                     category, reason: merit.reason || '',
                     created_at, source
                 };
@@ -1031,7 +1113,8 @@ const LBW_Merits = (() => {
             effectiveAmount = Math.max(0, Math.min(amount, _catDef.maxMerits - currentCatMerits));
         }
 
-        userData.records.push({ id, dTag, amount: effectiveAmount, category, created_at, source });
+        userData.records.push({ id, dTag, amount: effectiveAmount, category, created_at, source,
+            signer: merit.signer || '', origin: merit.origin || '', reason: merit.reason || '' });
         userData.total += effectiveAmount;
         userData.byCategory[category] = (userData.byCategory[category] || 0) + effectiveAmount;
         // [transparency-1] _allMerits ya se actualizó arriba (antes del
@@ -1470,6 +1553,7 @@ const LBW_Merits = (() => {
         calculateVotingPower,
         getStats,
         hasFoundationalMerits,
+        TRUSTED_ISSUERS, isTrustedIssuer,
         isGovernor,
 
         // Utilities (centralizadas, [M-14])
@@ -1516,8 +1600,10 @@ function getUnifiedMerits() {
     const activityCount = userPosts + userOffers + userVotes + userProposals;
 
     // Sum + cap (NOT max)
-    const ACTIVITY_MERIT_CAP = 300;
-    const activityMeritsRaw = activityCount * 10;
+    // [C2P] 2 méritos por acción, tope 210 (antes ×10, tope 300)
+    const ACTIVITY_MERIT_PER_ACTION = 2;
+    const ACTIVITY_MERIT_CAP = 210;
+    const activityMeritsRaw = activityCount * ACTIVITY_MERIT_PER_ACTION;
     const activityMerits = Math.min(activityMeritsRaw, ACTIVITY_MERIT_CAP);
     const totalMerits = nostrMerits + activityMerits;
 
@@ -1527,6 +1613,7 @@ function getUnifiedMerits() {
         activityMerits,
         activityMeritsRaw,
         activityCap: ACTIVITY_MERIT_CAP,
+        activityPerAction: ACTIVITY_MERIT_PER_ACTION,
         byCategory: nostrBreakdown,
         activity: { posts: userPosts, offers: userOffers, votes: userVotes, proposals: userProposals },
         activityCount,
