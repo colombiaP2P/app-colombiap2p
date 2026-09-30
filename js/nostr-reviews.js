@@ -68,6 +68,8 @@
 
         // Marcar como ya reseñado
         localStorage.setItem(dedupeKey, nowSecs.toString());
+        // La caché de reseñas del destinatario ya no está al día
+        _reviewsCache.delete(reviewedPubkey);
 
         console.log(`[Reviews] ✅ Reseña publicada: ${rating}★ → ${reviewedPubkey.substring(0, 12)}`);
 
@@ -114,50 +116,101 @@
 
     // ── Fetch reseñas de un usuario ───────────────────────────
     // Devuelve array de { rating, comment, authorPubkey, listingTitle, role, created_at }
-    async function getReviewsForUser(pubkey) {
-        return new Promise(resolve => {
-            const reviews = [];
-            const timeout = setTimeout(() => resolve(reviews), 6000);
+    //
+    // [C2P] Por LOTES y con caché. Antes cada tarjeta del marketplace abría su
+    // propia sub (una por anuncio, repetida en cada re-render): 83 REQ para 11
+    // vendedores, que agotaban el cupo de 32 subs del relay. Además, por el
+    // dedup global de eventos, las consultas repetidas volvían vacías.
+    // Ahora: caché 2 min, peticiones en curso compartidas, y las que llegan en
+    // 150 ms van en un solo REQ con '#p': [vendedores] (máx. 50).
+    const REVIEWS_TTL_MS = 2 * 60 * 1000;
+    const REVIEWS_BATCH_WINDOW_MS = 150;
+    const REVIEWS_BATCH_MAX = 50;
+    const _reviewsCache = new Map();     // pubkey → { reviews, ts }
+    const _reviewsInflight = new Map();  // pubkey → Promise
+    const _reviewsQueue = new Map();     // pubkey → [resolve]
+    let _reviewsTimer = null;
 
-            const sub = LBW_Nostr.subscribe(
-                {
-                    kinds: [KIND_REVIEW],
-                    '#p': [pubkey],
-                    '#t': ['lbw-review'],
-                    limit: 50
-                },
-                event => {
-                    try {
-                        const ratingTag = event.tags.find(t => t[0] === 'rating');
-                        const roleTag   = event.tags.find(t => t[0] === 'role');
-                        const titleTag  = event.tags.find(t => t[0] === 'listing-title');
-                        const rating    = ratingTag ? parseInt(ratingTag[1]) : 0;
-                        if (rating >= 1 && rating <= 5) {
-                            reviews.push({
-                                id:           event.id,
-                                rating,
-                                comment:      event.content || '',
-                                authorPubkey: event.pubkey,
-                                listingTitle: titleTag ? titleTag[1] : '',
-                                role:         roleTag ? roleTag[1] : '',
-                                created_at:   event.created_at
-                            });
-                        }
-                    } catch (e) {}
-                },
-                () => {
-                    clearTimeout(timeout);
-                    resolve(reviews);
-                }
-            );
+    function _parseReview(event) {
+        try {
+            const ratingTag = event.tags.find(t => t[0] === 'rating');
+            const roleTag   = event.tags.find(t => t[0] === 'role');
+            const titleTag  = event.tags.find(t => t[0] === 'listing-title');
+            const rating    = ratingTag ? parseInt(ratingTag[1]) : 0;
+            if (rating < 1 || rating > 5) return null;
+            return {
+                id:           event.id,
+                rating,
+                comment:      event.content || '',
+                authorPubkey: event.pubkey,
+                listingTitle: titleTag ? titleTag[1] : '',
+                role:         roleTag ? roleTag[1] : '',
+                created_at:   event.created_at
+            };
+        } catch (e) { return null; }
+    }
 
-            // Resolver tras un tiempo razonable aunque no llegue EOSE
-            setTimeout(() => {
-                try { LBW_Nostr.unsubscribe(sub); } catch(e) {}
-                clearTimeout(timeout);
-                resolve(reviews);
-            }, 5000);
+    function getReviewsForUser(pubkey) {
+        if (!pubkey) return Promise.resolve([]);
+        const cached = _reviewsCache.get(pubkey);
+        if (cached && Date.now() - cached.ts < REVIEWS_TTL_MS) return Promise.resolve(cached.reviews.slice());
+        if (_reviewsInflight.has(pubkey)) return _reviewsInflight.get(pubkey).then(r => r.slice());
+
+        const p = new Promise(resolve => {
+            if (!_reviewsQueue.has(pubkey)) _reviewsQueue.set(pubkey, []);
+            _reviewsQueue.get(pubkey).push(resolve);
+            if (!_reviewsTimer) _reviewsTimer = setTimeout(_flushReviewsBatch, REVIEWS_BATCH_WINDOW_MS);
         });
+        _reviewsInflight.set(pubkey, p);
+        p.finally(() => _reviewsInflight.delete(pubkey));
+        return p.then(r => r.slice());
+    }
+
+    function _flushReviewsBatch() {
+        _reviewsTimer = null;
+        const entries = [..._reviewsQueue.entries()];
+        _reviewsQueue.clear();
+        for (let i = 0; i < entries.length; i += REVIEWS_BATCH_MAX) {
+            _fetchReviewsChunk(new Map(entries.slice(i, i + REVIEWS_BATCH_MAX)));
+        }
+    }
+
+    function _fetchReviewsChunk(waiting) {
+        const byUser = new Map();   // pubkey → Map(id → review)
+        waiting.forEach((_, pk) => byUser.set(pk, new Map()));
+        let sub = null;
+        let finished = false;
+
+        const finish = () => {
+            if (finished) return;
+            finished = true;
+            clearTimeout(timeout);
+            waiting.forEach((resolvers, pk) => {
+                const reviews = [...byUser.get(pk).values()].sort((a, b) => b.created_at - a.created_at);
+                _reviewsCache.set(pk, { reviews, ts: Date.now() });
+                resolvers.forEach(r => { try { r(reviews); } catch (e) {} });
+            });
+            setTimeout(() => { try { LBW_Nostr.unsubscribe(sub); } catch (e) {} }, 0);
+        };
+        const timeout = setTimeout(finish, 6000);
+
+        sub = LBW_Nostr.subscribe(
+            {
+                kinds: [KIND_REVIEW],
+                '#p': [...waiting.keys()],
+                '#t': ['lbw-review'],
+                limit: 50 * waiting.size
+            },
+            event => {
+                const review = _parseReview(event);
+                if (!review) return;
+                // Una reseña puede etiquetar varias p: asignarla a cada destinatario pedido
+                (event.tags || []).forEach(t => {
+                    if (t[0] === 'p' && byUser.has(t[1])) byUser.get(t[1]).set(review.id, review);
+                });
+            },
+            finish
+        );
     }
 
     // ── Calcular puntuación media ─────────────────────────────

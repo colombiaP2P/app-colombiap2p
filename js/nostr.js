@@ -631,8 +631,8 @@ const LBW_Nostr = (() => {
         // Al caerse la conexión el relay olvida todas las subs: vaciar el registro
         const prevOnclose = relay.onclose;
         relay.onclose = () => { live.clear(); try { if (prevOnclose) prevOnclose(); } catch (e) {} };
-        const origSend = relay.send.bind(relay);
-        relay.send = (msg) => {
+        const origSend = typeof relay.send === 'function' ? relay.send.bind(relay) : null;
+        if (origSend) relay.send = (msg) => {
             try {
                 if (typeof msg === 'string') {
                     if (msg.startsWith('["REQ"')) {
