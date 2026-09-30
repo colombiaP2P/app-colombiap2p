@@ -559,6 +559,17 @@ const LBW_Nostr = (() => {
         catch (e) { return; }   // relay caído, no es crítico
         if (!relay || relay._lbwAuthHooked) return;
         relay._lbwAuthHooked = true;
+        // El relay (nostr-rs-relay) limita a 32 subs concurrentes por conexión.
+        // Al superarlo NO cierra la sub: solo manda un NOTICE, y nostr-tools lo
+        // ignora → la sub queda abierta pero muda. Lo hacemos visible.
+        relay.onnotice = (msg) => {
+            if (/maximum concurrent subscription/i.test(String(msg))) {
+                console.warn('[Nostr] ⚠️ ' + url + ' rechazó una suscripción: límite de suscripciones concurrentes alcanzado. Alguna sección puede no recibir datos.');
+                window.dispatchEvent(new CustomEvent('nostr-sub-limit', { detail: { relay: url } }));
+            } else {
+                console.debug('[Nostr] NOTICE de ' + url + ':', msg);
+            }
+        };
         relay._onauth = async (challenge) => {
             try {
                 if (!isLoggedIn()) {
@@ -1268,18 +1279,23 @@ const LBW_Nostr = (() => {
 
     async function fetchUserProfile(pubkey) {
         return new Promise(resolve => {
-            const timeout = setTimeout(() => resolve(null), 6000);
+            // [C2P] Consulta puntual: la sub se cierra SIEMPRE (evento, EOSE o
+            // timeout). Antes solo se cerraba si había perfil; cada usuario sin
+            // kind:0 dejaba una sub abierta y agotaba el cupo de 32 del relay.
+            let sub = null;
+            const done = () => setTimeout(() => { try { unsubscribe(sub); } catch (e) {} }, 0);
+            const timeout = setTimeout(() => { resolve(null); done(); }, 6000);
             let found = false;
-            const sub = subscribe(
+            sub = subscribe(
                 { kinds: [0], authors: [pubkey], limit: 1 },
                 event => {
                     if (found) return;
                     found = true;
                     clearTimeout(timeout);
                     try { resolve(JSON.parse(event.content)); } catch (e) { resolve(null); }
-                    setTimeout(() => unsubscribe(sub), 200);
+                    done();
                 },
-                () => { clearTimeout(timeout); if (!found) resolve(null); }
+                () => { clearTimeout(timeout); if (!found) resolve(null); done(); }
             );
         });
     }

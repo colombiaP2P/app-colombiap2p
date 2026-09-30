@@ -477,15 +477,6 @@ const LBW_Governance = (() => {
         });
     }
 
-    function _subscribeDeletions() {
-        _deletionSub = LBW_Nostr.subscribe(
-            { kinds: [5], '#k': [String(KIND.PROPOSAL)], limit: 500 },
-            (event) => { try { _applyDeletionEvent(event); } catch (e) {} },
-            null,
-            LBW_Nostr.GOVERNANCE_RELAYS
-        );
-    }
-
     async function deleteProposal(dTag, reason) {
         if (!LBW_Nostr.isLoggedIn()) throw new Error('Login requerido.');
         const p = _proposals.get(dTag);
@@ -1172,35 +1163,39 @@ const LBW_Governance = (() => {
         if (onProposal) _onProposalCallbacks.push(onProposal);
         if (_proposals.size === 0) _loadFromStorage();
         if (_myVotes.size === 0) _fetchMyVotesFromNostr();
-        if (!_resultSub) _subscribeResultEvents();
-        if (!_execSub) _subscribeExecutionEvents();
         if (!_communitySub) _subscribeCommunities();
         if (!_umbrellaSub) _subscribeUmbrellaCommunity();
-        if (!_deletionSub) _subscribeDeletions();
-        if (!_allVotesSub) _subscribeAllVotes();
         _startStatusTimer();
 
         if (_sub) return _sub;
 
+        // [C2P] UNA sola suscripción (un REQ con 5 filtros) para propuestas,
+        // resultados, ejecución, borrados y votos. El relay limita a 32 subs
+        // concurrentes por conexión y, al superarlo, solo manda un NOTICE: la
+        // sub queda abierta pero muda. Agrupar evita agotar ese cupo.
         _sub = LBW_Nostr.subscribe(
-            { kinds: [KIND.PROPOSAL], '#t': ['c2p-proposal'], limit: 100 },
+            [
+                { kinds: [KIND.PROPOSAL], '#t': ['c2p-proposal'], limit: 100 },
+                { kinds: [KIND.RESULT], '#t': ['c2p-governance'], limit: 200 },
+                { kinds: [KIND.EXECUTION, KIND.EXEC_VERIFY], '#t': ['c2p-governance'], limit: 100 },
+                { kinds: [5], '#k': [String(KIND.PROPOSAL)], limit: 500 },
+                { kinds: [KIND.VOTE], '#t': ['c2p-governance'], limit: 2000 }
+            ],
             (event) => {
-                const proposal = _parseProposal(event);
-                if (!proposal) return;
-                if (_deleted.has(proposal.dTag)) return;
-                const existing = _proposals.get(proposal.dTag);
-                if (existing && existing.created_at >= proposal.created_at) return;
-                _proposals.set(proposal.dTag, proposal);
-                _refreshProposalStatus(proposal);
-                _persistToStorage();
-                _onProposalCallbacks.forEach(cb => { try { cb(proposal, existing ? 'updated' : 'new'); } catch (e) {} });
-
-                // Schedule result calc for expired proposals without a result
-                if (proposal.status === 'expired' && !_results.has(proposal.dTag)) {
-                    _scheduleResultCalc(proposal.dTag);
+                switch (event.kind) {
+                    case KIND.PROPOSAL:    _onProposalEvent(event); break;
+                    // [SEC-23] Result events must come from a Genesis signer.
+                    case KIND.RESULT:      _validateAndProcessResultEvent(event); break;
+                    case KIND.EXECUTION:
+                    case KIND.EXEC_VERIFY: _onExecutionEvent(event); break;
+                    case 5:                try { _applyDeletionEvent(event); } catch (e) {} break;
+                    case KIND.VOTE:        _onAnyVoteEvent(event); break;
                 }
             }
         );
+        // Alias: el resto del módulo (resync, unsubscribeAll) cierra por estos nombres
+        _resultSub = _execSub = _deletionSub = _allVotesSub = _sub;
+        _hookResultDrainOnMerits();
 
         setTimeout(() => {
             _onProposalCallbacks.forEach(cb => { try { cb(null, 'relay-sync'); } catch (e) {} });
@@ -1217,16 +1212,21 @@ const LBW_Governance = (() => {
         return _sub;
     }
 
-    // ── Subscribe Result Events (kind 31010) ─────────────────
-    function _subscribeResultEvents() {
-        _resultSub = LBW_Nostr.subscribe(
-            { kinds: [KIND.RESULT], '#t': ['c2p-governance'], limit: 200 },
-            (event) => {
-                // [SEC-23] Result events must come from a Genesis signer.
-                _validateAndProcessResultEvent(event);
-            }
-        );
-        _hookResultDrainOnMerits();
+    function _onProposalEvent(event) {
+        const proposal = _parseProposal(event);
+        if (!proposal) return;
+        if (_deleted.has(proposal.dTag)) return;
+        const existing = _proposals.get(proposal.dTag);
+        if (existing && existing.created_at >= proposal.created_at) return;
+        _proposals.set(proposal.dTag, proposal);
+        _refreshProposalStatus(proposal);
+        _persistToStorage();
+        _onProposalCallbacks.forEach(cb => { try { cb(proposal, existing ? 'updated' : 'new'); } catch (e) {} });
+
+        // Schedule result calc for expired proposals without a result
+        if (proposal.status === 'expired' && !_results.has(proposal.dTag)) {
+            _scheduleResultCalc(proposal.dTag);
+        }
     }
 
     // [SEC-23] Validate and process a result event.
@@ -1311,29 +1311,24 @@ const LBW_Governance = (() => {
     }
 
     // ── Subscribe Execution Events (kind 31011 + 31012) ──────
-    function _subscribeExecutionEvents() {
-        _execSub = LBW_Nostr.subscribe(
-            { kinds: [KIND.EXECUTION, KIND.EXEC_VERIFY], '#t': ['c2p-governance'], limit: 100 },
-            (event) => {
-                if (event.kind === KIND.EXECUTION) {
-                    const exec = _parseExecution(event);
-                    if (!exec) return;
-                    const existing = _executions.get(exec.dTag);
-                    if (!existing || event.created_at > existing.created_at) {
-                        _executions.set(exec.dTag, exec);
-                        // Update proposal status
-                        const proposal = _proposals.get(exec.dTag);
-                        if (proposal && proposal.status === 'approved') {
-                            proposal.status = 'in_execution';
-                            _persistToStorage();
-                        }
-                        _onProposalCallbacks.forEach(cb => { try { cb(proposal, 'execution'); } catch (e) {} });
-                    }
-                } else if (event.kind === KIND.EXEC_VERIFY) {
-                    _handleExecVerification(event);
+    function _onExecutionEvent(event) {
+        if (event.kind === KIND.EXECUTION) {
+            const exec = _parseExecution(event);
+            if (!exec) return;
+            const existing = _executions.get(exec.dTag);
+            if (!existing || event.created_at > existing.created_at) {
+                _executions.set(exec.dTag, exec);
+                // Update proposal status
+                const proposal = _proposals.get(exec.dTag);
+                if (proposal && proposal.status === 'approved') {
+                    proposal.status = 'in_execution';
+                    _persistToStorage();
                 }
+                _onProposalCallbacks.forEach(cb => { try { cb(proposal, 'execution'); } catch (e) {} });
             }
-        );
+        } else if (event.kind === KIND.EXEC_VERIFY) {
+            _handleExecVerification(event);
+        }
     }
 
     // ── Ensure Voter Merits Loaded ───────────────────────────
@@ -1971,17 +1966,13 @@ const LBW_Governance = (() => {
     }
 
     // ── Subscribe Votes ──────────────────────────────────────
+    // Ya no abre un REQ por propuesta: la suscripción combinada de
+    // subscribeProposals trae todos los votos de gobernanza. Solo registra
+    // el callback y se asegura de que esa suscripción exista.
     function subscribeVotes(proposalEventId, proposalDTag, onVote) {
-        if (onVote) _onVoteCallbacks.push(onVote);
-        if (_voteSubs[proposalDTag]) return _voteSubs[proposalDTag];
-
-        const sub = LBW_Nostr.subscribe(
-            { kinds: [KIND.VOTE], '#e': [proposalEventId], limit: 500 },
-            (event) => _handleVoteEvent(event, proposalDTag)
-        );
-
-        _voteSubs[proposalDTag] = sub;
-        return sub;
+        if (onVote && !_onVoteCallbacks.includes(onVote)) _onVoteCallbacks.push(onVote);
+        if (!_sub) subscribeProposals();
+        return _sub;
     }
 
     // Procesa un kind:31001 (admisión o temático) para una propuesta.
@@ -2023,20 +2014,15 @@ const LBW_Governance = (() => {
     let _allVotesSub = null;
     let _statusTimer = null;
 
-    function _subscribeAllVotes() {
-        _allVotesSub = LBW_Nostr.subscribe(
-            { kinds: [KIND.VOTE], '#t': ['c2p-governance'], limit: 2000 },
-            (event) => {
-                let dTag = (event.tags.find(t => t[0] === 'proposal') || [])[1]
-                        || (event.tags.find(t => t[0] === 'd') || [])[1];
-                if (dTag && dTag.endsWith(ADMISSION_D_SUFFIX)) dTag = dTag.slice(0, -ADMISSION_D_SUFFIX.length);
-                if (!dTag) {
-                    const eId = (event.tags.find(t => t[0] === 'e') || [])[1];
-                    for (const [d, p] of _proposals) { if (p.id === eId) { dTag = d; break; } }
-                }
-                _handleVoteEvent(event, dTag);
-            }
-        );
+    function _onAnyVoteEvent(event) {
+        let dTag = (event.tags.find(t => t[0] === 'proposal') || [])[1]
+                || (event.tags.find(t => t[0] === 'd') || [])[1];
+        if (dTag && dTag.endsWith(ADMISSION_D_SUFFIX)) dTag = dTag.slice(0, -ADMISSION_D_SUFFIX.length);
+        if (!dTag) {
+            const eId = (event.tags.find(t => t[0] === 'e') || [])[1];
+            for (const [d, p] of _proposals) { if (p.id === eId) { dTag = d; break; } }
+        }
+        _handleVoteEvent(event, dTag);
     }
 
     function _startStatusTimer() {
@@ -2058,7 +2044,7 @@ const LBW_Governance = (() => {
         const now = Date.now();
         if (!force && now - _lastResync < 10000) return;   // anti-ráfaga
         _lastResync = now;
-        [_sub, _resultSub, _execSub, _deletionSub, _allVotesSub].forEach(s => {
+        [...new Set([_sub, _resultSub, _execSub, _deletionSub, _allVotesSub])].forEach(s => {
             if (s) { try { LBW_Nostr.unsubscribe(s); } catch (e) {} }
         });
         _sub = _resultSub = _execSub = _deletionSub = _allVotesSub = null;
@@ -2110,7 +2096,7 @@ const LBW_Governance = (() => {
         if (!pubkey || _fetchingVotes) return;
         _fetchingVotes = true;
 
-        LBW_Nostr.subscribe(
+        const mySub = LBW_Nostr.subscribe(
             { kinds: [KIND.VOTE], authors: [pubkey], '#t': ['c2p-vote'], limit: 100 },
             (event) => {
                 const dTagTag = event.tags.find(t => t[0] === 'd');
@@ -2131,6 +2117,8 @@ const LBW_Governance = (() => {
             },
             () => {
                 _fetchingVotes = false;
+                // Consulta puntual: cerrar para no ocupar cupo del relay
+                setTimeout(() => { try { LBW_Nostr.unsubscribe(mySub); } catch (e) {} }, 0);
                 if (_myVotes.size > 0) {
                     _persistVotesToStorage();
                     _onProposalCallbacks.forEach(cb => { try { cb(null, 'votes-synced'); } catch (e) {} });

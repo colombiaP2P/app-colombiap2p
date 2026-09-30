@@ -689,27 +689,29 @@ const LBW_Merits = (() => {
 
         // [C2P Fase 1] Ya no hay auto-bootstrap del fundador de LiberBit: los
         // méritos fundacionales los emite el emisor de confianza.
-        _subscribeRevocations();
-
+        // [C2P] UNA sola suscripción (un REQ con 4 filtros) para méritos,
+        // revocaciones, contribuciones y snapshots. El relay limita a 32 subs
+        // concurrentes por conexión y, al superarlo, solo manda un NOTICE: la
+        // sub queda abierta pero muda. Agrupar evita agotar ese cupo.
         _subMerits = LBW_Nostr.subscribe(
-            {
-                kinds: [KIND.MERIT],
-                // NOTE: '#t' filter omitted intentionally — relay.liberbitworld.org
-                // does not support tag filters reliably (same issue documented in
-                // _checkBootstrapOnRelay). Filter client-side instead.
-                limit: 500
-            },
+            [
+                { kinds: [KIND.MERIT], '#t': ['c2p-merits'], limit: 2000 },
+                { kinds: [5], '#k': [String(KIND.MERIT)], limit: 500 },
+                { kinds: [KIND.CONTRIB], '#t': ['c2p-contrib'], limit: 500 },
+                { kinds: [KIND.SNAPSHOT], '#t': ['c2p-snapshot'], limit: 5 }
+            ],
             (event) => {
-                // Client-side tag filter: only process LBW merit events
-                const hasLbwTag = event.tags && event.tags.some(
-                    t => t[0] === 't' && (t[1] === 'c2p-merits' || t[1] === 'c2p-bootstrap' || t[1] === 'c2p-merit-award')
-                );
-                if (!hasLbwTag) return;
-                // [SEC-22] All merit events must pass issuer validation.
-                // Callbacks fire from inside _processMerit only on success.
-                _validateAndProcessMeritEvent(event);
+                switch (event.kind) {
+                    // [SEC-22] All merit events must pass issuer validation.
+                    // Callbacks fire from inside _processMerit only on success.
+                    case KIND.MERIT:    _validateAndProcessMeritEvent(event); break;
+                    case 5:             try { _applyRevocation(event); } catch (e) {} break;
+                    case KIND.CONTRIB:  _onContributionEvent(event); break;
+                    case KIND.SNAPSHOT: _onSnapshotEvent(event); break;
+                }
             }
         );
+        _subContribs = _subSnapshots = _subRevocations = _subMerits;
 
         return _subMerits;
     }
@@ -717,76 +719,62 @@ const LBW_Merits = (() => {
     // ── Subscribe Contributions ──────────────────────────────
     function subscribeContributions(onContrib) {
         if (onContrib) _onContribCallbacks.push(onContrib);
-        if (_subContribs) return _subContribs;
+        if (!_subMerits) subscribeMerits();   // la sub combinada trae las contribuciones
+        return _subMerits;
+    }
 
-        _subContribs = LBW_Nostr.subscribe(
-            {
-                kinds: [KIND.CONTRIB],
-                '#t': ['c2p-contrib'],
-                limit: 500
-            },
-            (event) => {
-                const contrib = _parseContribution(event);
-                if (!contrib) return;
+    function _onContributionEvent(event) {
+        const contrib = _parseContribution(event);
+        if (!contrib) return;
 
-                // Dedup
-                if (_contributions.some(c => c.id === contrib.id)) return;
-                _contributions.push(contrib);
+        // Dedup
+        if (_contributions.some(c => c.id === contrib.id)) return;
+        _contributions.push(contrib);
 
-                // NOTE: Contributions do NOT auto-count as merits.
-                // Merit points are only assigned via kind 31002 (awardMerit)
-                // after governance approval or auto-verification.
+        // NOTE: Contributions do NOT auto-count as merits.
+        // Merit points are only assigned via kind 31002 (awardMerit)
+        // after governance approval or auto-verification.
 
-                if (contrib.pubkey === LBW_Nostr.getPubkey()) {
-                    _myContributions.push(contrib);
-                }
+        if (contrib.pubkey === LBW_Nostr.getPubkey()) {
+            _myContributions.push(contrib);
+        }
 
-                // Persist contributions to cache
-                _persistContribsToStorage();
+        // Persist contributions to cache
+        _persistContribsToStorage();
 
-                _onContribCallbacks.forEach(cb => {
-                    try { cb(contrib); } catch (e) {}
-                });
-            }
-        );
-
-        return _subContribs;
+        _onContribCallbacks.forEach(cb => {
+            try { cb(contrib); } catch (e) {}
+        });
     }
 
     // ── Subscribe Snapshots ──────────────────────────────────
+    let _onSnapshotCallbacks = [];
     function subscribeSnapshots(onSnapshot) {
-        if (_subSnapshots) return _subSnapshots;
+        if (onSnapshot && !_onSnapshotCallbacks.includes(onSnapshot)) _onSnapshotCallbacks.push(onSnapshot);
+        if (!_subMerits) subscribeMerits();   // la sub combinada trae los snapshots
+        return _subMerits;
+    }
 
-        _subSnapshots = LBW_Nostr.subscribe(
-            {
-                kinds: [KIND.SNAPSHOT],
-                '#t': ['c2p-snapshot'],
-                limit: 5
-            },
-            (event) => {
-                try {
-                    const data = JSON.parse(event.content);
-                    if (!_lastSnapshot || event.created_at > _lastSnapshot.created_at) {
-                        _lastSnapshot = {
-                            ...data,
-                            id: event.id,
-                            pubkey: event.pubkey,
-                            created_at: event.created_at,
-                            sig: event.sig
-                        };
-                        console.log(`[Merits] 📊 Snapshot cargado: ${data.totalParticipants} participantes`);
-                    }
-                    if (onSnapshot) onSnapshot(_lastSnapshot);
-                } catch (e) {}
+    function _onSnapshotEvent(event) {
+        try {
+            const data = JSON.parse(event.content);
+            if (!_lastSnapshot || event.created_at > _lastSnapshot.created_at) {
+                _lastSnapshot = {
+                    ...data,
+                    id: event.id,
+                    pubkey: event.pubkey,
+                    created_at: event.created_at,
+                    sig: event.sig
+                };
+                console.log(`[Merits] 📊 Snapshot cargado: ${data.totalParticipants} participantes`);
             }
-        );
-
-        return _subSnapshots;
+            _onSnapshotCallbacks.forEach(cb => { try { cb(_lastSnapshot); } catch (e) {} });
+        } catch (e) {}
     }
 
     // ── Unsubscribe ──────────────────────────────────────────
     function unsubscribeAll() {
-        [_subMerits, _subContribs, _subSnapshots, _subRevocations].forEach(s => {
+        [...new Set([_subMerits, _subContribs, _subSnapshots, _subRevocations])].forEach(s => {
             if (s) try { LBW_Nostr.unsubscribe(s); } catch (e) {}
         });
         _subRevocations = null;
@@ -995,15 +983,6 @@ const LBW_Merits = (() => {
         }
     }
 
-    function _subscribeRevocations() {
-        if (_subRevocations) return;
-        _subRevocations = LBW_Nostr.subscribe(
-            { kinds: [5], '#k': [String(KIND.MERIT)], limit: 500 },
-            (event) => { try { _applyRevocation(event); } catch (e) {} },
-            null,
-            LBW_Nostr.GOVERNANCE_RELAYS
-        );
-    }
 
     // Re-evaluate parked merit events. Called whenever a new issuer
     // crosses the Genesis threshold. One pass is enough because we
