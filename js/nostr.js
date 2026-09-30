@@ -857,59 +857,92 @@ const LBW_Nostr = (() => {
     function npubToHex(npub) { return _getNostrTools().nip19.decode(npub).data; }
 
     // ── Subscriptions (via SimplePool) ───────────────────────
+    // [C2P] Suscripciones que se reabren solas. nostr-tools 2.7.2 llama a
+    // onclose cuando la sub muere (conexión fallida o caída, timeout, CLOSED
+    // del relay como "auth-required") pero NO la reabre: quedaba muerta en
+    // silencio y la app dejaba de recibir propuestas y méritos. Ahora, si se
+    // cierra sin que la hayamos cerrado nosotros, se reabre con backoff.
+    // Lo ya recibido lo descarta el dedup global (_seenEvents).
+    const SUB_REOPEN_MAX_RETRIES = 20;
+
+    function _resolveTargetRelays(filterArr, relayUrls) {
+        if (relayUrls) return relayUrls;
+        const kinds = filterArr[0]?.kinds;
+        if (kinds && kinds.length > 0) {
+            // Intersection of relay sets for all requested kinds
+            const sets = kinds.map(k => _getRelaysForKind(k));
+            const targets = sets.reduce((acc, s) => acc.filter(r => s.includes(r)), sets[0] || ALL_RELAYS);
+            return targets.length > 0 ? targets : [...ALL_RELAYS];
+        }
+        return [...ALL_RELAYS];
+    }
+
     function subscribe(filters, onEvent, onEose = null, relayUrls = null) {
-        const pool = _getPool();
         const filterArr = Array.isArray(filters) ? filters : [filters];
 
-        // Determine target relays
-        let targetRelays;
-        if (relayUrls) {
-            targetRelays = relayUrls;
-        } else {
-            const kinds = filterArr[0]?.kinds;
-            if (kinds && kinds.length > 0) {
-                // Intersection of relay sets for all requested kinds
-                const sets = kinds.map(k => _getRelaysForKind(k));
-                targetRelays = sets.reduce((acc, s) => acc.filter(r => s.includes(r)), sets[0] || ALL_RELAYS);
-                if (targetRelays.length === 0) targetRelays = [...ALL_RELAYS];
-            } else {
-                targetRelays = [...ALL_RELAYS];
+        const handle = {
+            closed: false,
+            inner: null,
+            retries: 0,
+            close() {
+                this.closed = true;
+                try { if (this.inner) this.inner.close(); } catch (e) {}
             }
-        }
+        };
 
-        const sub = pool.subscribeMany(
-            targetRelays,
-            filterArr,
-            {
-                onevent: (event) => {
-                    // Dedup
-                    if (_seenEvents.has(event.id)) return;
-                    _seenEvents.add(event.id);
-                    if (_seenEvents.size > 10000) {
-                        const arr = [..._seenEvents];
-                        _seenEvents = new Set(arr.slice(-5000));
+        const open = () => {
+            if (handle.closed) return;
+            const pool = _getPool();
+            const targetRelays = _resolveTargetRelays(filterArr, relayUrls);
+
+            handle.inner = pool.subscribeMany(
+                targetRelays,
+                filterArr,
+                {
+                    onevent: (event) => {
+                        // Dedup
+                        if (_seenEvents.has(event.id)) return;
+                        _seenEvents.add(event.id);
+                        if (_seenEvents.size > 10000) {
+                            const arr = [..._seenEvents];
+                            _seenEvents = new Set(arr.slice(-5000));
+                        }
+
+                        // VALIDATE + VERIFY
+                        if (!_validateIncomingEvent(event, 'pool')) return;
+
+                        // Deliver
+                        if (onEvent) onEvent(event, 'pool');
+
+                        // Kind callbacks
+                        (_eventCallbacks[event.kind] || []).forEach(cb => cb(event, 'pool'));
+
+                        // Global dispatch
+                        window.dispatchEvent(new CustomEvent('nostr-event', {
+                            detail: { event, relay: 'pool' }
+                        }));
+                    },
+                    oneose: () => {
+                        handle.retries = 0;
+                        if (onEose) onEose();
+                    },
+                    onclose: (reasons) => {
+                        if (handle.closed) return;
+                        if (handle.retries >= SUB_REOPEN_MAX_RETRIES) {
+                            console.warn('[Nostr] Suscripción abandonada tras reintentos:', reasons);
+                            return;
+                        }
+                        const delay = Math.min(30000, 1500 * Math.pow(2, handle.retries++));
+                        console.log(`[Nostr] 🔁 Suscripción cerrada (${(reasons || []).join(', ')}) — reabriendo en ${delay} ms`);
+                        setTimeout(open, delay);
                     }
+                }
+            );
+        };
 
-                    // VALIDATE + VERIFY
-                    if (!_validateIncomingEvent(event, 'pool')) return;
-
-                    // Deliver
-                    if (onEvent) onEvent(event, 'pool');
-
-                    // Kind callbacks
-                    (_eventCallbacks[event.kind] || []).forEach(cb => cb(event, 'pool'));
-
-                    // Global dispatch
-                    window.dispatchEvent(new CustomEvent('nostr-event', {
-                        detail: { event, relay: 'pool' }
-                    }));
-                },
-                oneose: () => { if (onEose) onEose(); }
-            }
-        );
-
-        _activeSubs.push(sub);
-        return sub;
+        open();
+        _activeSubs.push(handle);
+        return handle;
     }
 
     function unsubscribe(sub) {
