@@ -956,8 +956,26 @@ const LBW_Nostr = (() => {
 
     // Sin duplicados: SYSTEM_ALL_RELAYS repite damus/nos.lol (están en la lista
     // privada y en la pública) y cada sub contaba doble en el limitador.
+    // Normaliza igual que nostr-tools (normalizeURL): 'wss://x' y 'wss://x/'
+    // son la MISMA conexión. Sin esto, si la lista NIP-65 del usuario trae el
+    // relay con '/', cada llamada abría 2 subs en la misma conexión y el
+    // limitador contaba cada forma por separado.
+    function _normRelayUrl(url) {
+        try {
+            let u = String(url);
+            if (u.indexOf('://') === -1) u = 'wss://' + u;
+            const p = new URL(u);
+            p.pathname = p.pathname.replace(/\/+/g, '/');
+            if (p.pathname.endsWith('/')) p.pathname = p.pathname.slice(0, -1);
+            if ((p.port === '80' && p.protocol === 'ws:') || (p.port === '443' && p.protocol === 'wss:')) p.port = '';
+            p.searchParams.sort();
+            p.hash = '';
+            return p.toString();
+        } catch (e) { return url; }
+    }
+
     function _resolveTargetRelays(filterArr, relayUrls) {
-        return [...new Set(_resolveTargetRelaysRaw(filterArr, relayUrls))];
+        return [...new Set(_resolveTargetRelaysRaw(filterArr, relayUrls).map(_normRelayUrl))];
     }
 
     function _resolveTargetRelaysRaw(filterArr, relayUrls) {
