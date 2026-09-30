@@ -558,6 +558,35 @@ const LBW_Nostr = (() => {
     // permiso), simplemente loguamos. El relay seguirá filtrando DMs hasta
     // que el cliente autentique correctamente — ese es el contrato de
     // NIP-42, no es un bug.
+    const _subLimitHits = {};
+    const _subLimitTimer = {};
+
+    // Diagnóstico: suscripciones abiertas por relay (según nostr-tools) y
+    // agrupadas por filtro, para localizar qué módulo agota el cupo de 32.
+    function debugSubscriptions() {
+        const out = {};
+        try {
+            const relays = _pool && _pool.relays ? [..._pool.relays.entries()] : [];
+            relays.forEach(([url, relay]) => {
+                const groups = {};
+                (relay.openSubs ? [...relay.openSubs.values()] : []).forEach(sub => {
+                    const key = JSON.stringify((sub.filters || []).map(f => {
+                        const g = { kinds: f.kinds };
+                        Object.keys(f).filter(k => k[0] === '#').forEach(k => { g[k] = f[k].length > 3 ? `[${f[k].length}]` : f[k]; });
+                        if (f.authors) g.authors = f.authors.length;
+                        if (f.ids) g.ids = f.ids.length;
+                        return g;
+                    }));
+                    groups[key] = (groups[key] || 0) + 1;
+                });
+                const total = relay.openSubs ? relay.openSubs.size : 0;
+                out[url] = { total, porFiltro: Object.entries(groups).sort((a, b) => b[1] - a[1]).map(([f, n]) => `${n}× ${f}`) };
+            });
+        } catch (e) { out.error = e.message; }
+        console.warn('[Nostr] Suscripciones abiertas:', JSON.stringify(out, null, 2));
+        return out;
+    }
+
     async function _setupAuthForRelay(url) {
         if (!_pool) return;
         let relay;
@@ -570,7 +599,15 @@ const LBW_Nostr = (() => {
         // ignora → la sub queda abierta pero muda. Lo hacemos visible.
         relay.onnotice = (msg) => {
             if (/maximum concurrent subscription/i.test(String(msg))) {
-                console.warn('[Nostr] ⚠️ ' + url + ' rechazó una suscripción: límite de suscripciones concurrentes alcanzado. Alguna sección puede no recibir datos.');
+                // Agrupar: un solo aviso cada 10 s con el número de rechazos
+                _subLimitHits[url] = (_subLimitHits[url] || 0) + 1;
+                if (!_subLimitTimer[url]) {
+                    _subLimitTimer[url] = setTimeout(() => {
+                        console.warn(`[Nostr] ⚠️ ${url} rechazó ${_subLimitHits[url]} suscripción(es) por el límite de concurrentes. Diagnóstico: LBW_Nostr.debugSubscriptions()`);
+                        _subLimitHits[url] = 0;
+                        _subLimitTimer[url] = null;
+                    }, 10000);
+                }
                 window.dispatchEvent(new CustomEvent('nostr-sub-limit', { detail: { relay: url } }));
             } else {
                 console.debug('[Nostr] NOTICE de ' + url + ':', msg);
@@ -1810,7 +1847,7 @@ const LBW_Nostr = (() => {
         hasNostrExtension, waitForExtension,
 
         // Profile
-        updateProfile, fetchUserProfile,
+        updateProfile, fetchUserProfile, debugSubscriptions,
 
         // Subscriptions
         subscribe, unsubscribe, onEventKind,
