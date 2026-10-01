@@ -101,185 +101,62 @@ const LBW_Missions = (function () {
         }
     }
 
-    async function createMission(data) {
+    // [C2P Fase 2] Todo el ciclo de la misión lo ejecuta el servidor
+    // (api/merits/mission), firmado con NIP-98 y atado a misión + acción.
+    // El servidor comprueba permisos y el Emisor ColombiaP2P acredita los
+    // méritos al aprobar la entrega. La app ya no escribe en PocketBase.
+    async function _missionApi(action, missionId, body = {}) {
         const pubkey = _myPubkey();
         if (!pubkey) throw new Error('No estás autenticado.');
-        if (!_canCreateMission()) throw new Error(`Necesitas al menos ${MIN_MERITS_TO_CREATE} méritos para crear misiones.`);
+        if (typeof LBW_Nostr === 'undefined' || !LBW_Nostr.nip98Auth) throw new Error('Nostr no disponible.');
+        const path = '/api/merits/mission';
+        const auth = await LBW_Nostr.nip98Auth(path, 'POST', { mission: missionId || 'new', action });
+        const res = await fetch(path, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Authorization': auth },
+            body: JSON.stringify({ action, missionId, userName: currentUser?.name || '', ...body })
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.error || ('Error ' + res.status));
+        if (data.mission) {
+            const idx = _missions.findIndex(m => m.id === data.mission.id);
+            if (idx >= 0) _missions[idx] = data.mission; else _missions.unshift(data.mission);
+        }
+        return data;
+    }
 
-        const mission = {
-            title: data.title.trim(),
-            description: data.description.trim(),
+    async function createMission(data) {
+        const r = await _missionApi('create', null, {
+            title: data.title,
+            description: data.description,
             merit_category: data.merit_category,
             merit_amount: parseInt(data.merit_amount),
             min_citizenship: data.min_citizenship || 'Fiatelo',
             deadline: data.deadline || null,
-            delivery_instructions: data.delivery_instructions || '',
-            status: _isGenesis() ? 'open' : 'pending_approval',
-            creator_pubkey: pubkey,
-            creator_name: currentUser?.name || pubkey.substring(0, 12),
-            claimed_by_pubkey: null,
-            claimed_at: null,
-            delivery_url: null,
-            created_at: new Date().toISOString(),
-            updated_at: new Date().toISOString()
-        };
-
-        const inserted = await _getPB().collection('missions').create(mission);
-        _missions.unshift(inserted);
-        return inserted;
+            delivery_instructions: data.delivery_instructions || ''
+        });
+        return r.mission;
     }
 
     async function claimMission(missionId) {
-        const pubkey = _myPubkey();
-        if (!pubkey) throw new Error('No estás autenticado.');
-
-        const mission = _missions.find(m => m.id === missionId);
-        if (!mission) throw new Error('Misión no encontrada.');
-        if (mission.status !== 'open') throw new Error('Esta misión ya no está disponible.');
-        if (mission.creator_pubkey === pubkey) throw new Error('No puedes reclamar tu propia misión.');
-
-        // Check min citizenship
-        if (mission.min_citizenship && mission.min_citizenship !== 'Fiatelo') {
-            const minMerits = _minMeritsForCitizenship(mission.min_citizenship);
-            if (_myMerits() < minMerits) {
-                throw new Error(`Necesitas ser ${mission.min_citizenship} (${minMerits}+ méritos) para reclamar esta misión.`);
-            }
-        }
-
-        const updated = await _getPB().collection('missions').update(missionId, {
-            status: 'claimed',
-            claimed_by_pubkey: pubkey,
-            claimed_by_name: currentUser?.name || pubkey.substring(0, 12),
-            claimed_at: new Date().toISOString(),
-            updated_at: new Date().toISOString()
-        });
-        const idx = _missions.findIndex(m => m.id === missionId);
-        if (idx >= 0) _missions[idx] = updated;
-        return updated;
+        return (await _missionApi('claim', missionId)).mission;
     }
 
     async function submitDelivery(missionId, deliveryNote, deliveryUrl) {
-        const pubkey = _myPubkey();
-        if (!pubkey) throw new Error('No estás autenticado.');
-
-        const mission = _missions.find(m => m.id === missionId);
-        if (!mission) throw new Error('Misión no encontrada.');
-        if (mission.claimed_by_pubkey !== pubkey) throw new Error('No eres quien reclamó esta misión.');
-
-        const updated = await _getPB().collection('missions').update(missionId, {
-            delivery_note: deliveryNote,
-            delivery_url: deliveryUrl || '',
-            status: 'pending_review',
-            updated_at: new Date().toISOString()
-        });
-        const idx = _missions.findIndex(m => m.id === missionId);
-        if (idx >= 0) _missions[idx] = updated;
-        return updated;
+        return (await _missionApi('deliver', missionId, { delivery_note: deliveryNote, delivery_url: deliveryUrl || '' })).mission;
     }
 
     async function approveMission(missionId) {
-        if (!_isGenesis()) throw new Error('Solo los Génesis pueden aprobar misiones.');
-        const pubkey = _myPubkey();
-
-        const mission = _missions.find(m => m.id === missionId);
-        if (!mission) throw new Error('Misión no encontrada.');
-
-        // If approving a pending_approval mission (making it open)
-        if (mission.status === 'pending_approval') {
-            const updated = await _getPB().collection('missions').update(missionId, {
-                status: 'open',
-                updated_at: new Date().toISOString()
-            });
-            const idx = _missions.findIndex(m => m.id === missionId);
-            if (idx >= 0) _missions[idx] = updated;
-            return updated;
+        const r = await _missionApi('approve', missionId);
+        if ((r.issued || []).length > 0 && typeof showNotification === 'function') {
+            const total = r.issued.reduce((s, i) => s + (i.amount || 0), 0);
+            setTimeout(() => showNotification(`🏅 ${total} méritos acreditados al ejecutor de la misión`, 'success'), 1200);
         }
-
-        // If approving a pending_review mission (awarding merits)
-        if (mission.status === 'pending_review') {
-            if (mission.creator_pubkey === pubkey && !_isFounder()) {
-                throw new Error('Un Génesis no puede aprobar sus propias misiones.');
-            }
-
-            // Award merits to the claimant
-            if (mission.claimed_by_pubkey && mission.merit_amount > 0) {
-                await _awardMissionMerits(mission);
-            }
-
-            const updated = await _getPB().collection('missions').update(missionId, {
-                status: 'completed',
-                approved_by_pubkey: pubkey,
-                completed_at: new Date().toISOString(),
-                updated_at: new Date().toISOString()
-            });
-            const idx = _missions.findIndex(m => m.id === missionId);
-            if (idx >= 0) _missions[idx] = updated;
-            return updated;
-        }
-
-        throw new Error('Esta misión no se puede aprobar en su estado actual.');
+        return r.mission;
     }
 
     async function cancelMission(missionId) {
-        if (!_isGenesis()) throw new Error('Solo los Génesis pueden cancelar misiones.');
-
-        const updated = await _getPB().collection('missions').update(missionId, {
-            status: 'cancelled',
-            updated_at: new Date().toISOString()
-        });
-        const idx = _missions.findIndex(m => m.id === missionId);
-        if (idx >= 0) _missions[idx] = updated;
-        return updated;
-    }
-
-    async function _awardMissionMerits(mission) {
-        const cat = mission.merit_category;
-        const amount = mission.merit_amount;
-        const recipientPubkey = mission.claimed_by_pubkey;
-        const reason = `✅ Misión completada: ${mission.title}`;
-
-        // 1. Publicar evento Nostr kind:31002 — actualiza el gauge del destinatario
-        if (typeof LBW_Merits !== 'undefined' && LBW_Merits.awardMerit) {
-            try {
-                await LBW_Merits.awardMerit(recipientPubkey, amount, cat, reason, `mision:${mission.id}`);
-            } catch (e) {
-                console.error('[Missions] Error publicando mérito Nostr:', e);
-            }
-        }
-
-        // 2. Crear entrada en xp_transactions — visible en el tab XP del usuario
-        const pb = _getPB();
-        if (pb && recipientPubkey) {
-            try {
-                await pb.collection('xp_transactions').create({
-                    user_pubkey: recipientPubkey,
-                    amount,
-                    reason,
-                    source: 'mision',
-                    ref_id: mission.id,
-                });
-            } catch (e) {
-                console.error('[Missions] Error creando xp_transaction:', e);
-            }
-        }
-
-        // 3. Registro de auditoría en merit_contributions
-        try {
-            await _getPB().collection('merit_contributions').create({
-                pubkey: recipientPubkey,
-                value: amount,
-                category: cat,
-                description: reason,
-                payment_method: 'mission',
-                status: 'approved',
-                approved_by: _myPubkey(),
-                approved_at: new Date().toISOString(),
-                evidence_url: mission.delivery_url || '',
-                created_at: new Date().toISOString()
-            });
-        } catch (e) {
-            console.error('[Missions] Error creando merit_contribution:', e);
-        }
+        return (await _missionApi('cancel', missionId)).mission;
     }
 
     function _isFounder() {
