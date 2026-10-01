@@ -1,8 +1,14 @@
 // ColombiaP2P — Módulo Tesorería (FASE 11)
-// El historial XP del usuario está disponible en la sección Perfil.
+// El historial de méritos del usuario está disponible en la sección Perfil.
+//
+// [C2P Fase 4] Historial UNIFICADO: une el XP histórico de PocketBase
+// (xp_transactions) con los méritos Nostr válidos (kind:31002 del Emisor
+// ColombiaP2P o de Génesis). La suma de la lista es exactamente el total del
+// Pasaporte (updateXPDisplay: XP de PocketBase + méritos Nostr).
 
 const C2P_Treasury = (function () {
 
+    // XP de PocketBase (flujo anterior), por campo source
     const SOURCE_LABEL = {
         evento:   { icon: '📅', label: 'Evento' },
         mision:   { icon: '🎯', label: 'Misión' },
@@ -10,6 +16,24 @@ const C2P_Treasury = (function () {
         referido: { icon: '👥', label: 'Referido' },
         manual:   { icon: '⚙️', label: 'Manual' },
         economica:{ icon: '💰', label: 'Aportación económica' },
+    };
+
+    // Méritos Nostr, por origen (prefijo del ref con el que los emite el servidor)
+    const ORIGIN_LABEL = {
+        'gov-vote':    { icon: '🗳️', label: 'Gobernanza · voto' },
+        'gov-author':  { icon: '🏛️', label: 'Gobernanza · propuesta' },
+        'gov-exec':    { icon: '🏆', label: 'Gobernanza · ejecución' },
+        zap:           { icon: '⚡', label: 'Aportación económica' },
+        evento:        { icon: '📅', label: 'Evento' },
+        mision:        { icon: '🎯', label: 'Misión' },
+        racha:         { icon: '🔥', label: 'Rachas diarias' },
+        referido:      { icon: '👥', label: 'Referido' },
+        fundacional:   { icon: '👑', label: 'Fundacional' },
+        contrib:       { icon: '✅', label: 'Aportación verificada' },
+    };
+    const CATEGORY_LABEL = {
+        productiva: 'Productiva', economica: 'Económica', responsabilidad: 'Responsabilidad',
+        financiada: 'Financiada', fundacional: 'Fundacional'
     };
 
     function _getPB() {
@@ -22,61 +46,134 @@ const C2P_Treasury = (function () {
             : (typeof currentUser !== 'undefined' && currentUser?.pubkey) ? currentUser.pubkey : '';
     }
 
-    function _formatDate(iso) {
-        if (!iso) return '';
-        const d = new Date(iso);
+    function _formatDate(ms) {
+        if (!ms) return '';
+        const d = new Date(ms);
         return d.toLocaleDateString('es-CO', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit', timeZone: 'America/Bogota' });
     }
 
-    function _renderXpRow(r) {
-        const meta = SOURCE_LABEL[r.source] || { icon: '⚡', label: r.source };
+    // Origen de un mérito Nostr: tag origin, o el prefijo del d (merit:<origen>:…)
+    function _originOf(rec) {
+        if (rec.origin) return rec.origin;
+        const m = /^merit:([a-z-]+):/.exec(rec.dTag || '');
+        if (m) return m[1];
+        return rec.category === 'fundacional' ? 'fundacional' : '';
+    }
+
+    // Normaliza ambas fuentes a { icon, title, detail, amount, ts, kind }
+    function _fromPB(r) {
+        const meta = SOURCE_LABEL[r.source] || { icon: '⚡', label: r.source || 'XP' };
+        return {
+            icon: meta.icon,
+            title: r.reason || meta.label,
+            detail: `${meta.label} · historial anterior`,
+            amount: r.amount || 0,
+            ts: r.created ? new Date(r.created).getTime() : 0,
+            kind: 'pb'
+        };
+    }
+
+    function _fromNostr(rec) {
+        const origin = _originOf(rec);
+        const meta = ORIGIN_LABEL[origin] || { icon: '🏅', label: 'Mérito' };
+        const cat = CATEGORY_LABEL[rec.category] || rec.category || '';
+        return {
+            icon: meta.icon,
+            title: rec.reason || meta.label,
+            detail: `${meta.label}${cat && cat !== meta.label ? ' · ' + cat : ''}`,
+            amount: rec.amount || 0,
+            ts: (rec.created_at || 0) * 1000,
+            kind: 'nostr'
+        };
+    }
+
+    function _renderRow(it) {
         return `
         <div style="display:flex;align-items:center;gap:0.75rem;padding:0.7rem 0.9rem;background:var(--color-bg-card);border-radius:10px;border:1px solid var(--color-border);">
-            <div style="font-size:1.4rem;width:2rem;text-align:center;flex-shrink:0;">${meta.icon}</div>
+            <div style="font-size:1.4rem;width:2rem;text-align:center;flex-shrink:0;">${it.icon}</div>
             <div style="flex:1;min-width:0;">
-                <div style="font-size:0.85rem;font-weight:600;color:var(--color-text-primary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${LBW.escapeHtml(r.reason || meta.label)}</div>
-                <div style="font-size:0.72rem;color:var(--color-text-secondary);">${meta.label} · ${_formatDate(r.created)}</div>
+                <div style="font-size:0.85rem;font-weight:600;color:var(--color-text-primary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${LBW.escapeHtml(it.title)}</div>
+                <div style="font-size:0.72rem;color:var(--color-text-secondary);">${LBW.escapeHtml(it.detail)} · ${_formatDate(it.ts)}</div>
             </div>
-            <div style="font-size:1rem;font-weight:700;color:var(--color-bitcoin);white-space:nowrap;">+${(r.amount||0).toLocaleString('es-CO')} Méritos</div>
+            <div style="font-size:1rem;font-weight:700;color:var(--color-bitcoin);white-space:nowrap;">+${(it.amount || 0).toLocaleString('es-CO')}</div>
         </div>`;
     }
 
     const XP_PAGE_SIZE = 10;
+    let _cache = null;          // { pubkey, items, at }
+    let _lastContainer = null;
+    let _lastPage = 1;
+    let _meritHookInstalled = false;
+    let _rerenderTimer = null;
 
-    // Renderiza el historial XP del usuario en un contenedor dado, con paginación
-    async function renderXpInto(containerId, page) {
+    async function _loadItems(pubkey, force) {
+        if (!force && _cache && _cache.pubkey === pubkey && Date.now() - _cache.at < 30000) return _cache.items;
+
+        const items = [];
+        // 1. XP de PocketBase (historial anterior)
+        const pb = _getPB();
+        if (pb) {
+            const records = await pb.collection('xp_transactions').getFullList({
+                filter: `user_pubkey = "${pubkey}"`,
+                sort: '-created',
+                requestKey: null,
+            });
+            records.forEach(r => items.push(_fromPB(r)));
+        }
+        // 2. Méritos Nostr válidos (ya validados y deduplicados por LBW_Merits)
+        if (typeof LBW_Merits !== 'undefined' && LBW_Merits.getUserMerits) {
+            const data = LBW_Merits.getUserMerits(pubkey);
+            (data?.records || []).filter(r => (r.amount || 0) > 0).forEach(r => items.push(_fromNostr(r)));
+        }
+
+        items.sort((a, b) => b.ts - a.ts);
+        _cache = { pubkey, items, at: Date.now() };
+        return items;
+    }
+
+    // Re-renderizar cuando lleguen méritos nuevos del relay
+    function _installMeritHook() {
+        if (_meritHookInstalled || typeof LBW_Merits === 'undefined' || !LBW_Merits.subscribeMerits) return;
+        _meritHookInstalled = true;
+        LBW_Merits.subscribeMerits(() => {
+            if (!_lastContainer || !document.getElementById(_lastContainer)) return;
+            clearTimeout(_rerenderTimer);
+            _rerenderTimer = setTimeout(() => renderXpInto(_lastContainer, _lastPage, true), 800);
+        });
+    }
+
+    // Renderiza el historial unificado del usuario en un contenedor dado, con paginación
+    async function renderXpInto(containerId, page, force) {
         page = Math.max(1, parseInt(page) || 1);
         const container = document.getElementById(containerId);
         if (!container) return;
+        _lastContainer = containerId;
+        _lastPage = page;
+        _installMeritHook();
 
-        const pb = _getPB();
         const pubkey = _myPubkey();
-
-        if (!pb) {
-            container.innerHTML = `<div class="c2p-empty-state" style="padding:2rem;">PocketBase no disponible</div>`;
-            return;
-        }
         if (!pubkey) {
             container.innerHTML = `<div class="c2p-empty-state" style="padding:2rem;">Inicia sesión para ver tu historial de méritos</div>`;
             return;
         }
 
-        container.innerHTML = `<p class="c2p-empty-state" style="padding:1.5rem;text-align:center;">Cargando...</p>`;
+        if (!_cache || _cache.pubkey !== pubkey) {
+            container.innerHTML = `<p class="c2p-empty-state" style="padding:1.5rem;text-align:center;">Cargando...</p>`;
+        }
 
         try {
-            const result = await pb.collection('xp_transactions').getList(page, XP_PAGE_SIZE, {
-                filter: `user_pubkey = "${pubkey}"`,
-                sort: '-created',
-                requestKey: null,
-            });
-
-            const { items, totalItems, totalPages } = result;
-            const currentPage = result.page;
+            const items = await _loadItems(pubkey, !!force);
+            const totalItems = items.length;
 
             if (totalItems === 0) {
-                container.innerHTML = `<div class="c2p-empty-state" style="padding:2rem;">Aún no tienes méritos de participación · Asiste a eventos y mantén tu racha diaria</div>`;
+                container.innerHTML = `<div class="c2p-empty-state" style="padding:2rem;">Aún no tienes méritos · Asiste a eventos, completa misiones, vota en gobernanza y mantén tu racha diaria</div>`;
                 return;
             }
+
+            const totalPages = Math.max(1, Math.ceil(totalItems / XP_PAGE_SIZE));
+            const currentPage = Math.min(page, totalPages);
+            const pageItems = items.slice((currentPage - 1) * XP_PAGE_SIZE, currentPage * XP_PAGE_SIZE);
+            const totalMerits = items.reduce((s, it) => s + (it.amount || 0), 0);
 
             const btnStyle = (enabled) => `
                 display:inline-flex;align-items:center;gap:0.3rem;
@@ -97,11 +194,11 @@ const C2P_Treasury = (function () {
 
             container.innerHTML = `
                 <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.75rem;flex-wrap:wrap;gap:0.5rem;">
-                    <div style="font-size:0.8rem;color:var(--color-text-secondary);">${totalItems.toLocaleString('es-CO')} transacciones</div>
+                    <div style="font-size:0.8rem;color:var(--color-text-secondary);">${totalItems.toLocaleString('es-CO')} movimientos · <strong style="color:var(--color-bitcoin);">${totalMerits.toLocaleString('es-CO')} méritos</strong></div>
                     <div style="font-size:0.8rem;color:var(--color-text-secondary);">Página ${currentPage} de ${totalPages}</div>
                 </div>
                 <div style="display:flex;flex-direction:column;gap:0.45rem;margin-bottom:0.75rem;">
-                    ${items.map(r => _renderXpRow(r)).join('')}
+                    ${pageItems.map(_renderRow).join('')}
                 </div>
                 <div style="display:flex;justify-content:space-between;align-items:center;gap:0.5rem;padding-top:0.5rem;border-top:1px solid var(--color-border);">
                     ${prevBtn}
