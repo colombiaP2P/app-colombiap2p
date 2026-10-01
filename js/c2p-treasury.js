@@ -1,22 +1,12 @@
 // ColombiaP2P — Módulo Tesorería (FASE 11)
 // El historial de méritos del usuario está disponible en la sección Perfil.
 //
-// [C2P Fase 4] Historial UNIFICADO: une el XP histórico de PocketBase
-// (xp_transactions) con los méritos Nostr válidos (kind:31002 del Emisor
-// ColombiaP2P o de Génesis). La suma de la lista es exactamente el total del
-// Pasaporte (updateXPDisplay: XP de PocketBase + méritos Nostr).
+// Historial de méritos: los méritos Nostr válidos del usuario (kind:31002 del
+// Emisor ColombiaP2P o de Génesis), fuente única desde la Fase 3 (el XP
+// histórico de PocketBase se migró a méritos del Emisor con su fecha original).
+// La suma de la lista es exactamente el total del Pasaporte.
 
 const C2P_Treasury = (function () {
-
-    // XP de PocketBase (flujo anterior), por campo source
-    const SOURCE_LABEL = {
-        evento:   { icon: '📅', label: 'Evento' },
-        mision:   { icon: '🎯', label: 'Misión' },
-        racha:    { icon: '🔥', label: 'Racha' },
-        referido: { icon: '👥', label: 'Referido' },
-        manual:   { icon: '⚙️', label: 'Manual' },
-        economica:{ icon: '💰', label: 'Aportación económica' },
-    };
 
     // Méritos Nostr, por origen (prefijo del ref con el que los emite el servidor)
     const ORIGIN_LABEL = {
@@ -35,10 +25,6 @@ const C2P_Treasury = (function () {
         productiva: 'Productiva', economica: 'Económica', responsabilidad: 'Responsabilidad',
         financiada: 'Financiada', fundacional: 'Fundacional'
     };
-
-    function _getPB() {
-        return (typeof C2P_PB !== 'undefined') ? C2P_PB.getClient() : null;
-    }
 
     function _myPubkey() {
         return (typeof LBW_Nostr !== 'undefined' && LBW_Nostr.isLoggedIn())
@@ -60,19 +46,7 @@ const C2P_Treasury = (function () {
         return rec.category === 'fundacional' ? 'fundacional' : '';
     }
 
-    // Normaliza ambas fuentes a { icon, title, detail, amount, ts, kind }
-    function _fromPB(r) {
-        const meta = SOURCE_LABEL[r.source] || { icon: '⚡', label: r.source || 'XP' };
-        return {
-            icon: meta.icon,
-            title: r.reason || meta.label,
-            detail: `${meta.label} · historial anterior`,
-            amount: r.amount || 0,
-            ts: r.created ? new Date(r.created).getTime() : 0,
-            kind: 'pb'
-        };
-    }
-
+    // Normaliza un mérito a { icon, title, detail, amount, ts }
     function _fromNostr(rec) {
         const origin = _originOf(rec);
         const meta = ORIGIN_LABEL[origin] || { icon: '🏅', label: 'Mérito' };
@@ -82,7 +56,7 @@ const C2P_Treasury = (function () {
             title: rec.reason || meta.label,
             detail: `${meta.label}${cat && cat !== meta.label ? ' · ' + cat : ''}`,
             amount: rec.amount || 0,
-            ts: (rec.created_at || 0) * 1000,
+            ts: (rec.occurred_at || rec.created_at || 0) * 1000,
             kind: 'nostr'
         };
     }
@@ -110,17 +84,7 @@ const C2P_Treasury = (function () {
         if (!force && _cache && _cache.pubkey === pubkey && Date.now() - _cache.at < 30000) return _cache.items;
 
         const items = [];
-        // 1. XP de PocketBase (historial anterior)
-        const pb = _getPB();
-        if (pb) {
-            const records = await pb.collection('xp_transactions').getFullList({
-                filter: `user_pubkey = "${pubkey}"`,
-                sort: '-created',
-                requestKey: null,
-            });
-            records.forEach(r => items.push(_fromPB(r)));
-        }
-        // 2. Méritos Nostr válidos (ya validados y deduplicados por LBW_Merits)
+        // Méritos Nostr válidos (ya validados y deduplicados por LBW_Merits)
         if (typeof LBW_Merits !== 'undefined' && LBW_Merits.getUserMerits) {
             const data = LBW_Merits.getUserMerits(pubkey);
             (data?.records || []).filter(r => (r.amount || 0) > 0).forEach(r => items.push(_fromNostr(r)));

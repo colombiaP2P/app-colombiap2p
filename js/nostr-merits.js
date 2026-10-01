@@ -807,6 +807,8 @@ const LBW_Merits = (() => {
                 awardedBy: g('awarded-by') || parsed.awardedBy || event.pubkey,
                 signer: event.pubkey,   // firmante verificado (awarded-by es solo informativo)
                 origin: g('origin') || '',
+                // Fecha real del hecho (méritos migrados de PocketBase la llevan aparte)
+                occurred_at: parseInt(g('occurred_at'), 10) || event.created_at,
                 created_at: event.created_at,
                 source: 'award'
             };
@@ -1093,7 +1095,8 @@ const LBW_Merits = (() => {
         }
 
         userData.records.push({ id, dTag, amount: effectiveAmount, category, created_at, source,
-            signer: merit.signer || '', origin: merit.origin || '', reason: merit.reason || '' });
+            signer: merit.signer || '', origin: merit.origin || '', reason: merit.reason || '',
+            occurred_at: merit.occurred_at || created_at });
         userData.total += effectiveAmount;
         userData.byCategory[category] = (userData.byCategory[category] || 0) + effectiveAmount;
         // [transparency-1] _allMerits ya se actualizó arriba (antes del

@@ -65,7 +65,8 @@ async function alreadyAwardedLegacy(relay, pay, recipient) {
     if (prior.length > 0) return 'mérito Nostr previo';
     // Registros XP de PocketBase del flujo anterior
     try {
-        const f = encodeURIComponent(`source="economica" && (ref_id="${zapKey}" || ref_id="${manualKey}")`);
+        // ref_id histórico: payment_hash (Tesorería), o claves zapKey/manual_ de versiones previas
+        const f = encodeURIComponent(`source="economica" && (ref_id="${pay.paymentHash}" || ref_id="${zapKey}" || ref_id="${manualKey}")`);
         const r = await pbFetch(`/api/collections/xp_transactions/records?perPage=1&filter=${f}`);
         if ((r.totalItems || 0) > 0) return 'registro XP previo en PocketBase';
     } catch (e) {

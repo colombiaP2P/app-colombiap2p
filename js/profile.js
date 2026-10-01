@@ -68,32 +68,17 @@ function _profilePubkeyHex() {
 
 async function updateXPDisplay(meritData) {
     try {
-        const pb = (typeof C2P_PB !== 'undefined') ? C2P_PB.getClient() : null;
-        const pubkey = (typeof LBW_Nostr !== 'undefined' && LBW_Nostr.isLoggedIn())
-            ? LBW_Nostr.getPubkey()
-            : (typeof currentUser !== 'undefined' && currentUser?.pubkey) ? currentUser.pubkey : '';
-
-        // Méritos de participación desde PocketBase
-        let pbMerits = 0;
-        if (pb && pubkey) {
-            const records = await pb.collection('xp_transactions').getFullList({
-                filter: `user_pubkey = "${pubkey}"`,
-                requestKey: null,
-            });
-            pbMerits = records.reduce((sum, r) => sum + (r.amount || 0), 0);
-        }
-
-        // Méritos de contribución desde Nostr C2PM
-        const nostrMerits = (meritData && meritData.nostrMerits) ? meritData.nostrMerits : 0;
-
-        const total = pbMerits + nostrMerits;
+        // [C2P Fase 3] Fuente única: méritos Nostr (kind:31002 válidos). El XP
+        // histórico de PocketBase se migró a méritos del Emisor ColombiaP2P;
+        // sumarlo aquí lo contaría dos veces.
+        const total = (meritData && meritData.nostrMerits) ? meritData.nostrMerits : 0;
         _renderXPDisplay(total);
 
         // Actualizar stat bar con total real
         const statMeritsEl = document.getElementById('statMerits');
         if (statMeritsEl) statMeritsEl.textContent = total;
 
-        // Actualizar nivel de ciudadanía con el total real (PB + Nostr)
+        // Actualizar nivel de ciudadanía con el total real
         if (typeof updateCitizenshipGauge === 'function') updateCitizenshipGauge(total);
         const citizenship = getCitizenshipLevel(total);
         const citizenshipBadge = document.getElementById('profileCitizenship');

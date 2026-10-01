@@ -39,20 +39,9 @@ const q = s => encodeURIComponent(s);
 const nowIso = () => new Date().toISOString();
 const clip = (v, n) => String(v || '').trim().substring(0, n);
 
-// Méritos del usuario como los ve el Pasaporte: libro Nostr + XP de PocketBase
-async function pasaporteTotal(ledger, pubkey) {
-    let pb = 0;
-    try {
-        let page = 1;
-        for (;;) {
-            const r = await pbFetch(`/api/collections/xp_transactions/records?perPage=500&page=${page}&fields=amount&filter=${q(`user_pubkey = "${pubkey}"`)}`);
-            (r.items || []).forEach(x => { pb += x.amount || 0; });
-            if (page >= (r.totalPages || 1)) break;
-            page++;
-        }
-    } catch (e) {}
-    return (ledger.get(pubkey)?.total || 0) + pb;
-}
+// Méritos del usuario como los ve el Pasaporte: libro Nostr (fuente única
+// desde la Fase 3; el XP de PocketBase se migró a méritos del Emisor)
+const pasaporteTotal = (ledger, pubkey) => ledger.get(pubkey)?.total || 0;
 
 const update = (id, data) => pbFetch(`/api/collections/missions/records/${id}`, { method: 'PATCH', body: JSON.stringify({ ...data, updated_at: nowIso() }) });
 
@@ -112,7 +101,7 @@ export default async function handler(req, res) {
                 if (mission.status !== 'open') return res.status(409).json({ error: 'Esta misión ya no está disponible.' });
                 if (mission.creator_pubkey === pubkey) return res.status(403).json({ error: 'No puedes reclamar tu propia misión.' });
                 const min = CITIZENSHIP_MIN[mission.min_citizenship] || 0;
-                if (min > 0 && await pasaporteTotal(ledger, pubkey) < min) {
+                if (min > 0 && pasaporteTotal(ledger, pubkey) < min) {
                     return res.status(403).json({ error: `Necesitas ser ${mission.min_citizenship} (${min}+ méritos) para reclamar esta misión.` });
                 }
                 const updated = await update(missionId, {
