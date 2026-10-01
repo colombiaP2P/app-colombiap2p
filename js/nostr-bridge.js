@@ -934,7 +934,7 @@ const LBW_NostrBridge = (() => {
         if (_replySub) { try { LBW_Nostr.unsubscribe(_replySub); } catch(e) {} }
         if (myPubkey) {
             _replySub = LBW_Nostr.subscribe(
-                { kinds: [1], '#p': [myPubkey], '#t': ['liberbit'], limit: 50 },
+                { kinds: [1], '#p': [myPubkey], '#t': ['c2p-chat'], limit: 50 },
                 event => {
                     if (event.pubkey === myPubkey) return; // ignorar mis propios replies
                     const hasReplyTag = event.tags.some(t => t[0] === 'e');

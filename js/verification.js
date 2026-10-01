@@ -376,7 +376,7 @@ function showInviteFriend() {
     
     const code = 'INV-' + Math.random().toString(36).substring(2, 10).toUpperCase();
     
-    const message = `Tu código de invitación:\n\n${code}\n\nCompártelo con un amigo para invitarlo a LiberBit World.\n\nTe quedan ${userVerification.invitationsLeft} invitaciones.`;
+    const message = `Tu código de invitación:\n\n${code}\n\nCompártelo con un amigo para invitarlo a ColombiaP2P.\n\nTe quedan ${userVerification.invitationsLeft} invitaciones.`;
     
     if (confirm(message + '\n\n¿Copiar al portapapeles?')) {
         navigator.clipboard.writeText(code);

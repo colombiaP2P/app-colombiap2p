@@ -265,7 +265,7 @@ async function generateInvoice() {
     try {
         const amount = parseFloat(document.getElementById('receiveAmount').value);
         const currency = document.getElementById('receiveCurrency').value;
-        const memo = document.getElementById('receiveMemo').value || 'Pago LiberBit World';
+        const memo = document.getElementById('receiveMemo').value || 'Pago ColombiaP2P';
 
         if (!amount || amount <= 0) {
             showNotification('Por favor ingresa una cantidad válida', 'error');
@@ -478,7 +478,7 @@ async function loadTransactions() {
         },
         {
             type: 'send', amount: 5000, currency: 'SATS',
-            memo: 'Compra en LiberBit',
+            memo: 'Compra en ColombiaP2P',
             date: new Date(Date.now() - 7200000).toISOString(), status: 'completed'
         }
     ];

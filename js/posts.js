@@ -176,7 +176,7 @@ function copyNpubKey() {
 }
 
 function downloadKeys() {
-    const content = `LiberBit World - Claves
+    const content = `ColombiaP2P - Claves
 =============================
 Nombre: ${currentUser.name}
 Fecha: ${new Date().toLocaleString()}

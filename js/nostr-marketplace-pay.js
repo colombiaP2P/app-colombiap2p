@@ -409,7 +409,7 @@
                         ">📋 Copiar invoice</button>
                         <!-- Marcar como pagado (manual, honor-based) -->
                         <!-- [M-9] El texto era "Confirmar pago realizado" / verde →
-                             implicaba que LiberBit verificaba el pago. No es así:
+                             implicaba que ColombiaP2P verificaba el pago. No es así:
                              si no pagas con Alby (WebLN), la app no puede
                              verificar nada. Texto y color ahora reflejan que
                              es manual + honor-based. -->
@@ -420,13 +420,13 @@
                                 ✋ Marcar como pagado (no verificado)
                             </button>
                             <p style="font-size:0.65rem;color:var(--color-text-secondary);text-align:center;margin-top:0.4rem;line-height:1.3;">
-                                LiberBit no puede verificar pagos manuales. Solo márcalo si realmente has pagado.
+                                ColombiaP2P no puede verificar pagos manuales. Solo márcalo si realmente has pagado.
                             </p>
                         </div>
                     </div>
 
                     <p style="font-size:0.7rem;color:var(--color-text-secondary);text-align:center;margin-top:1rem;">
-                        El pago va directo al vendedor · LiberBit no toca los fondos
+                        El pago va directo al vendedor · ColombiaP2P no toca los fondos
                     </p>
                 </div>
             </div>`;
@@ -489,7 +489,7 @@
         if (!_activeListing) return;
         const ok = confirm(
             '⚠️ MARCAR COMO PAGADO (no verificado)\n\n' +
-            'LiberBit no puede verificar automáticamente que esta factura ' +
+            'ColombiaP2P no puede verificar automáticamente que esta factura ' +
             'Lightning se haya pagado — solo tú puedes saberlo.\n\n' +
             '· Marca solo si REALMENTE has enviado el pago desde tu wallet.\n' +
             '· El listing se marcará como vendido en Nostr a tu nombre.\n' +
@@ -551,7 +551,7 @@
             const lnurlData = await resolveLnurlp(lud16);
 
             // 3. Pedir invoice (en sats reales convertidos)
-            const comment = `Pago por: ${listing.title} (LiberBit World)`;
+            const comment = `Pago por: ${listing.title} (ColombiaP2P)`;
             const bolt11  = await requestInvoice(lnurlData, amountSats, comment);
 
             // 4. Guardar estado activo (incluida la info de conversión para

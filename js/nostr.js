@@ -1416,7 +1416,7 @@ const LBW_Nostr = (() => {
         const metadata = {
             name: displayName || 'Anon',
             display_name: displayName || 'Anon',
-            about: 'Ciudadano de LiberBit World 🌐',
+            about: 'Ciudadano de ColombiaP2P 🇨🇴',
             picture: '', lud16: '', nip05: '', banner: '', website: '',
             lbw_citizenship: 'Plebeyo',
             lbw_city: '',
@@ -1561,7 +1561,7 @@ const LBW_Nostr = (() => {
 
     // ── Community Chat (Kind 1) ──────────────────────────────
     function subscribeCommunityChat(onMessage, since = null) {
-        const filter = { kinds: [EVENT_KINDS.TEXT_NOTE], '#t': ['liberbit', 'lbw'], limit: 50 };
+        const filter = { kinds: [EVENT_KINDS.TEXT_NOTE], '#t': ['c2p-chat'], limit: 50 };
         if (since) filter.since = since;
 
         return subscribe(filter, event => {
@@ -1579,7 +1579,7 @@ const LBW_Nostr = (() => {
     }
 
     async function publishCommunityMessage(content, replyToEventId = null, replyToAuthorPubkey = null) {
-        const tags = [['t', 'liberbit'], ['t', 'lbw'], ['client', 'LiberBit World']];
+        const tags = [['t', 'c2p-chat'], ['t', 'colombiap2p'], ['client', 'ColombiaP2P']];
         if (replyToEventId) tags.push(['e', replyToEventId, '', 'reply']);
         if (replyToAuthorPubkey) tags.push(['p', replyToAuthorPubkey]);
         return publishEvent({ kind: EVENT_KINDS.TEXT_NOTE, content, tags });
@@ -1805,7 +1805,7 @@ const LBW_Nostr = (() => {
 
     // ── Marketplace (NIP-99, Kind 30402) ─────────────────────
     function subscribeMarketplace(onListing, since = null) {
-        const filter = { kinds: [EVENT_KINDS.MARKETPLACE], '#t': ['liberbit-market'], limit: 50 };
+        const filter = { kinds: [EVENT_KINDS.MARKETPLACE], '#t': ['c2p-market'], limit: 50 };
         if (since) filter.since = since;
         return subscribe(filter, event => {
             const l = _parseMarketplaceListing(event);
@@ -1867,8 +1867,8 @@ const LBW_Nostr = (() => {
             ['currency', listing.currency || 'sats'],
             ['emoji', listing.emoji || '🏪'],
             ['status', listing.status || 'active'],
-            ['t', 'liberbit-market'], ['t', 'lbw'], ['t', listing.category || 'servicios'],
-            ['client', 'LiberBit World']
+            ['t', 'c2p-market'], ['t', 'colombiap2p'], ['t', listing.category || 'servicios'],
+            ['client', 'ColombiaP2P']
         ];
 
         // Fase 1: precio estructurado — frecuencia

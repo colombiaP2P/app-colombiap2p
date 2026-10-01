@@ -44,7 +44,7 @@ const LBW_Governance = (() => {
     // ── NIP-72 Umbrella Community ────────────────────────────
     // Comunidad paraguas que agrupa todo el ecosistema LBW. Cada PRP
     // emite su propio kind:34550 hijo (con `a` tag apuntando aquí), y
-    // clientes Nostr externos descubren LiberBit World como una sola
+    // clientes Nostr externos descubren ColombiaP2P como una sola
     // comunidad federada en lugar de propuestas huérfanas.
     //
     // Política de emisión: manual, una sola entidad (el fundador
@@ -54,14 +54,14 @@ const LBW_Governance = (() => {
     // Re-emisiones desde OTROS pubkeys crean un community distinto;
     // los clientes externos seguirán al primero que descubran.
     const UMBRELLA = {
-        D_TAG:       'lbw-community',
-        NAME:        'LiberBit World',
-        DESCRIPTION: 'Polis paralela sobre Nostr y Bitcoin Lightning. Soberanía individual, gobernanza directa por méritos, comunidades voluntarias. Propone, nunca impone. Las propuestas (PRP-XXX) aparecen como hilos hijos. liberbitworld.org',
-        IMAGE:       'https://www.liberbitworld.org/icons/icon-512.png',
+        D_TAG:       'c2p-community',
+        NAME:        'ColombiaP2P',
+        DESCRIPTION: 'Comunidad Bitcoin colombiana sobre Nostr y Lightning. Gobernanza por méritos: las propuestas (PRP-XXX) aparecen como hilos hijos. colombiap2p.com',
+        IMAGE:       'https://colombiap2p.com/icons/icon-512.png',
         // [SEC-NIP72-1] Anti-squatting: solo aceptamos como paraguas
         // legítima eventos firmados por pubkeys en esta lista. Cualquier
-        // otro `kind:34550` con `d=lbw-community` es ignorado por el
-        // cliente LBW (clientes externos verán los dos eventos; eso es
+        // otro `kind:34550` con `d=c2p-community` es ignorado por el
+        // cliente (clientes externos verán los dos eventos; eso es
         // problema de su discovery layer, no nuestro).
         //
         // Por defecto vacío → fail-open con warning, así el sistema
@@ -74,22 +74,23 @@ const LBW_Governance = (() => {
         // y deploy — intencionado, esta lista es la raíz de confianza
         // de la paraguas y no debe ser editable desde la UI.
         AUTHORIZED_CREATORS: [
-            // Fundador (npub172vh56w30sgev82c09lfujswr4u2djcd5w9vcj79qrmyk9jd459swvrkf5)
-            'f2997a69d17c11961d58797e9e4a0e1d78a6cb0da38acc4bc500f64b164dad0b'
+            // Admins ColombiaP2P (antes: fundador de LiberBit World)
+            '2479ef8e78d635cb40054f1e1a3895b13d67b36b2326b2a1d68df7b989b4cac0', // colbitcoin
+            '51cfd8f59cd6c8e7699e5b8e3cfed94967c780939877f78e16da995107f432b9'  // admin
         ]
     };
 
     let _umbrellaCache = null;   // { eventId, creator, name, description, image, moderators[], created_at }
     let _umbrellaSub   = null;
 
-    // Suscribe a kind:34550 con d=lbw-community. Cualquier evento que
+    // Suscribe a kind:34550 con d=c2p-community. Cualquier evento que
     // matchee actualiza _umbrellaCache. Si llegan varios con distintos
     // creators (no debería pasar bajo política manual), nos quedamos
     // con el último publicado por created_at.
     function _subscribeUmbrellaCommunity() {
         if (_umbrellaSub) return;
         if (!Array.isArray(UMBRELLA.AUTHORIZED_CREATORS) || UMBRELLA.AUTHORIZED_CREATORS.length === 0) {
-            console.warn('[Governance] [SEC-NIP72-1] UMBRELLA.AUTHORIZED_CREATORS está vacío — aceptando cualquier pubkey como paraguas. Esto es vulnerable a squatting: cualquiera puede publicar un kind:34550 con d=lbw-community. Edita js/nostr-governance.js y añade el pubkey hex del fundador antes del anuncio público.');
+            console.warn('[Governance] [SEC-NIP72-1] UMBRELLA.AUTHORIZED_CREATORS está vacío — aceptando cualquier pubkey como paraguas. Esto es vulnerable a squatting: cualquiera puede publicar un kind:34550 con d=c2p-community. Edita js/nostr-governance.js y añade el pubkey hex del fundador antes del anuncio público.');
         }
         _umbrellaSub = LBW_Nostr.subscribe(
             { kinds: [KIND.COMMUNITY], '#d': [UMBRELLA.D_TAG], limit: 10 },
@@ -160,7 +161,7 @@ const LBW_Governance = (() => {
         // y debería coincidir con la pubkey que se añadirá al array.
         if (UMBRELLA.AUTHORIZED_CREATORS.length > 0 &&
             !UMBRELLA.AUTHORIZED_CREATORS.includes(myPubkey)) {
-            throw new Error('Tu pubkey no está en UMBRELLA.AUTHORIZED_CREATORS. Si publicas, crearás una paraguas paralela que el cliente LBW ignorará. Habla con el fundador para añadir tu pubkey al array si tiene sentido.');
+            throw new Error('Tu pubkey no está en UMBRELLA.AUTHORIZED_CREATORS. Si publicas, crearás una paraguas paralela que el cliente ignorará. Habla con el fundador para añadir tu pubkey al array si tiene sentido.');
         }
 
         // Recoger moderadores actuales: todos los Génesis del ledger
@@ -194,8 +195,8 @@ const LBW_Governance = (() => {
             ['name', name],
             ['description', description],
             ['image', image],
-            ['t', 'lbw-governance'],
-            ['t', 'lbw-community'],
+            ['t', 'c2p-governance'],
+            ['t', 'c2p-community'],
             ['client', 'ColombiaP2P']
         ];
         for (const p of moderators) {
@@ -1061,7 +1062,7 @@ const LBW_Governance = (() => {
         const tags = [
             ['d', communityDTag],
             ['name', formatProposalNumber(number) + ' — ' + (proposal.title || '').substring(0, 120)],
-            ['description', 'Debate de la propuesta ' + formatProposalNumber(number) + ' en LiberBit World. Ver detalles + votar en la app.'],
+            ['description', 'Debate de la propuesta ' + formatProposalNumber(number) + ' en ColombiaP2P. Ver detalles + votar en colombiap2p.com.'],
             ['p', proposal.pubkey, '', 'moderator'],
             ['t', 'c2p-debate'],
             ['t', 'c2p-governance'],
@@ -2282,7 +2283,7 @@ const LBW_Governance = (() => {
         requiresAdmission, getAdmissionStatus, getAdmissionTimeLeft,
         isAdmitted, isCommunityArchived, getMyAdmissionVote,
         publishAdmissionVote, getCommunity, getCommunityATag,
-        // NIP-72 umbrella community (lbw-community)
+        // NIP-72 umbrella community (c2p-community)
         UMBRELLA, getUmbrellaCommunity, getUmbrellaATag, publishUmbrellaCommunity,
         isGenesis: _isGenesis,
         isGovAuthority: _isGovAuthority

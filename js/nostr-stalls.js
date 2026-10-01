@@ -11,7 +11,7 @@
 
     const KIND_STALL   = 30017;
     const KIND_PRODUCT = 30018;
-    const LBW_TAG      = 'liberbit-market';
+    const LBW_TAG      = 'c2p-market';
 
     // ── Estado en memoria ─────────────────────────────────────
     let _stalls   = [];   // [{id, pubkey, dTag, name, description, currency, shipping, created_at}]
@@ -105,12 +105,12 @@
             tags: [
                 ['d', dTag],
                 ['t', LBW_TAG],
-                ['t', 'lbw']
+                ['t', 'colombiap2p']
             ]
         });
 
         // Actualizar estado local
-        const stall = _parseStall({ ...event, tags: [['d', dTag], ['t', LBW_TAG], ['t', 'lbw']] });
+        const stall = _parseStall({ ...event, tags: [['d', dTag], ['t', LBW_TAG], ['t', 'colombiap2p']] });
         if (stall) _upsertStall(stall);
 
         console.log('[Stalls] ✅ Tienda publicada:', dTag);
@@ -155,7 +155,7 @@
             ['d', prodDTag],
             ['a', aTagVal],
             ['t', LBW_TAG],
-            ['t', 'lbw'],
+            ['t', 'colombiap2p'],
             ...mediaTags
         ];
 

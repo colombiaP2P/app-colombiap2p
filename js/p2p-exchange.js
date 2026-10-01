@@ -84,7 +84,7 @@ const LBW_P2P = (() => {
         label: 'P2P',
         color: 'var(--color-teal-light)',
         emoji: '⚡',
-        description: 'Esta orden ha sido publicada en la red Nostr mediante el estándar NIP-69 (kind 38383). LiberBit World solo agrega y muestra las órdenes: para operar debes usar el cliente de la plataforma que la publicó.',
+        description: 'Esta orden ha sido publicada en la red Nostr mediante el estándar NIP-69 (kind 38383). ColombiaP2P solo agrega y muestra las órdenes: para operar debes usar el cliente de la plataforma que la publicó.',
         steps: [
             'Identifica la plataforma origen en la insignia de la orden',
             'Instala o abre el cliente oficial de esa plataforma',

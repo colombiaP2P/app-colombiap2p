@@ -225,10 +225,10 @@ const LBW_Sync = (() => {
 
     // ── Convenience: Synced Community Chat ───────────────────
     async function syncCommunityChat(onMessage, onHydrated = null) {
-        return syncedSubscribe('community-chat', {
+        return syncedSubscribe('c2p-community-chat', {
             kind: LBW_Nostr.EVENT_KINDS.TEXT_NOTE,
-            filters: { '#t': ['liberbit', 'lbw'] },
-            tagFilter: { t: ['liberbit', 'lbw'] },
+            filters: { '#t': ['c2p-chat'] },
+            tagFilter: { t: ['c2p-chat'] },
             onEvent: (event, source) => {
                 const npub = LBW_Nostr.pubkeyToNpub(event.pubkey);
                 onMessage({
@@ -251,10 +251,10 @@ const LBW_Sync = (() => {
 
     // ── Convenience: Synced Marketplace ──────────────────────
     async function syncMarketplace(onListing, onHydrated = null) {
-        return syncedSubscribe('marketplace', {
+        return syncedSubscribe('c2p-marketplace', {
             kind: LBW_Nostr.EVENT_KINDS.MARKETPLACE,
-            filters: { '#t': ['liberbit-market'] },
-            tagFilter: { t: ['liberbit-market'] },
+            filters: { '#t': ['c2p-market'] },
+            tagFilter: { t: ['c2p-market'] },
             onEvent: (event, source) => {
                 const g = name => (event.tags.find(t => t[0] === name) || [])[1] || '';
                 onListing({

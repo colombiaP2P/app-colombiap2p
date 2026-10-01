@@ -100,13 +100,18 @@ Implementado en `nostr.js:_getRelaysForKind`:
 
 | Kinds | Routing |
 |-------|---------|
-| **PRIVATE_KINDS**: DMs (4), gobernanza (31000-31006) | Solo relay privado (`wss://relay.colombiap2p.com` — descomentar en `nostr.js` cuando esté activo). [SEC-A7] sin fallback público. |
-| **PUBLIC_KINDS**: metadata (0), chat (1), reactions (7), marketplace, reviews, stalls, relay-list | Privado + públicos (`relay.damus.io`, `nos.lol`). |
+| **OWN_RELAY_KINDS**: gobernanza (31000, 31001, 31004, 31010-31012) y méritos (31002, 31003, 31005) | Solo `GOVERNANCE_RELAYS` = `wss://relay.colombiap2p.com/?c2p=core` (mismo relay, **conexión dedicada**: el `?c2p=core` hace que nostr-tools abra otro WebSocket con su propio cupo de subs). |
+| **PRIVATE_KINDS**: DMs (4), app state | `SYSTEM_PRIVATE_RELAYS` (relay propio + damus/nos.lol). [SEC-A7] sin fallback público. |
+| **PUBLIC_KINDS**: metadata (0), chat (1), reactions (7), marketplace, reviews, stalls, relay-list | Privado + públicos (`relay.damus.io`, `nos.lol`, …). |
 | **Privacy Strict mode** | Cero eventos a públicos. Toggle en perfil. |
 
-> **Nota**: `relay.colombiap2p.com` está comentado en `SYSTEM_PRIVATE_RELAYS` de `nostr.js`. Descomentar cuando el relay esté activo y bumpar `?v=` del script.
+**Suscripciones** (`LBW_Nostr.subscribe`): el relay (nostr-rs-relay) admite **32 subs concurrentes por conexión** y al superarlo responde `NOTICE` (no `CLOSED`): la sub queda muda. Por eso: limitador por relay (28, con cola), dedup **por suscripción** (la caché global solo evita re-validar firmas), reapertura automática con backoff si una sub se cierra, perfiles (`fetchUserProfile`) y reseñas pedidos por lotes. Diagnóstico: `LBW_Nostr.debugSubscriptions()`.
+
+**Tags propios**: todo lo que publica la app usa `c2p-*` y `client=ColombiaP2P` (chat `c2p-chat`, marketplace/stalls `c2p-market`, reseñas `c2p-review`, gobernanza `c2p-governance`/`c2p-proposal`/…, méritos `c2p-merits`, comunidad paraguas NIP-72 `d=c2p-community`). Los tags `lbw-*`/`liberbit*` heredados de LiberBit World ya no se leen.
 
 ### Colecciones PocketBase (`api.colombiap2p.com`)
+
+Versión **< 0.23** (usa `/api/admins`, sin campos Hidden; "solo admins" = candado de la regla + Save changes). `event_checkins`, `xp_transactions`, `missions`, `user_streaks`, `user_stamps` y `user_badges` tienen Create/Update/Delete solo admins: escriben únicamente los endpoints `api/merits/*`. Los méritos válidos viven en Nostr (kind 31002), fuente única del Pasaporte, nivel, Génesis y poder de voto.
 
 | Colección | Propósito |
 |-----------|-----------|
@@ -114,9 +119,9 @@ Implementado en `nostr.js:_getRelaysForKind`:
 | `badges` / `user_badges` | Badges/logros de habilidad |
 | `missions` | Misiones educativas |
 | `merit_contributions` | Contribuciones de méritos C2PM |
-| `events` | Eventos comunitarios (con `checkin_token` para QR) |
+| `events` | Eventos comunitarios (se crean en el panel de PocketBase; el código de check-in lo deriva el servidor, `checkin_token` ya no se usa) |
 | `event_checkins` | Check-ins presenciales |
-| `xp_transactions` | Historial XP (source, reason, amount, user_pubkey) |
+| `xp_transactions` | XP histórico (migrado a méritos Nostr en la Fase 3; solo lectura, ya no se suma) |
 | `nip05_identities` | Identidades `usuario@colombiap2p.com` activas |
 | `user_streaks` | Rachas diarias (current, max, last_activity_date) |
 | `referrals` | Referidos (referrer_pubkey_short, referred_pubkey) |
@@ -128,6 +133,13 @@ Implementado en `nostr.js:_getRelaysForKind`:
 - `api/well-known/lnurlp/aportaciones.js` — LNURL well-known; sobreescribe `callback` al proxy propio.
 - `api/well-known/nostr/json.js` — NIP-05 dinámico; consulta `nip05_identities` en PocketBase.
 - `api/transparency/wallet.js` — datos de tesorería: LNURL público + LNbits API opcional.
+- `api/merits/*` — el **Emisor ColombiaP2P** firma los méritos (kind 31002) tras validar el hecho; autenticación de usuario con **NIP-98** (`LBW_Nostr.nip98Auth(path, method, bind)`, tags atados a la acción). Lógica común en `api/_lib/c2p-issuer.js` (libro de méritos con la regla de confianza, emisión idempotente por `d`, `C2P_DRY_RUN=1`):
+  - `governance.js` — votar / autor / ejecución verificada.
+  - `economic.js` — zaps a la tesorería (recibo 9735 verificable) o atribución por admin; `round(sats × 0.01)`.
+  - `checkin.js` — check-in con código derivado (`checkinCode` = HMAC de la clave del emisor; `events.checkin_token` se ignora) + sello/badge + referido en el primer check-in; acción `qr` para organizadores.
+  - `mission.js` — ciclo completo de misiones (create/claim/deliver/approve/cancel).
+  - `streak.js` — racha diaria (fecha Bogotá), mérito acumulado reemplazable.
+- **Imports en funciones**: siempre desde la entrada principal de `nostr-tools` (las subrutas como `nostr-tools/relay` no se empaquetan en Vercel).
 
 ### Variables de entorno Vercel
 
@@ -136,6 +148,8 @@ Implementado en `nostr.js:_getRelaysForKind`:
 | `LNBITS_URL` | URL instancia LNbits (ej. `https://colsats.com`) |
 | `LNBITS_READ_KEY` | Invoice/read key para balance y pagos |
 | `LNBITS_WALLET_ID` | (Opcional) filtrar pagos por wallet |
+| `C2P_ISSUER_NSEC` | Clave privada del Emisor ColombiaP2P (firma méritos y deriva códigos de check-in). Copia local: `~/.config/colombiap2p/issuer-key.json`. Nunca en el repo |
+| `PB_ADMIN_EMAIL` / `PB_ADMIN_PASSWORD` | Credenciales admin de PocketBase para los endpoints |
 
 ### Lightning
 

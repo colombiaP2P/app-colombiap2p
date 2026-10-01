@@ -15,8 +15,8 @@
 //     ['p', '<delegate-hex>']       → pubkey del delegado (vacío = revocación)
 //     ['scope', 'global']           → v1: siempre 'global'. Futuro:
 //                                      'referendum' / 'budget' / 'election'
-//     ['t', 'lbw-delegate']
-//     ['client', 'LiberBit World']
+//     ['t', 'c2p-delegate']
+//     ['client', 'ColombiaP2P']
 //
 // Reglas (aplicadas por el tally en nostr-governance.js, Fase 2):
 //   - El voto directo del delegador SIEMPRE prevalece sobre la delegación.
@@ -225,8 +225,8 @@ const LBW_Delegations = (() => {
             ['d', dTag],
             ['p', delegateHex],
             ['scope', normScope],
-            ['t', 'lbw-delegate'],
-            ['client', 'LiberBit World']
+            ['t', 'c2p-delegate'],
+            ['client', 'ColombiaP2P']
         ];
 
         const result = await LBW_Nostr.publishEvent({
@@ -267,8 +267,8 @@ const LBW_Delegations = (() => {
             ['p', ''],
             ['scope', normScope],
             ['action', 'revoke'],
-            ['t', 'lbw-delegate'],
-            ['client', 'LiberBit World']
+            ['t', 'c2p-delegate'],
+            ['client', 'ColombiaP2P']
         ];
 
         const result = await LBW_Nostr.publishEvent({
@@ -301,7 +301,7 @@ const LBW_Delegations = (() => {
         if (_sub) return _sub;
 
         _sub = LBW_Nostr.subscribe(
-            { kinds: [KIND], '#t': ['lbw-delegate'], limit: 500 },
+            { kinds: [KIND], '#t': ['c2p-delegate'], limit: 500 },
             (event) => {
                 const parsed = _parseDelegationEvent(event);
                 if (!parsed) return;

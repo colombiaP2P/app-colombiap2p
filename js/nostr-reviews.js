@@ -8,7 +8,7 @@
 
     // ── Constantes ────────────────────────────────────────────
     const KIND_REVIEW    = 1985;
-    const LABEL_NS       = 'lbw/marketplace/review';
+    const LABEL_NS       = 'c2p/marketplace/review';
     const STARS_EMOJI    = ['', '⭐', '⭐⭐', '⭐⭐⭐', '⭐⭐⭐⭐', '⭐⭐⭐⭐⭐'];
     const POSITIVE_THRESHOLD = 4; // 4-5★ cuenta como positiva para el bonus LBWM
     const BONUS_REVIEWS_NEEDED = 5; // reseñas positivas para +10 LBWM
@@ -50,14 +50,14 @@
             ['l',    String(rating), LABEL_NS],
             // Referencia al listing
             ['e',    listing.id || listing.dTag || '', '', 'mention'],
-            // Metadatos LiberBit
+            // Metadatos ColombiaP2P
             ['rating',  String(rating)],
             ['role',    role],                           // 'buyer' o 'seller'
             ['listing-title', listing.title || ''],
-            ['t',    'lbw-review'],
-            ['t',    'lbw-marketplace'],
-            ['t',    'liberbit'],
-            ['client', 'LiberBit World']
+            ['t',    'c2p-review'],
+            ['t',    'c2p-market'],
+            ['t',    'colombiap2p'],
+            ['client', 'ColombiaP2P']
         ];
 
         const result = await LBW_Nostr.publishEvent({
@@ -198,7 +198,7 @@
             {
                 kinds: [KIND_REVIEW],
                 '#p': [...waiting.keys()],
-                '#t': ['lbw-review'],
+                '#t': ['c2p-review'],
                 limit: 50 * waiting.size
             },
             event => {

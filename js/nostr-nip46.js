@@ -41,7 +41,7 @@ const LBW_NIP46 = (() => {
     // Permisos solicitados en la URI nostrconnect. Format NIP-46:
     // method[:kind] separados por coma.
     const DEFAULT_NC_PERMS = 'sign_event,nip04_encrypt,nip04_decrypt,nip44_encrypt,nip44_decrypt';
-    const APP_NAME = 'LiberBit World';
+    const APP_NAME = 'ColombiaP2P';
 
     // ── Estado de la sesión activa ──────────────────────────
     // _signer expone la API común para ambos modos:

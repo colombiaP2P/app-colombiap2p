@@ -10,7 +10,7 @@ window.LBW_Debate = {
     _subscriptions: {},
     _callbacks: {},
 
-    _tag: function(dTag) { return 'lbw-debate-' + dTag; },
+    _tag: function(dTag) { return 'c2p-debate-' + dTag; },
 
     // ¿La propuesta está admitida (puede debatirse)?
     // Las legacy sin admission_required cuentan como admitidas.
@@ -122,7 +122,7 @@ window.LBW_Debate = {
             throw new Error('Esta propuesta aún no ha sido admitida por los Génesis. Espera a que se admita para debatir.');
         }
         var tags = [
-            ['t', 'lbw-debate'],
+            ['t', 'c2p-debate'],
             ['t', this._tag(proposalDTag)]
         ];
         // NIP-72: si existe community kind:34550 para esta propuesta,
