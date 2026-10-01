@@ -9,11 +9,13 @@
 //
 // Los archivos de api/ que empiezan por "_" no se publican como rutas.
 
-import { finalizeEvent, getPublicKey, nip19 } from 'nostr-tools';
-import { Relay, useWebSocketImplementation } from 'nostr-tools/relay';
+// Todo desde la entrada principal de nostr-tools: el empaquetado de Vercel no
+// incluye subrutas como 'nostr-tools/relay' (Cannot find module .../lib/cjs/relay.js).
+import { finalizeEvent, getPublicKey, nip19, Relay } from 'nostr-tools';
 import WebSocket from 'ws';
 
-useWebSocketImplementation(WebSocket);
+// AbstractRelay usa el WebSocket global si no se le inyecta uno (Node < 22 no lo tiene)
+if (typeof globalThis.WebSocket === 'undefined') globalThis.WebSocket = WebSocket;
 
 export const RELAY_URL = process.env.C2P_RELAY_URL || 'wss://relay.colombiap2p.com';
 
