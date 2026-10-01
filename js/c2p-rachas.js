@@ -8,9 +8,10 @@ const C2P_Rachas = (function () {
     const STORAGE_KEY_FIRST  = 'c2p_first_activity_date'; // fecha primer uso (nunca se borra)
     const STORAGE_KEY_USER   = 'c2p_streak_user';         // pubkey dueño del caché local
     const STORAGE_KEY_REF_BY = 'c2p_referred_by';
+    const STORAGE_KEY_REQ    = 'c2p_streak_req';           // último día registrado en el servidor
 
-    const XP_PER_STREAK_DAY = 1;
-    const XP_REFERRAL_REWARD = 50;
+    // Recompensas de racha (1/día, 5 cada 7 días) y de referido (50): las emite
+    // el servidor en api/merits/streak.js y api/merits/checkin.js
 
     function _getPB() {
         const pb = (typeof C2P_PB !== 'undefined') ? C2P_PB.getClient() : null;
@@ -89,108 +90,33 @@ const C2P_Rachas = (function () {
     }
 
     // ── Registrar actividad ───────────────────────────────────
+    // [C2P Fase 2] La racha la calcula el servidor (api/merits/streak) con la
+    // fecha de Bogotá y el Emisor ColombiaP2P acredita los méritos (1/día, 5 cada
+    // 7 días). La app solo guarda en caché lo que responde el servidor.
     async function recordActivity() {
-        const today = _today();
-        const data  = _readLocal();
-
-        let { last, current, max, firstDate } = data;
-
-        // Si no hay primera fecha en localStorage, intentar leerla de PocketBase
-        // antes de asumir que es un usuario nuevo (evita sobreescribir con hoy)
-        if (!firstDate) {
-            const pb     = _getPB();
-            const pubkey = _myPubkey();
-            if (pb && pubkey) {
-                try {
-                    const rec = await pb.collection('user_streaks')
-                        .getFirstListItem(`user_pubkey = "${pubkey}"`).catch(() => null);
-                    if (rec?.first_activity_date) {
-                        firstDate = rec.first_activity_date.slice(0, 10);
-                        try { localStorage.setItem(STORAGE_KEY_FIRST, firstDate); } catch (_) {}
-                    }
-                } catch (_) {}
-            }
-        }
-
-        // Si sigue vacío, es realmente la primera vez — usar hoy
-        if (!firstDate) {
-            firstDate = today;
-            try { localStorage.setItem(STORAGE_KEY_FIRST, firstDate); } catch (_) {}
-        }
-
-        if (last === today) return { current, max, xpEarned: 0 }; // ya registrado hoy
-
-        let xpEarned = 0;
-
-        if (last && _dayDiff(last, today) === 1) {
-            // Día consecutivo
-            current += 1;
-        } else if (!last || _dayDiff(last, today) > 1) {
-            // Racha rota o primer día
-            current = 1;
-        }
-
-        if (current > max) max = current;
-        _writeLocal(today, current, max, firstDate);
-
-        // XP por racha (cada 7 días extra)
-        const XP_WEEKLY_BONUS = 5;
-        if (current % 7 === 0) {
-            xpEarned = XP_WEEKLY_BONUS;
-            await _grantStreakXP(current, xpEarned);
-        } else {
-            xpEarned = XP_PER_STREAK_DAY;
-            await _grantStreakXP(current, XP_PER_STREAK_DAY);
-        }
-
-        // Sincronizar con PocketBase si disponible (incluye first_activity_date)
-        _syncStreakToPB(current, max, firstDate).catch(() => {});
-
-        return { current, max, xpEarned };
-    }
-
-    async function _grantStreakXP(streakDays, amount) {
-        const pb = _getPB();
+        const local = _readLocal();
         const pubkey = _myPubkey();
-        if (!pb || !pubkey) return;
-        try {
-            const todayKey = _today();
-            const existing = await pb.collection('xp_transactions')
-                .getFirstListItem(`user_pubkey="${pubkey}" && source="racha" && ref_id="${todayKey}"`).catch(() => null);
-            if (existing) return;
-            await pb.collection('xp_transactions').create({
-                user_pubkey: pubkey,
-                amount,
-                reason:  `Racha día ${streakDays}`,
-                source:  'racha',
-                ref_id:  todayKey,
-            });
-        } catch (_) {}
-    }
+        if (!pubkey || typeof LBW_Nostr === 'undefined' || !LBW_Nostr.nip98Auth) {
+            return { current: local.current, max: local.max, xpEarned: 0 };
+        }
+        // Una petición por día y navegador (el servidor es idempotente igualmente)
+        let lastReq = '';
+        try { lastReq = localStorage.getItem(STORAGE_KEY_REQ) || ''; } catch (_) {}
+        if (lastReq === `${pubkey}:${_today()}`) return { current: local.current, max: local.max, xpEarned: 0 };
 
-    async function _syncStreakToPB(current, max, firstDate) {
-        const pb = _getPB();
-        const pubkey = _myPubkey();
-        if (!pb || !pubkey) return;
         try {
-            const existing = await pb.collection('user_streaks')
-                .getFirstListItem(`user_pubkey = "${pubkey}"`).catch(() => null);
-            const payload = {
-                user_pubkey:        pubkey,
-                current_streak:     current,
-                max_streak:         max,
-                last_activity_date: _today(),
-            };
-            // Escribir first_activity_date solo si PB aún no lo tiene
-            if (firstDate && (!existing || !existing.first_activity_date)) {
-                payload.first_activity_date = firstDate;
-            }
-            if (existing) {
-                await pb.collection('user_streaks').update(existing.id, payload);
-            } else {
-                await pb.collection('user_streaks').create(payload);
-            }
-        } catch (_) {}
+            const path = '/api/merits/streak';
+            const auth = await LBW_Nostr.nip98Auth(path, 'POST', { action: 'streak' });
+            const res = await fetch(path, { method: 'POST', headers: { 'Authorization': auth } });
+            const data = await res.json().catch(() => ({}));
+            if (!res.ok) throw new Error(data.error || ('HTTP ' + res.status));
+            _writeLocal(data.last || data.today, data.current || 0, data.max || 0, data.firstDate || local.firstDate);
+            try { localStorage.setItem(STORAGE_KEY_REQ, `${pubkey}:${_today()}`); } catch (_) {}
+            return { current: data.current || 0, max: data.max || 0, xpEarned: data.earned || 0 };
+        } catch (e) {
+            console.warn('[C2P Rachas] No se pudo registrar la racha:', e.message);
+            return { current: local.current, max: local.max, xpEarned: 0 };
+        }
     }
 
     // ── Leer racha (local + PB si disponible) ─────────────────

@@ -272,6 +272,22 @@ export function buildMerit({ recipient, amount, category, reason, ref, d }, issu
     };
 }
 
+// Lee el mérito vigente del emisor con ese d (o null). Para méritos acumulados.
+export async function getIssuerMerit(relay, d) {
+    const { pk } = issuerKey();
+    const evs = await query(relay, { kinds: [31002], authors: [pk], '#d': [d], limit: 5 });
+    return evs.sort((a, b) => b.created_at - a.created_at)[0] || null;
+}
+
+// Publica (o REEMPLAZA, mismo d) un mérito del emisor. Para acumulados como la
+// racha: un solo evento por usuario con el total, en vez de uno por día.
+export async function publishMerit(relay, award) {
+    const { sk, pk } = issuerKey();
+    const ev = finalizeEvent(buildMerit(award, pk), sk);
+    if (process.env.C2P_DRY_RUN !== '1') await relay.publish(ev);
+    return { id: ev.id, d: award.d || meritDTag(award.recipient, award.ref), amount: award.amount };
+}
+
 // Emite los méritos que el emisor aún no haya emitido (idempotente por d).
 // awards: [{ recipient, amount, category, reason, ref, d? }]
 export async function issueMerits(relay, awards) {
