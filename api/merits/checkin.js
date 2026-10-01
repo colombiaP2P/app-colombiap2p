@@ -17,13 +17,16 @@
 //
 // Acción 'qr' (organizadores): Body { action: 'qr', eventId }, NIP-98 con tags
 // ['event', eventId] y ['action', 'qr'] firmado por un admin/Génesis. Devuelve
-// el enlace del QR de check-in. El checkin_token debe estar como campo Hidden
-// en PocketBase: solo el servidor (credenciales admin) puede leerlo.
+// el enlace del QR de check-in.
+//
+// El código de check-in NO se guarda: es un HMAC de la clave del emisor y el id
+// del evento (checkinCode). El campo events.checkin_token se ignora porque la
+// API pública de PocketBase lo exponía (y esta versión no admite campos Hidden).
 //
 // Env: C2P_ISSUER_NSEC, PB_ADMIN_EMAIL, PB_ADMIN_PASSWORD.
 
 import {
-    withRelay, issueMerits, isHex64, verifyNip98, pbFetch, loadLedger, isGenesis, GOV_ADMIN_PUBKEYS
+    withRelay, issueMerits, isHex64, verifyNip98, pbFetch, loadLedger, isGenesis, GOV_ADMIN_PUBKEYS, checkinCode
 } from '../_lib/c2p-issuer.js';
 
 const ENDPOINT_PATH = '/api/merits/checkin';
@@ -48,10 +51,10 @@ async function handleQr(req, res, eventId) {
     let ev;
     try { ev = await pbFetch(`/api/collections/events/records/${eventId}`); }
     catch (e) { return res.status(404).json({ error: 'Evento no encontrado' }); }
-    if (!ev.checkin_token) return res.status(409).json({ error: 'El evento no tiene código de check-in configurado' });
+    const code = checkinCode(eventId);
     return res.status(200).json({
-        eventId, title: ev.title || '',
-        url: `${PUBLIC_ORIGIN}/?c2pcheckin=${eventId}:${encodeURIComponent(ev.checkin_token)}`
+        eventId, title: ev.title || '', code,
+        url: `${PUBLIC_ORIGIN}/?c2pcheckin=${eventId}:${code}`
     });
 }
 
@@ -101,11 +104,11 @@ export default async function handler(req, res) {
     }
 
     try {
-        // 1. Evento + token (el token solo es legible con credenciales admin)
+        // 1. Evento + código derivado (no se usa events.checkin_token: era público)
         let ev;
         try { ev = await pbFetch(`/api/collections/events/records/${eventId}`); }
         catch (e) { return res.status(404).json({ error: 'Evento no encontrado' }); }
-        if (!ev.checkin_token || token !== ev.checkin_token) return res.status(403).json({ error: 'Código del evento incorrecto' });
+        if (token !== checkinCode(eventId)) return res.status(403).json({ error: 'Código del evento incorrecto' });
 
         // 2. Check-in (idempotente). La ventana solo se exige para registros nuevos.
         const existingCheckin = await firstOrNull('event_checkins', `event_id = "${eventId}" && user_pubkey = "${pubkey}"`);
@@ -116,7 +119,7 @@ export default async function handler(req, res) {
                 method: 'POST',
                 body: JSON.stringify({
                     event_id: eventId, user_pubkey: pubkey, user_name: userName,
-                    checkin_token: token, check_method: 'qr', checked_in_at: new Date().toISOString()
+                    check_method: 'qr', checked_in_at: new Date().toISOString()
                 })
             });
         }

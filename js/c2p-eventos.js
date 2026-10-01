@@ -263,6 +263,7 @@ const C2P_Eventos = (function () {
         if (!ev) return;
 
         let qrContent = '';
+        let qrCode = '';
         try {
             const path = '/api/merits/checkin';
             const auth = await LBW_Nostr.nip98Auth(path, 'POST', { event: eventId, action: 'qr' });
@@ -274,6 +275,7 @@ const C2P_Eventos = (function () {
             const data = await res.json().catch(() => ({}));
             if (!res.ok) throw new Error(data.error || ('Error ' + res.status));
             qrContent = data.url;
+            qrCode = data.code || '';
         } catch (e) {
             showNotification('No se pudo obtener el QR: ' + e.message, 'error');
             return;
@@ -286,6 +288,8 @@ const C2P_Eventos = (function () {
                 <h2 style="color:var(--color-bitcoin);margin-bottom:0.3rem;">📲 QR Check-in</h2>
                 <p style="color:var(--color-text-secondary);font-size:0.82rem;margin-bottom:1rem;">${_esc(ev.title)}</p>
                 <div id="c2pQrCanvas" style="display:inline-block;padding:1rem;background:#fff;border-radius:12px;margin-bottom:1rem;"></div>
+                ${qrCode ? `<div style="font-size:0.75rem;color:var(--color-text-secondary);margin-bottom:0.2rem;">Código para escribir a mano</div>
+                <div style="font-family:var(--font-mono);font-size:1.35rem;font-weight:800;letter-spacing:0.12em;color:var(--color-bitcoin);margin-bottom:1rem;">${_esc(qrCode)}</div>` : ''}
                 <p style="font-size:0.72rem;color:var(--color-text-secondary);font-family:var(--font-mono);word-break:break-all;margin-bottom:1rem;">${_esc(qrContent)}</p>
                 <button id="c2pQrCopyBtn" class="btn btn-secondary" style="width:100%;">📋 Copiar URL</button>
             </div>`;

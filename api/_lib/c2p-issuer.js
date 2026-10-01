@@ -13,6 +13,7 @@
 // incluye subrutas como 'nostr-tools/relay' (Cannot find module .../lib/cjs/relay.js).
 import { finalizeEvent, getPublicKey, nip19, Relay, verifyEvent } from 'nostr-tools';
 import WebSocket from 'ws';
+import { createHmac } from 'crypto';
 
 // AbstractRelay usa el WebSocket global si no se le inyecta uno (Node < 22 no lo tiene)
 if (typeof globalThis.WebSocket === 'undefined') globalThis.WebSocket = WebSocket;
@@ -52,6 +53,19 @@ export function issuerKey() {
     const pk = getPublicKey(_sk);
     if (!TRUSTED_ISSUERS.some(i => i.pubkey === pk)) throw new Error('La clave configurada no corresponde a un emisor de confianza');
     return { sk: _sk, pk };
+}
+
+// ── Código de check-in de un evento ──────────────────────────
+// Derivado (HMAC) de la clave del emisor + id del evento: no se guarda en
+// ningún sitio, así que no se puede filtrar desde PocketBase. Solo el servidor
+// puede calcularlo. Cambiar 'v1' invalida todos los códigos.
+export function checkinCode(eventId) {
+    const { sk } = issuerKey();
+    return createHmac('sha256', Buffer.from(sk))
+        .update('c2p-checkin-v1:' + eventId)
+        .digest('base64url')
+        .replace(/[^A-Za-z0-9]/g, '')
+        .substring(0, 12);
 }
 
 // ── Relay ────────────────────────────────────────────────────
