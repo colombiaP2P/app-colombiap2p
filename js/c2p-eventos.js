@@ -168,6 +168,10 @@ const C2P_Eventos = (function () {
                 alreadyCheckedIn = existing.totalItems > 0;
             } catch (_) {}
         }
+        // Organizadores (admin/Génesis): botón para mostrar el QR de check-in
+        const canShowQR = !!(pubkey && typeof LBW_Governance !== 'undefined' && LBW_Governance.isGovAuthority
+            && LBW_Governance.isGovAuthority(pubkey));
+
         const modal = _getOrCreateModal('c2pEventDetailModal');
         modal.innerHTML = `
             <div class="modal-content" style="max-width:580px;padding:2rem;position:relative;">
@@ -189,6 +193,7 @@ const C2P_Eventos = (function () {
                     ${alreadyCheckedIn
                         ? `<div style="flex:1;padding:0.65rem;background:rgba(76,175,80,0.15);color:#4CAF50;border:1px solid #4CAF50;border-radius:10px;text-align:center;font-weight:700;font-size:0.9rem;">✅ Ya estás registrado</div>`
                         : open ? `<button onclick="document.getElementById('c2pEventDetailModal').remove(); C2P_Eventos.showCheckinModal('${_esc(ev.id)}')" style="flex:1;padding:0.65rem;background:var(--color-bitcoin);color:#0e0e0d;border:none;border-radius:10px;cursor:pointer;font-weight:700;font-size:0.9rem;">📲 Hacer Check-in</button>` : ''}
+                    ${canShowQR ? `<button onclick="C2P_Eventos.showQRModal('${_esc(ev.id)}')" style="flex:1;padding:0.65rem;background:transparent;color:var(--color-bitcoin);border:1px solid var(--color-bitcoin);border-radius:10px;cursor:pointer;font-weight:700;font-size:0.9rem;">🔳 Mostrar QR</button>` : ''}
                     <button onclick="document.getElementById('c2pEventDetailModal').remove()" class="btn btn-secondary" style="flex:1;">Cerrar</button>
                 </div>
             </div>`;
@@ -250,21 +255,29 @@ const C2P_Eventos = (function () {
     }
 
     // ── QR para organizadores ─────────────────────────────────
+    // [C2P] QR de check-in para organizadores. El checkin_token es un campo
+    // oculto en PocketBase: el enlace lo entrega el servidor solo a admins o
+    // Génesis (api/merits/checkin, acción 'qr', firmada con NIP-98).
     async function showQRModal(eventId) {
         const ev = _events.find(e => e.id === eventId);
         if (!ev) return;
 
-        // Fetched event record with checkin_token (requires admin auth in PocketBase)
-        let token = '';
+        let qrContent = '';
         try {
-            const full = await _getPB().collection('events').getOne(eventId);
-            token = full.checkin_token || '';
+            const path = '/api/merits/checkin';
+            const auth = await LBW_Nostr.nip98Auth(path, 'POST', { event: eventId, action: 'qr' });
+            const res = await fetch(path, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'Authorization': auth },
+                body: JSON.stringify({ action: 'qr', eventId })
+            });
+            const data = await res.json().catch(() => ({}));
+            if (!res.ok) throw new Error(data.error || ('Error ' + res.status));
+            qrContent = data.url;
         } catch (e) {
-            showNotification('Sin acceso al token del evento. ¿Eres administrador?', 'error');
+            showNotification('No se pudo obtener el QR: ' + e.message, 'error');
             return;
         }
-
-        const qrContent = `https://colombiap2p.com/?c2pcheckin=${eventId}:${token}`;
 
         const modal = _getOrCreateModal('c2pQRModal');
         modal.innerHTML = `
@@ -274,10 +287,12 @@ const C2P_Eventos = (function () {
                 <p style="color:var(--color-text-secondary);font-size:0.82rem;margin-bottom:1rem;">${_esc(ev.title)}</p>
                 <div id="c2pQrCanvas" style="display:inline-block;padding:1rem;background:#fff;border-radius:12px;margin-bottom:1rem;"></div>
                 <p style="font-size:0.72rem;color:var(--color-text-secondary);font-family:var(--font-mono);word-break:break-all;margin-bottom:1rem;">${_esc(qrContent)}</p>
-                <button onclick="navigator.clipboard.writeText('${_esc(qrContent)}').then(()=>showNotification('URL copiada','success'))"
-                    class="btn btn-secondary" style="width:100%;">📋 Copiar URL</button>
+                <button id="c2pQrCopyBtn" class="btn btn-secondary" style="width:100%;">📋 Copiar URL</button>
             </div>`;
         document.body.appendChild(modal);
+        document.getElementById('c2pQrCopyBtn')?.addEventListener('click', () => {
+            navigator.clipboard.writeText(qrContent).then(() => showNotification('URL copiada', 'success'));
+        });
 
         // Render QR
         if (typeof QRCode !== 'undefined') {

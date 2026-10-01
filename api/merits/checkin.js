@@ -15,15 +15,45 @@
 //      d merit:referido:<referido>:<referidor16>
 // Idempotente: repetir la petición no duplica registros ni méritos.
 //
+// Acción 'qr' (organizadores): Body { action: 'qr', eventId }, NIP-98 con tags
+// ['event', eventId] y ['action', 'qr'] firmado por un admin/Génesis. Devuelve
+// el enlace del QR de check-in. El checkin_token debe estar como campo Hidden
+// en PocketBase: solo el servidor (credenciales admin) puede leerlo.
+//
 // Env: C2P_ISSUER_NSEC, PB_ADMIN_EMAIL, PB_ADMIN_PASSWORD.
 
-import { withRelay, issueMerits, isHex64, verifyNip98, pbFetch } from '../_lib/c2p-issuer.js';
+import {
+    withRelay, issueMerits, isHex64, verifyNip98, pbFetch, loadLedger, isGenesis, GOV_ADMIN_PUBKEYS
+} from '../_lib/c2p-issuer.js';
 
 const ENDPOINT_PATH = '/api/merits/checkin';
 const REFERRAL_REWARD = 50;   // XP_REFERRAL_REWARD de js/c2p-rachas.js
 const ID_RE = /^[a-z0-9]{15}$/;   // ids de registros PocketBase
 
 const q = s => encodeURIComponent(s);
+const PUBLIC_ORIGIN = 'https://colombiap2p.com';
+
+// QR de check-in para organizadores (admin/Génesis)
+async function handleQr(req, res, eventId) {
+    let pubkey;
+    try {
+        pubkey = verifyNip98(req, { path: ENDPOINT_PATH, bind: { event: eventId, action: 'qr' } });
+    } catch (e) {
+        return res.status(401).json({ error: e.message });
+    }
+    if (!GOV_ADMIN_PUBKEYS.includes(pubkey)) {
+        const ledger = await withRelay(relay => loadLedger(relay));
+        if (!isGenesis(ledger, pubkey)) return res.status(403).json({ error: 'Solo admins o Génesis pueden mostrar el QR del evento' });
+    }
+    let ev;
+    try { ev = await pbFetch(`/api/collections/events/records/${eventId}`); }
+    catch (e) { return res.status(404).json({ error: 'Evento no encontrado' }); }
+    if (!ev.checkin_token) return res.status(409).json({ error: 'El evento no tiene código de check-in configurado' });
+    return res.status(200).json({
+        eventId, title: ev.title || '',
+        url: `${PUBLIC_ORIGIN}/?c2pcheckin=${eventId}:${encodeURIComponent(ev.checkin_token)}`
+    });
+}
 
 function checkinOpen(ev) {
     const now = Date.now();
@@ -52,6 +82,15 @@ export default async function handler(req, res) {
     const token = String(req.body?.token || '').trim();
     const userName = String(req.body?.userName || '').substring(0, 80);
     if (!ID_RE.test(eventId)) return res.status(400).json({ error: 'eventId inválido' });
+
+    if (req.body?.action === 'qr') {
+        try { return await handleQr(req, res, eventId); }
+        catch (err) {
+            console.error('[merits/checkin qr]', err);
+            return res.status(500).json({ error: 'Error obteniendo el QR: ' + err.message });
+        }
+    }
+
     if (!token) return res.status(400).json({ error: 'Falta el código del evento' });
 
     let pubkey;
