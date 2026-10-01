@@ -163,13 +163,8 @@ const LBW_Nostr = (() => {
         EVENT_KINDS.MARKETPLACE,        // 30402 — Marketplace (visibilidad)
         EVENT_KINDS.STALL,              // 30017 — NIP-15 Tiendas
         EVENT_KINDS.PRODUCT,            // 30018 — NIP-15 Productos
-        EVENT_KINDS.REVIEW,             // 1985  — NIP-85 Reviews (públicas)
-        // NIP-72 communities: público explícito. Una propuesta admitida
-        // se "expone" como community en relays públicos para que clientes
-        // externos (Coracle, Habla, satellite) puedan descubrir el debate.
-        // Si el autor activa Privacy Strict, el kind:34550 se queda en
-        // privados — decisión consciente del usuario, no del sistema.
-        EVENT_KINDS.COMMUNITY          // 34550 — NIP-72 community per PRP
+        EVENT_KINDS.REVIEW              // 1985  — NIP-85 Reviews (públicas)
+        // [C2P] NIP-72 (kind 34550) ya NO es público: ver OWN_RELAY_KINDS.
     ]);
 
     // Kinds que viven SOLO en el relay propio: gobernanza + méritos.
@@ -182,7 +177,12 @@ const LBW_Nostr = (() => {
         EVENT_KINDS.LBW_SNAPSHOT,       // 31005
         EVENT_KINDS.LBW_RESULT,         // 31010
         EVENT_KINDS.LBW_EXECUTION,      // 31011
-        EVENT_KINDS.LBW_EXEC_VERIFY     // 31012
+        EVENT_KINDS.LBW_EXEC_VERIFY,    // 31012
+        // [C2P] Decisión 2026-10-01: la gobernanza es interna. Las comunidades
+        // NIP-72 (paraguas y debate por PRP) no salen a relays públicos. Para
+        // hacerla descubrible en Nostr, mover COMMUNITY a PUBLIC_KINDS y
+        // activar UMBRELLA_PUBLISH_ENABLED en js/governance.js.
+        EVENT_KINDS.COMMUNITY           // 34550
     ]);
 
     function _getRelaysForKind(kind) {

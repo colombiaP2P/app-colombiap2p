@@ -217,8 +217,17 @@ function updateGovStats() {
 // Visible solo a Génesis. Muestra estado actual (creator, nº moderadores,
 // fecha) y un botón para publicar/re-publicar. Se llama desde
 // displayProposals para refrescar tras cualquier cambio.
+// [C2P] Decisión 2026-10-01: no publicar todavía la comunidad paraguas NIP-72
+// (la gobernanza es interna). Poner en true para volver a mostrar el panel
+// "Publicar paraguas" (y mover COMMUNITY a PUBLIC_KINDS en js/nostr.js).
+const UMBRELLA_PUBLISH_ENABLED = false;
+
 function _refreshUmbrellaPanel() {
     if (typeof LBW_Governance === 'undefined') return;
+    if (!UMBRELLA_PUBLISH_ENABLED) {
+        document.getElementById('umbrellaAdminPanel')?.remove();
+        return;
+    }
     const myPubkey = (typeof LBW_Nostr !== 'undefined' && LBW_Nostr.isLoggedIn()) ? LBW_Nostr.getPubkey() : null;
     const iAmGenesis = myPubkey ? LBW_Governance.isGenesis(myPubkey) : false;
     if (!iAmGenesis) {

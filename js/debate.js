@@ -74,6 +74,7 @@ window.LBW_Debate = {
 
         var filter = { kinds: [1], '#t': [self._tag(proposalDTag)], limit: 200 };
 
+        // [C2P] Debate interno: solo relay propio (gobernanza no sale a públicos)
         var sub = window.LBW_Nostr.subscribe(
             [filter],
             function(event) {
@@ -88,7 +89,8 @@ window.LBW_Debate = {
             function() {
                 var cbs = self._callbacks[proposalDTag] || [];
                 for (var i = 0; i < cbs.length; i++) cbs[i](null, 'eose');
-            }
+            },
+            window.LBW_Nostr.GOVERNANCE_RELAYS
         );
 
         self._subscriptions[proposalDTag] = sub;
@@ -136,7 +138,9 @@ window.LBW_Debate = {
         if (replyToEventId) {
             tags.push(['e', replyToEventId, '', 'reply']);
         }
-        await window.LBW_Nostr.publishEvent({ kind: window.LBW_Nostr.EVENT_KINDS.TEXT_NOTE, content: content.trim(), tags: tags });
+        // [C2P] Debate interno: el mensaje (kind 1) se publica solo en el relay propio
+        await window.LBW_Nostr.publishEvent({ kind: window.LBW_Nostr.EVENT_KINDS.TEXT_NOTE, content: content.trim(), tags: tags },
+            window.LBW_Nostr.GOVERNANCE_RELAYS);
     },
 
     getMessages: function(proposalDTag) {
