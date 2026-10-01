@@ -12,7 +12,8 @@
 //   deliver — solo quien la reclamó; pasa a 'pending_review'
 //   approve — Génesis/admin. pending_approval → open. pending_review →
 //             completed + mérito al ejecutor (d merit:mision:<id>:<pk16>).
-//             Un Génesis no admin no aprueba la entrega de su propia misión.
+//             Quien entregó nunca aprueba su propia entrega; un Génesis no
+//             admin tampoco aprueba la entrega de una misión que creó.
 //   cancel  — Génesis/admin
 //
 // Antes todo esto lo escribía la app en PocketBase (regla de Update abierta,
@@ -150,6 +151,9 @@ export default async function handler(req, res) {
 
             if (mission.status !== 'pending_review' && mission.status !== 'completed') {
                 return res.status(409).json({ error: 'Esta misión no se puede aprobar en su estado actual.' });
+            }
+            if (mission.claimed_by_pubkey === pubkey) {
+                return res.status(403).json({ error: 'No puedes aprobar tu propia entrega: debe hacerlo otro Génesis o admin.' });
             }
             if (mission.creator_pubkey === pubkey && !isAdmin) {
                 return res.status(403).json({ error: 'Un Génesis no puede aprobar sus propias misiones.' });

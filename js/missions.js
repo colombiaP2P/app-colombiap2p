@@ -253,7 +253,10 @@ const LBW_Missions = (function () {
 
         const canClaim = m.status === 'open' && !isCreator && !isMine;
         const canDeliver = m.status === 'claimed' && isMine;
-        const canApprove = isGov && (m.status === 'pending_approval' || m.status === 'pending_review') && !isCreator;
+        // Mismas reglas que api/merits/mission.js: quien entregó nunca aprueba su
+        // propia entrega; el creador solo puede aprobarla si es admin.
+        const canApprove = isGov && (m.status === 'pending_approval' || m.status === 'pending_review')
+            && !isMine && (!isCreator || _isAdmin());
         const canCancel = isGov && (m.status === 'open' || m.status === 'claimed');
 
         return `
