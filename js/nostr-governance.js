@@ -1206,6 +1206,17 @@ const LBW_Governance = (() => {
                     _scheduleResultCalc(dTag);
                 }
             });
+            // [C2P Fase 2] Pedir méritos también para resultados ya en caché:
+            // el relay los reenvía pero se descartan como "ya conocidos" antes
+            // de llegar a la petición. El endpoint es idempotente y la petición
+            // está limitada a una cada 6 h por propuesta.
+            const nowSecs = Date.now() / 1000;
+            _results.forEach((r, dTag) => {
+                if (!_proposals.has(dTag)) return;
+                if (r.calculated_at && nowSecs - r.calculated_at < GOV_MERITS_MAX_AGE_SECS) {
+                    _requestGovernanceMerits(dTag);
+                }
+            });
         }, 2500);
 
         return _sub;
