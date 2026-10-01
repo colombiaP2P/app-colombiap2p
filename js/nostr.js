@@ -523,7 +523,8 @@ const LBW_Nostr = (() => {
     let _useExtension = false;     // NIP-07 mode
     let _useRemoteSigner = false;  // NIP-46 mode (bunker remoto)
     let _profile = {};             // kind 0 metadata
-    let _seenEvents = new Set();   // dedup
+    let _seenEvents = new Set();   // eventos ya validados (caché de verificación)
+    let _invalidEvents = new Set(); // eventos rechazados por validación
     let _activeSubs = [];          // track for cleanup
     let _onRelayStatus = null;
     let _relayStatusMap = {};      // url -> status
@@ -982,7 +983,7 @@ const LBW_Nostr = (() => {
     // del relay como "auth-required") pero NO la reabre: quedaba muerta en
     // silencio y la app dejaba de recibir propuestas y méritos. Ahora, si se
     // cierra sin que la hayamos cerrado nosotros, se reabre con backoff.
-    // Lo ya recibido lo descarta el dedup global (_seenEvents).
+    // Al reabrir no se re-entrega lo ya recibido: cada handle guarda su propio 'seen'.
     const SUB_REOPEN_MAX_RETRIES = 20;
 
     // [C2P] Limitador por relay. nostr-rs-relay admite 32 subs concurrentes
@@ -1061,6 +1062,7 @@ const LBW_Nostr = (() => {
             inner: null,
             held: null,
             retries: 0,
+            seen: new Set(),
             close() {
                 this.closed = true;
                 try { if (this.inner) this.inner.close(); } catch (e) {}
@@ -1090,24 +1092,36 @@ const LBW_Nostr = (() => {
                 filterArr,
                 {
                     onevent: (event) => {
-                        // Dedup
-                        if (_seenEvents.has(event.id)) return;
-                        _seenEvents.add(event.id);
-                        if (_seenEvents.size > 10000) {
-                            const arr = [..._seenEvents];
-                            _seenEvents = new Set(arr.slice(-5000));
-                        }
+                        // [C2P] Dedup POR SUSCRIPCIÓN. Antes el dedup era global:
+                        // si otra sub ya había recibido el evento (p.ej. el aviso
+                        // de pago recibía el recibo del zap), esta sub nunca lo
+                        // veía (Tesorería sin zap, reseñas repetidas vacías…).
+                        if (handle.seen.has(event.id)) return;
+                        handle.seen.add(event.id);
+                        if (handle.seen.size > 5000) handle.seen = new Set([...handle.seen].slice(-2500));
 
-                        // VALIDATE + VERIFY
-                        if (!_validateIncomingEvent(event, 'pool')) return;
+                        // Validar/verificar una sola vez por evento (caché global)
+                        const firstTime = !_seenEvents.has(event.id);
+                        if (firstTime) {
+                            if (_invalidEvents.has(event.id)) return;
+                            if (!_validateIncomingEvent(event, 'pool')) {
+                                _invalidEvents.add(event.id);
+                                if (_invalidEvents.size > 5000) _invalidEvents = new Set([..._invalidEvents].slice(-2500));
+                                return;
+                            }
+                            _seenEvents.add(event.id);
+                            if (_seenEvents.size > 10000) {
+                                const arr = [..._seenEvents];
+                                _seenEvents = new Set(arr.slice(-5000));
+                            }
+                        }
 
                         // Deliver
                         if (onEvent) onEvent(event, 'pool');
 
-                        // Kind callbacks
+                        // Callbacks por kind y difusión global: solo la primera vez
+                        if (!firstTime) return;
                         (_eventCallbacks[event.kind] || []).forEach(cb => cb(event, 'pool'));
-
-                        // Global dispatch
                         window.dispatchEvent(new CustomEvent('nostr-event', {
                             detail: { event, relay: 'pool' }
                         }));
@@ -1427,7 +1441,7 @@ const LBW_Nostr = (() => {
         disconnectAll();
         _privkey = null; _pubkey = null; _npub = null; _nsec = null;
         _useExtension = false; _useRemoteSigner = false; _profile = {};
-        _seenEvents.clear(); _eventCallbacks = {};
+        _seenEvents.clear(); _invalidEvents.clear(); _eventCallbacks = {};
         // NIP-65 state
         _userReadRelays = []; _userWriteRelays = [];
         _userRelayListLoaded = false;

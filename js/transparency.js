@@ -536,14 +536,16 @@ const LBW_Transparency = (() => {
                     if (zaps.length > 0) {
                         data.movements = _matchMovementsWithZaps(data.movements, zaps);
                         data.zapsFound = zaps.length;
-                        // [C2P Fase 2] Méritos por zap: los emite el servidor (verificable)
-                        _autoIssueZapMerits(data.movements);
                         console.log('[C2P Zaps] movimientos con zap emparejado:', data.movements.filter(m => m.zap).length);
                     }
                 }
             } catch (e) {
                 console.warn('[Transparency] zaps fetch fallo:', e && e.message);
             }
+            // [C2P Fase 2] Méritos económicos: el servidor decide si cada entrada
+            // es un zap verificable (y los emite) o necesita que un admin indique
+            // el donante. No depende del emparejamiento del cliente.
+            if (Array.isArray(data.movements)) _autoIssueZapMerits(data.movements);
             _walletData = data;
             _walletDataAt = Date.now();
             _walletError = data && data.error ? data : null;
@@ -886,7 +888,7 @@ const LBW_Transparency = (() => {
                                             const canIssue = isIn && Math.round((m.amount || 0) * 0.01) >= 1 && !!m.payment_hash;
                                             const adminBtn = !canIssue ? '' : alreadyAwarded
                                                 ? `<span style="font-size:0.65rem;color:#51cf66;background:rgba(81,207,102,0.1);padding:0.15rem 0.45rem;border-radius:6px;border:1px solid rgba(81,207,102,0.3);display:inline-block;margin-top:0.2rem;">✅ Méritos emitidos</span>`
-                                                : m.zap
+                                                : !_econNeedsRecipient(m.payment_hash)
                                                     ? `<span style="font-size:0.65rem;color:var(--color-text-secondary);display:inline-block;margin-top:0.2rem;">⏳ Méritos en proceso</span>`
                                                     : _isAdminWallet
                                                         ? `<button onclick="LBW_Transparency.awardMeritsForZap('${_esc(m.payment_hash)}',${m.amount||0})" style="font-size:0.68rem;padding:0.2rem 0.55rem;background:rgba(206,147,216,0.12);border:1px solid rgba(206,147,216,0.4);border-radius:6px;color:#CE93D8;cursor:pointer;font-weight:700;white-space:nowrap;margin-top:0.2rem;">🏅 Atribuir donante</button>`
@@ -1158,9 +1160,32 @@ const LBW_Transparency = (() => {
     const ECON_ENDPOINT = '/api/merits/economic';
     const ECON_REQ_KEY = 'c2p_econ_merits_req';
     const ECON_RETRY_MS = 6 * 3600 * 1000;
+    const ECON_NEEDS_KEY = 'c2p_econ_needs_recipient';   // pagos sin zap verificable
+
+    const ECON_DONE_KEY = 'c2p_econ_done';   // pagos ya acreditados por el flujo anterior
+    function _econDone(hash) {
+        try { return JSON.parse(localStorage.getItem(ECON_DONE_KEY) || '[]').includes(hash); } catch (e) { return false; }
+    }
+    function _markEconDone(hash) {
+        try {
+            const list = JSON.parse(localStorage.getItem(ECON_DONE_KEY) || '[]');
+            if (!list.includes(hash)) { list.push(hash); localStorage.setItem(ECON_DONE_KEY, JSON.stringify(list.slice(-500))); }
+        } catch (e) {}
+    }
+
+    function _econNeedsRecipient(hash) {
+        try { return JSON.parse(localStorage.getItem(ECON_NEEDS_KEY) || '[]').includes(hash); } catch (e) { return false; }
+    }
+    function _markEconNeedsRecipient(hash) {
+        try {
+            const list = JSON.parse(localStorage.getItem(ECON_NEEDS_KEY) || '[]');
+            if (!list.includes(hash)) { list.push(hash); localStorage.setItem(ECON_NEEDS_KEY, JSON.stringify(list.slice(-500))); }
+        } catch (e) {}
+    }
 
     function _isEconMeritIssued(m) {
         if (!m || !m.payment_hash || typeof LBW_Merits === 'undefined' || !LBW_Merits.getAllMerits) return false;
+        if (_econDone(m.payment_hash)) return true;
         const d = `merit:zap:${m.payment_hash}`;
         try { return LBW_Merits.getAllMerits().some(x => x.dTag === d); } catch (e) { return false; }
     }
@@ -1182,11 +1207,13 @@ const LBW_Transparency = (() => {
             let log = {};
             try { log = JSON.parse(localStorage.getItem(ECON_REQ_KEY) || '{}'); } catch (e) {}
             const pending = movements.filter(m =>
-                m.type === 'in' && m.zap && m.payment_hash &&
+                m.type === 'in' && m.payment_hash &&
                 Math.round((m.amount || 0) * 0.01) >= 1 &&
                 !_isEconMeritIssued(m) &&
+                !_econNeedsRecipient(m.payment_hash) &&
                 Date.now() - (log[m.payment_hash] || 0) > ECON_RETRY_MS
             ).slice(0, 5);
+            let anyNeeds = false;
             let anyIssued = false;
             for (const m of pending) {
                 log[m.payment_hash] = Date.now();
@@ -1194,17 +1221,24 @@ const LBW_Transparency = (() => {
                 try {
                     const r = await _postEconMerit({ paymentHash: m.payment_hash });
                     if ((r.issued || []).length > 0) anyIssued = true;
+                    else if ((r.skipped || []).some(x => /ya emitido/.test(x.reason || ''))) { _markEconDone(m.payment_hash); anyIssued = true; }
                     const me = (typeof LBW_Nostr !== 'undefined' && LBW_Nostr.isLoggedIn()) ? LBW_Nostr.getPubkey() : null;
                     if (me && r.recipient === me && (r.issued || []).length > 0) {
                         showNotification(`🏅 +${r.merits} méritos por tu aportación de ${r.sats} sats`, 'success');
                     }
                 } catch (err) {
+                    if (err.data && err.data.needsRecipient) {
+                        // Sin zap verificable: queda para que un admin indique el donante
+                        _markEconNeedsRecipient(m.payment_hash);
+                        anyNeeds = true;
+                        continue;
+                    }
                     console.warn('[Treasury] Méritos por zap no emitidos:', m.payment_hash.substring(0, 12), err.message);
                     delete log[m.payment_hash];
                     try { localStorage.setItem(ECON_REQ_KEY, JSON.stringify(log)); } catch (e) {}
                 }
             }
-            if (anyIssued) setTimeout(() => { try { renderWalletPanel(); } catch (e) {} }, 2500);
+            if (anyIssued || anyNeeds) setTimeout(() => { try { renderWalletPanel(); } catch (e) {} }, 2500);
         } finally {
             _autoIssuing = false;
         }
