@@ -11,7 +11,7 @@
 
 // Todo desde la entrada principal de nostr-tools: el empaquetado de Vercel no
 // incluye subrutas como 'nostr-tools/relay' (Cannot find module .../lib/cjs/relay.js).
-import { finalizeEvent, getPublicKey, nip19, Relay } from 'nostr-tools';
+import { finalizeEvent, getPublicKey, nip19, Relay, verifyEvent } from 'nostr-tools';
 import WebSocket from 'ws';
 
 // AbstractRelay usa el WebSocket global si no se le inyecta uno (Node < 22 no lo tiene)
@@ -84,6 +84,100 @@ export function query(relay, filters, timeoutMs = 7000) {
 
 const tag = (ev, name) => (ev.tags.find(t => t[0] === name) || [])[1] || '';
 
+// Consulta puntual en varios relays (los que fallen o tarden se ignoran).
+export async function queryRelays(urls, filters, timeoutMs = 6000) {
+    const results = await Promise.allSettled(urls.map(async url => {
+        const relay = await Promise.race([
+            Relay.connect(url),
+            new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), timeoutMs))
+        ]);
+        try { return await query(relay, filters, timeoutMs); }
+        finally { try { relay.close(); } catch (e) {} }
+    }));
+    const byId = new Map();
+    results.forEach(r => { if (r.status === 'fulfilled') r.value.forEach(ev => byId.set(ev.id, ev)); });
+    return [...byId.values()];
+}
+
+// ── NIP-98: autenticación HTTP con un evento Nostr firmado ───
+// Header: Authorization: Nostr <base64(evento kind:27235)>
+// Comprueba firma, kind, antigüedad (±60 s), ruta, método y, opcionalmente,
+// tags extra que atan la autorización al contenido de la petición.
+export function verifyNip98(req, { path, method = 'POST', bind = {} }) {
+    const header = req.headers?.authorization || req.headers?.Authorization || '';
+    if (!header.startsWith('Nostr ')) throw new Error('Falta autenticación Nostr (NIP-98)');
+    let ev;
+    try { ev = JSON.parse(Buffer.from(header.slice(6).trim(), 'base64').toString('utf8')); }
+    catch (e) { throw new Error('Autenticación NIP-98 ilegible'); }
+    if (!ev || ev.kind !== 27235 || !verifyEvent(ev)) throw new Error('Autenticación NIP-98 inválida');
+    if (Math.abs(Math.floor(Date.now() / 1000) - ev.created_at) > 60) throw new Error('Autenticación NIP-98 caducada');
+    let u;
+    try { u = new URL(tag(ev, 'u')); } catch (e) { throw new Error('NIP-98: URL inválida'); }
+    if (u.pathname !== path) throw new Error('NIP-98: la URL no corresponde a este endpoint');
+    if (tag(ev, 'method').toUpperCase() !== method) throw new Error('NIP-98: método no corresponde');
+    for (const [k, v] of Object.entries(bind)) {
+        if (tag(ev, k) !== String(v)) throw new Error(`NIP-98: '${k}' no coincide con la petición`);
+    }
+    return ev.pubkey;
+}
+
+// ── LNbits (solo lectura) ────────────────────────────────────
+// Devuelve { paymentHash, bolt11, sats, incoming, paid, timeMs, memo } o null.
+export async function getLnbitsPayment(paymentHash) {
+    const url = (process.env.LNBITS_URL || '').replace(/\/+$/, '');
+    const key = process.env.LNBITS_READ_KEY || '';
+    if (!url || !key) throw new Error('LNBITS_URL / LNBITS_READ_KEY no configurados');
+    const headers = { 'X-Api-Key': key, 'Accept': 'application/json' };
+
+    // Lista reciente filtrada por hash (formato estable entre versiones de LNbits)
+    const res = await fetch(`${url}/api/v1/payments?limit=500`, { headers, signal: AbortSignal.timeout(8000) });
+    if (!res.ok) throw new Error('LNbits respondió HTTP ' + res.status);
+    const raw = await res.json();
+    const list = Array.isArray(raw) ? raw : (Array.isArray(raw?.data) ? raw.data : []);
+    const p = list.find(x => x.payment_hash === paymentHash || x.checking_id === paymentHash);
+    if (!p) return null;
+    // p.time puede ser ISO string o segundos Unix según la versión
+    const timeMs = p.time
+        ? (typeof p.time === 'string' ? new Date(p.time).getTime() : p.time * 1000)
+        : (p.created_at ? new Date(p.created_at).getTime() : 0);
+    return {
+        paymentHash: p.payment_hash || paymentHash,
+        bolt11: p.bolt11 || '',
+        sats: Math.floor(Math.abs(p.amount || 0) / 1000),
+        incoming: (p.amount || 0) > 0,
+        paid: p.pending === false || p.status === 'success' || p.paid === true,
+        timeMs,
+        memo: p.memo || ''
+    };
+}
+
+// ── PocketBase (admin) ───────────────────────────────────────
+const PB_URL = process.env.PB_URL || 'https://api.colombiap2p.com';
+let _pbToken = null;
+let _pbTokenAt = 0;
+export async function pbFetch(path, opts = {}) {
+    if (!_pbToken || Date.now() - _pbTokenAt > 50 * 60 * 1000) {
+        const email = process.env.PB_ADMIN_EMAIL;
+        const password = process.env.PB_ADMIN_PASSWORD;
+        if (!email || !password) throw new Error('PB_ADMIN_EMAIL / PB_ADMIN_PASSWORD no configurados');
+        const r = await fetch(`${PB_URL}/api/admins/auth-with-password`, {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ identity: email, password }), signal: AbortSignal.timeout(8000)
+        });
+        if (!r.ok) throw new Error('Auth PocketBase admin falló: HTTP ' + r.status);
+        _pbToken = (await r.json()).token;
+        _pbTokenAt = Date.now();
+    }
+    const res = await fetch(`${PB_URL}${path}`, {
+        ...opts,
+        headers: { 'Content-Type': 'application/json', 'Authorization': _pbToken, ...(opts.headers || {}) },
+        signal: AbortSignal.timeout(8000)
+    });
+    const body = await res.json().catch(() => ({}));
+    if (!res.ok) throw Object.assign(new Error(body.message || 'PocketBase error'), { status: res.status });
+    return body;
+}
+
 // ── Libro de méritos ─────────────────────────────────────────
 // Devuelve Map(pubkey → { total, byCategory }) con la regla de confianza de la app.
 export async function loadLedger(relay) {
@@ -155,14 +249,15 @@ export function isGenesis(ledger, pubkey) {
 // Mismo formato de d que js/nostr-merits.js → _makeDTag('merit', recipient, ref)
 export const meritDTag = (recipient, ref) => `merit:${ref}:${recipient.substring(0, 16)}`;
 
-export function buildMerit({ recipient, amount, category, reason, ref }, issuerPk) {
+// d: opcional, identificador fijo (p.ej. por pago) en vez de ref+destinatario
+export function buildMerit({ recipient, amount, category, reason, ref, d }, issuerPk) {
     const now = Math.floor(Date.now() / 1000);
     return {
         kind: 31002,
         created_at: now,
         content: JSON.stringify({ reason, amount, awardedBy: issuerPk, timestamp: now }),
         tags: [
-            ['d', meritDTag(recipient, ref)],
+            ['d', d || meritDTag(recipient, ref)],
             ['p', recipient],
             ['amount', String(amount)],
             ['category', category],
@@ -178,19 +273,20 @@ export function buildMerit({ recipient, amount, category, reason, ref }, issuerP
 }
 
 // Emite los méritos que el emisor aún no haya emitido (idempotente por d).
-// awards: [{ recipient, amount, category, reason, ref }]
+// awards: [{ recipient, amount, category, reason, ref, d? }]
 export async function issueMerits(relay, awards) {
     const { sk, pk } = issuerKey();
     if (awards.length === 0) return { issued: [], skipped: [] };
 
-    const ds = awards.map(a => meritDTag(a.recipient, a.ref));
+    const dOf = a => a.d || meritDTag(a.recipient, a.ref);
+    const ds = awards.map(dOf);
     const existing = await query(relay, { kinds: [31002], authors: [pk], '#d': ds, limit: ds.length });
     const have = new Set(existing.map(ev => tag(ev, 'd')));
 
     const issued = [];
     const skipped = [];
     for (const a of awards) {
-        const d = meritDTag(a.recipient, a.ref);
+        const d = dOf(a);
         if (have.has(d)) { skipped.push({ ref: a.ref, recipient: a.recipient, reason: 'ya emitido' }); continue; }
         const ev = finalizeEvent(buildMerit(a, pk), sk);
         // C2P_DRY_RUN=1: calcular y firmar sin publicar (pruebas)

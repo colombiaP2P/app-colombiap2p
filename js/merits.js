@@ -871,19 +871,15 @@ async function submitContribution(event) {
                 amount: value,
                 currency: document.getElementById('contrib_currency')?.value || 'EUR',
                 evidence: evidence ? [evidence, `payMethod:${payMethod}`] : [`payMethod:${payMethod}`],
-                status: isAutoVerifiable ? 'verified' : 'pending_verification'
+                // [C2P Fase 2] Nunca auto-verificada: antes se emitían méritos a uno
+                // mismo con awardMerit (válidos si el usuario es Génesis/admin).
+                status: 'pending_verification'
             });
 
             if (isAutoVerifiable) {
-                // Step 2a: Auto-verify (crypto payment)
-                // In production this would check the blockchain/Lightning.
-                // For now, auto-award merits since TX is verifiable.
-                const pubkey = LBW_Nostr.getPubkey();
-                await LBW_Merits.awardMerit(
-                    pubkey, value, category,
-                    `Auto-verificado: ${payMethod === 'lightning' ? '⚡ Lightning' : '⛓️ Bitcoin on-chain'}`
-                );
-                showNotification('✅ Pago verificado automáticamente. Méritos emitidos.', 'success');
+                // Los zaps a la tesorería los verifica y acredita el Emisor
+                // (api/merits/economic); el resto lo verifica un Génesis.
+                showNotification('📨 Aportación registrada. Si pagaste con zap a la tesorería, los méritos se acreditan automáticamente; si no, un Génesis la verificará.', 'success');
             } else {
                 // Step 2b: Pending Génesis verification
                 showNotification('📨 Aportación registrada. Pendiente de verificación por Génesis.', 'success');
@@ -965,8 +961,10 @@ async function verifyDeposit(contribId) {
             return;
         }
 
+        // Puntos ya ponderados (amount × peso de la categoría, p.ej. ×0.01 en económica)
+        const points = contrib.meritPoints > 0 ? contrib.meritPoints : Math.round((contrib.amount || 0) * (contrib.weight || 1));
         await LBW_Merits.awardMerit(
-            contrib.pubkey, contrib.amount, contrib.category,
+            contrib.pubkey, points, contrib.category,
             '👑 Verificado por Génesis',
             `contrib:${contrib.id}`
         );

@@ -536,6 +536,8 @@ const LBW_Transparency = (() => {
                     if (zaps.length > 0) {
                         data.movements = _matchMovementsWithZaps(data.movements, zaps);
                         data.zapsFound = zaps.length;
+                        // [C2P Fase 2] Méritos por zap: los emite el servidor (verificable)
+                        _autoIssueZapMerits(data.movements);
                         console.log('[C2P Zaps] movimientos con zap emparejado:', data.movements.filter(m => m.zap).length);
                     }
                 }
@@ -870,7 +872,7 @@ const LBW_Transparency = (() => {
                                             const zapKey = m.zap
                                                 ? `${(m.zap.senderPubkey||'').substring(0,16)}_${m.zap.sats||0}_${m.ts||0}`
                                                 : `manual_${payKey}`;
-                                            const alreadyAwarded = _awardedZaps.includes(zapKey);
+                                            const alreadyAwarded = _isEconMeritIssued(m) || _awardedZaps.includes(zapKey);
                                             const memoHtml = m.memo ? `<span style="font-style:italic;">"${_sanitizeMemo(m.memo)}"</span>` : '<span style="opacity:0.4;">—</span>';
                                             const zapBadge = m.zap ? `
                                                 <div style="display:flex;align-items:center;gap:0.35rem;flex-wrap:wrap;margin-bottom:0.2rem;">
@@ -879,10 +881,16 @@ const LBW_Transparency = (() => {
                                                 </div>
                                                 ${m.zap.senderMessage ? `<div style="font-style:italic;color:var(--color-text-secondary);margin-bottom:0.2rem;">"${_sanitizeMemo(m.zap.senderMessage)}"</div>` : ''}
                                             ` : memoHtml;
-                                            const adminBtn = _isAdminWallet && isIn ? (alreadyAwarded
+                                            // [C2P Fase 2] Zaps: emisión automática por el servidor.
+                                            // Sin zap: un admin atribuye el donante (NIP-98).
+                                            const canIssue = isIn && Math.round((m.amount || 0) * 0.01) >= 1 && !!m.payment_hash;
+                                            const adminBtn = !canIssue ? '' : alreadyAwarded
                                                 ? `<span style="font-size:0.65rem;color:#51cf66;background:rgba(81,207,102,0.1);padding:0.15rem 0.45rem;border-radius:6px;border:1px solid rgba(81,207,102,0.3);display:inline-block;margin-top:0.2rem;">✅ Méritos emitidos</span>`
-                                                : `<button onclick="LBW_Transparency.awardMeritsForZap('${m.zap ? _esc(m.zap.senderPubkey) : ''}',${m.amount||0},${m.ts||0},'${_esc(payKey)}')" style="font-size:0.68rem;padding:0.2rem 0.55rem;background:rgba(206,147,216,0.12);border:1px solid rgba(206,147,216,0.4);border-radius:6px;color:#CE93D8;cursor:pointer;font-weight:700;white-space:nowrap;margin-top:0.2rem;">🏅 Emitir méritos</button>`
-                                            ) : '';
+                                                : m.zap
+                                                    ? `<span style="font-size:0.65rem;color:var(--color-text-secondary);display:inline-block;margin-top:0.2rem;">⏳ Méritos en proceso</span>`
+                                                    : _isAdminWallet
+                                                        ? `<button onclick="LBW_Transparency.awardMeritsForZap('${_esc(m.payment_hash)}',${m.amount||0})" style="font-size:0.68rem;padding:0.2rem 0.55rem;background:rgba(206,147,216,0.12);border:1px solid rgba(206,147,216,0.4);border-radius:6px;color:#CE93D8;cursor:pointer;font-weight:700;white-space:nowrap;margin-top:0.2rem;">🏅 Atribuir donante</button>`
+                                                        : '';
                                             return `<div style="display:flex;flex-direction:column;gap:0;">${zapBadge}${adminBtn}</div>`;
                                         })()}
                                     </td>
@@ -1142,136 +1150,125 @@ const LBW_Transparency = (() => {
 
     // ── Admin: emitir méritos por zap desde Transparencia ──────────────────────
 
-    function awardMeritsForZap(senderPubkey, amountSats, zapTs, payKey) {
-        // payKey es el identificador único del pago (payment_hash o ts_amount)
-        const _key = payKey || `${(senderPubkey||'').substring(0,16)}_${amountSats}_${zapTs}`;
-        let awarded = [];
-        try { awarded = JSON.parse(localStorage.getItem('c2p_awarded_zaps') || '[]'); } catch (_e) {}
-        if (awarded.includes(_key)) { showNotification('Ya se emitieron méritos para este pago.', 'info'); return; }
+    // ── [C2P Fase 2] Méritos económicos vía servidor ─────────
+    // El Emisor ColombiaP2P (api/merits/economic) verifica el pago en LNbits
+    // y el donante (zap NIP-57 o atribución firmada por un admin) y emite
+    // round(sats × 0.01) méritos. Ya no se escribe XP en PocketBase (evita
+    // el doble conteo en el Pasaporte).
+    const ECON_ENDPOINT = '/api/merits/economic';
+    const ECON_REQ_KEY = 'c2p_econ_merits_req';
+    const ECON_RETRY_MS = 6 * 3600 * 1000;
 
-        const _adminPks = [
-            '2479ef8e78d635cb40054f1e1a3895b13d67b36b2326b2a1d68df7b989b4cac0',
-            '51cfd8f59cd6c8e7699e5b8e3cfed94967c780939877f78e16da995107f432b9',
-        ];
-        const _callerPk = typeof LBW_Nostr !== 'undefined' && LBW_Nostr.getPubkey ? LBW_Nostr.getPubkey() : null;
-        const _isAuth = (typeof getUnifiedMerits !== 'undefined' && getUnifiedMerits().isGovernor)
-            || (_callerPk && _adminPks.includes(_callerPk));
-        if (!_isAuth) {
-            showNotification('Solo Génesis (≥3.000 méritos) o admins pueden emitir méritos.', 'error');
-            return;
+    function _isEconMeritIssued(m) {
+        if (!m || !m.payment_hash || typeof LBW_Merits === 'undefined' || !LBW_Merits.getAllMerits) return false;
+        const d = `merit:zap:${m.payment_hash}`;
+        try { return LBW_Merits.getAllMerits().some(x => x.dTag === d); } catch (e) { return false; }
+    }
+
+    async function _postEconMerit(body, authHeader) {
+        const headers = { 'Content-Type': 'application/json' };
+        if (authHeader) headers['Authorization'] = authHeader;
+        const res = await fetch(ECON_ENDPOINT, { method: 'POST', headers, body: JSON.stringify(body) });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw Object.assign(new Error(data.error || ('HTTP ' + res.status)), { data, status: res.status });
+        return data;
+    }
+
+    let _autoIssuing = false;
+    async function _autoIssueZapMerits(movements) {
+        if (_autoIssuing || !Array.isArray(movements)) return;
+        _autoIssuing = true;
+        try {
+            let log = {};
+            try { log = JSON.parse(localStorage.getItem(ECON_REQ_KEY) || '{}'); } catch (e) {}
+            const pending = movements.filter(m =>
+                m.type === 'in' && m.zap && m.payment_hash &&
+                Math.round((m.amount || 0) * 0.01) >= 1 &&
+                !_isEconMeritIssued(m) &&
+                Date.now() - (log[m.payment_hash] || 0) > ECON_RETRY_MS
+            ).slice(0, 5);
+            let anyIssued = false;
+            for (const m of pending) {
+                log[m.payment_hash] = Date.now();
+                try { localStorage.setItem(ECON_REQ_KEY, JSON.stringify(log)); } catch (e) {}
+                try {
+                    const r = await _postEconMerit({ paymentHash: m.payment_hash });
+                    if ((r.issued || []).length > 0) anyIssued = true;
+                    const me = (typeof LBW_Nostr !== 'undefined' && LBW_Nostr.isLoggedIn()) ? LBW_Nostr.getPubkey() : null;
+                    if (me && r.recipient === me && (r.issued || []).length > 0) {
+                        showNotification(`🏅 +${r.merits} méritos por tu aportación de ${r.sats} sats`, 'success');
+                    }
+                } catch (err) {
+                    console.warn('[Treasury] Méritos por zap no emitidos:', m.payment_hash.substring(0, 12), err.message);
+                    delete log[m.payment_hash];
+                    try { localStorage.setItem(ECON_REQ_KEY, JSON.stringify(log)); } catch (e) {}
+                }
+            }
+            if (anyIssued) setTimeout(() => { try { renderWalletPanel(); } catch (e) {} }, 2500);
+        } finally {
+            _autoIssuing = false;
         }
-        if (typeof LBW_Merits === 'undefined' || !LBW_Merits.awardMerit) {
-            showNotification('Módulo LBW_Merits no disponible.', 'error');
-            return;
-        }
+    }
 
-        const hasZap = !!senderPubkey;
-        const existing = document.getElementById('c2pAwardZapDialog');
-        if (existing) existing.remove();
-
+    // Pago sin zap: un admin atribuye el donante. La petición va firmada con
+    // NIP-98 (tags payment + recipient), el servidor comprueba que sea admin/Génesis.
+    function awardMeritsForZap(paymentHash, amountSats) {
+        if (!paymentHash) { showNotification('Este pago no tiene payment_hash: no se puede verificar.', 'error'); return; }
+        document.getElementById('c2pAwardZapDialog')?.remove();
+        const merits = Math.round((amountSats || 0) * 0.01);
         const dialog = document.createElement('div');
         dialog.id = 'c2pAwardZapDialog';
         dialog.style.cssText = 'position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,0.72);display:flex;align-items:center;justify-content:center;padding:1rem;';
         dialog.innerHTML = `
             <div style="background:var(--color-bg-card);border:2px solid rgba(206,147,216,0.5);border-radius:16px;padding:1.5rem;max-width:440px;width:100%;box-shadow:0 8px 32px rgba(0,0,0,0.5);">
-                <div style="font-size:1rem;font-weight:800;color:#CE93D8;margin-bottom:1rem;">🏅 Emitir Méritos Económicos</div>
+                <div style="font-size:1rem;font-weight:800;color:#CE93D8;margin-bottom:1rem;">🏅 Atribuir donante</div>
                 <div style="font-size:0.82rem;background:rgba(206,147,216,0.07);border:1px solid rgba(206,147,216,0.2);border-radius:8px;padding:0.75rem;margin-bottom:1rem;line-height:1.6;">
-                    ${hasZap
-                        ? `<div>Donante (⚡ NIP-57): <strong style="color:#CE93D8;font-family:monospace;">${_shortNpub(senderPubkey)}</strong></div>
-                           <div style="font-size:0.7rem;color:var(--color-text-secondary);word-break:break-all;">${_esc(senderPubkey)}</div>`
-                        : `<div style="color:#FFB74D;font-size:0.78rem;">⚠️ Pago sin atribución NIP-57 automática.<br>Introduce el npub del donante manualmente tras verificarlo.</div>`
-                    }
-                    <div style="margin-top:0.3rem;">Pago: <strong style="color:#FFB74D;">${(amountSats||0).toLocaleString('es-ES')} sats</strong></div>
+                    <div style="color:#FFB74D;font-size:0.78rem;">⚠️ Pago sin zap NIP-57: indica quién lo hizo tras verificarlo.</div>
+                    <div style="margin-top:0.3rem;">Pago: <strong style="color:#FFB74D;">${(amountSats || 0).toLocaleString('es-ES')} sats</strong> → <strong style="color:#CE93D8;">${merits.toLocaleString('es-ES')} méritos</strong> (× 0.01)</div>
                 </div>
-                ${!hasZap ? `
                 <label style="display:block;font-size:0.78rem;color:var(--color-text-secondary);margin-bottom:0.3rem;">npub o hex del donante <span style="color:#ff6b6b;">*</span></label>
-                <input id="c2pAwardZapNpub" type="text" placeholder="npub1... o hex pubkey" style="width:100%;box-sizing:border-box;padding:0.65rem 0.75rem;border-radius:8px;border:1px solid var(--color-border);background:var(--color-bg-dark);color:var(--color-text-primary);font-size:0.82rem;font-family:monospace;margin-bottom:0.75rem;">
-                ` : ''}
-                <label style="display:block;font-size:0.78rem;color:var(--color-text-secondary);margin-bottom:0.3rem;">Sats a convertir <span style="font-size:0.7rem;">(categoría Económica, peso × 0.01)</span></label>
-                <input id="c2pAwardZapAmt" type="number" value="${amountSats||0}" min="1"
-                    oninput="const p=document.getElementById('c2pAwardZapPreview');if(p){const m=Math.round((+this.value||0)*0.01);p.textContent='→ '+m.toLocaleString('es-ES')+' méritos';}"
-                    style="width:100%;box-sizing:border-box;padding:0.65rem 0.75rem;border-radius:8px;border:1px solid var(--color-border);background:var(--color-bg-dark);color:var(--color-text-primary);font-size:1rem;margin-bottom:0.3rem;">
-                <div id="c2pAwardZapPreview" style="font-size:0.82rem;color:#CE93D8;font-weight:700;margin-bottom:0.75rem;">→ ${Math.round((amountSats||0)*0.01).toLocaleString('es-ES')} méritos</div>
-                <label style="display:block;font-size:0.78rem;color:var(--color-text-secondary);margin-bottom:0.3rem;">Razón</label>
-                <input id="c2pAwardZapReason" type="text" value="${hasZap ? '⚡ Zap Lightning verificado' : '⚡ Aportación Lightning verificada'}" maxlength="120" style="width:100%;box-sizing:border-box;padding:0.65rem 0.75rem;border-radius:8px;border:1px solid var(--color-border);background:var(--color-bg-dark);color:var(--color-text-primary);font-size:0.9rem;margin-bottom:1.25rem;">
+                <input id="c2pAwardZapNpub" type="text" placeholder="npub1... o hex pubkey" style="width:100%;box-sizing:border-box;padding:0.65rem 0.75rem;border-radius:8px;border:1px solid var(--color-border);background:var(--color-bg-dark);color:var(--color-text-primary);font-size:0.82rem;font-family:monospace;margin-bottom:1.25rem;">
                 <div style="display:flex;gap:0.75rem;justify-content:flex-end;">
                     <button onclick="document.getElementById('c2pAwardZapDialog').remove()" style="padding:0.65rem 1.1rem;background:transparent;border:1px solid var(--color-border);border-radius:8px;color:var(--color-text-secondary);cursor:pointer;font-weight:600;font-size:0.88rem;">Cancelar</button>
-                    <button onclick="LBW_Transparency._confirmAwardZap('${_esc(senderPubkey)}','${_esc(_key)}')" style="padding:0.65rem 1.25rem;background:linear-gradient(135deg,#CE93D8,#9C27B0);border:none;border-radius:8px;color:white;cursor:pointer;font-weight:700;font-size:0.88rem;">✓ Emitir</button>
+                    <button onclick="LBW_Transparency._confirmAwardZap('${_esc(paymentHash)}')" style="padding:0.65rem 1.25rem;background:linear-gradient(135deg,#CE93D8,#9C27B0);border:none;border-radius:8px;color:white;cursor:pointer;font-weight:700;font-size:0.88rem;">✓ Emitir méritos</button>
                 </div>
             </div>
         `;
         document.body.appendChild(dialog);
-        setTimeout(() => {
-            const inp = document.getElementById('c2pAwardZapNpub') || document.getElementById('c2pAwardZapAmt');
-            if (inp) { inp.focus(); if (inp.select) inp.select(); }
-        }, 80);
+        setTimeout(() => document.getElementById('c2pAwardZapNpub')?.focus(), 80);
     }
 
-    async function _confirmAwardZap(senderPubkeyOrig, zapKey) {
-        const amountEl = document.getElementById('c2pAwardZapAmt');
-        const reasonEl = document.getElementById('c2pAwardZapReason');
-        const npubEl   = document.getElementById('c2pAwardZapNpub');
-        const amount = parseInt(amountEl?.value || '0', 10);
-        const reason = (reasonEl?.value || '').trim() || '⚡ Aportación Lightning verificada';
-
-        // Si no había pubkey automática, leer del input manual y convertir npub→hex si es necesario
-        let senderPubkey = senderPubkeyOrig;
-        if (!senderPubkey && npubEl) {
-            const raw = (npubEl.value || '').trim();
-            if (!raw) { showNotification('Ingresa el npub o hex del donante.', 'error'); return; }
-            if (raw.startsWith('npub1')) {
-                try {
-                    senderPubkey = typeof nip19 !== 'undefined'
-                        ? nip19.decode(raw).data
-                        : (typeof LBW_Nostr?.bech32Decode === 'function' ? LBW_Nostr.bech32Decode(raw) : raw);
-                } catch (_) { senderPubkey = raw; }
-            } else {
-                senderPubkey = raw;
-            }
+    async function _confirmAwardZap(paymentHash) {
+        const raw = (document.getElementById('c2pAwardZapNpub')?.value || '').trim();
+        if (!raw) { showNotification('Ingresa el npub o hex del donante.', 'error'); return; }
+        let recipient = raw.toLowerCase();
+        if (raw.startsWith('npub1')) {
+            try { recipient = LBW_Nostr.npubToHex(raw); } catch (e) { recipient = ''; }
         }
-
-        if (!senderPubkey) { showNotification('Ingresa el npub o hex del donante.', 'error'); return; }
-        if (!amount || amount < 1) { showNotification('Introduce una cantidad válida.', 'error'); return; }
+        if (!/^[0-9a-f]{64}$/.test(recipient)) { showNotification('npub o hex inválido.', 'error'); return; }
         document.getElementById('c2pAwardZapDialog')?.remove();
 
         try {
-            const meritosEmitidos = Math.round(amount * 0.01);
-
-            // Idempotencia: verificar si ya existe xp_transaction para este pago
-            const pb = typeof C2P_PB !== 'undefined' ? C2P_PB.getClient() : null;
-            if (pb) {
-                const existing = await pb.collection('xp_transactions')
-                    .getFirstListItem(`user_pubkey="${senderPubkey}" && source="economica" && ref_id="${zapKey}"`).catch(() => null);
-                if (existing) {
-                    showNotification('Ya se emitieron méritos para este pago.', 'info');
-                    return;
-                }
+            // NIP-98: autorización firmada, atada a este pago y destinatario
+            const authEvent = await LBW_Nostr.signEvent({
+                kind: 27235,
+                created_at: Math.floor(Date.now() / 1000),
+                content: '',
+                tags: [
+                    ['u', location.origin + ECON_ENDPOINT],
+                    ['method', 'POST'],
+                    ['payment', paymentHash],
+                    ['recipient', recipient]
+                ]
+            });
+            const auth = 'Nostr ' + btoa(unescape(encodeURIComponent(JSON.stringify(authEvent))));
+            const r = await _postEconMerit({ paymentHash, recipient }, auth);
+            if ((r.issued || []).length > 0) {
+                showNotification(`✅ ${r.merits.toLocaleString('es-ES')} méritos emitidos a ${_shortNpub(recipient)} (${r.sats.toLocaleString('es-ES')} sats × 0.01).`, 'success');
+            } else {
+                showNotification('No se emitieron méritos: ' + ((r.skipped || [])[0]?.reason || 'ya existían'), 'info');
             }
-
-            await LBW_Merits.awardMerit(senderPubkey, amount, 'economica', reason, `zap:${zapKey}`);
-
-            // Registro en PocketBase para historial XP del destinatario
-            if (pb) {
-                try {
-                    await pb.collection('xp_transactions').create({
-                        user_pubkey: senderPubkey,
-                        amount: meritosEmitidos,
-                        reason,
-                        source: 'economica',
-                        ref_id: zapKey,
-                    });
-                } catch (pbErr) {
-                    console.error('[Treasury] Error creando xp_transaction:', pbErr, pbErr?.data);
-                    showNotification('Méritos Nostr emitidos, pero falló el registro en historial: ' + pbErr.message, 'warning');
-                }
-            }
-
-            let awarded = [];
-            try { awarded = JSON.parse(localStorage.getItem('c2p_awarded_zaps') || '[]'); } catch (_e) {}
-            awarded.push(zapKey);
-            try { localStorage.setItem('c2p_awarded_zaps', JSON.stringify(awarded.slice(-500))); } catch (_e) {}
-            showNotification(`✅ ${meritosEmitidos.toLocaleString('es-ES')} méritos emitidos a ${_shortNpub(senderPubkey)} (${amount.toLocaleString('es-ES')} sats × 0.01).`, 'success');
-            await renderWalletPanel();
+            setTimeout(() => { try { renderWalletPanel(); } catch (e) {} }, 2500);
         } catch (err) {
             showNotification('Error al emitir méritos: ' + err.message, 'error');
         }
