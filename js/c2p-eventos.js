@@ -58,82 +58,31 @@ const C2P_Eventos = (function () {
         return _events;
     }
 
+    // [C2P Fase 2] El check-in lo valida y registra el servidor
+    // (api/merits/checkin): comprueba el token del QR, crea el check-in, el
+    // sello y el badge, y el Emisor ColombiaP2P acredita los méritos del evento
+    // y, si es tu primer evento, los del usuario que te refirió.
     async function submitCheckin(eventId, token) {
         const pubkey = _myPubkey();
         if (!pubkey) throw new Error('Debes iniciar sesión primero.');
+        if (typeof LBW_Nostr === 'undefined' || !LBW_Nostr.nip98Auth) throw new Error('Nostr no disponible.');
 
-        // Verificar si ya hizo check-in
-        const existing = await _getPB().collection('event_checkins').getList(1, 1, {
-            filter: `event_id = "${eventId}" && user_pubkey = "${pubkey}"`,
+        const path = '/api/merits/checkin';
+        const auth = await LBW_Nostr.nip98Auth(path, 'POST', { event: eventId });
+        const res = await fetch(path, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Authorization': auth },
+            body: JSON.stringify({ eventId, token, userName: _myName() })
         });
-        if (existing.totalItems > 0) throw new Error('Ya estás registrado en este evento.');
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.error || ('Error ' + res.status));
+        if (data.alreadyCheckedIn && (data.issued || []).length === 0) throw new Error('Ya estás registrado en este evento.');
 
-        await _getPB().collection('event_checkins').create({
-            event_id:      eventId,
-            user_pubkey:   pubkey,
-            user_name:     _myName(),
-            checkin_token: token,
-            check_method:  'qr',
-            checked_in_at: new Date().toISOString(),
-        });
-
-        const ev = _events.find(e => e.id === eventId);
-
-        // Registrar méritos de participación si el evento tiene recompensa
-        if (ev && ev.xp_reward > 0) {
-            try {
-                await _getPB().collection('xp_transactions').create({
-                    user_pubkey: pubkey,
-                    amount:      ev.xp_reward,
-                    reason:      `Check-in: ${ev.title}`,
-                    source:      'evento',
-                    ref_id:      eventId,
-                });
-            } catch (xpErr) {
-                console.warn('[C2P Eventos] XP no registrado:', xpErr.message);
-            }
+        const mine = (data.issued || []).filter(i => i.recipient === pubkey).reduce((s, i) => s + (i.amount || 0), 0);
+        if (mine > 0 && typeof showNotification === 'function') {
+            setTimeout(() => showNotification(`🏅 +${mine} méritos por asistir`, 'success'), 1200);
         }
-
-        // Asignar sello si el evento tiene uno (verificar duplicado primero)
-        if (ev && ev.stamp_id) {
-            try {
-                const existingStamp = await _getPB().collection('user_stamps').getList(1, 1, {
-                    filter: `user_pubkey = "${pubkey}" && stamp_id = "${ev.stamp_id}"`,
-                });
-                if (existingStamp.totalItems === 0) {
-                    await _getPB().collection('user_stamps').create({
-                        user_pubkey: pubkey,
-                        stamp_id:    ev.stamp_id,
-                        obtained_at: new Date().toISOString(),
-                    });
-                }
-            } catch (stampErr) {
-                console.warn('[C2P Eventos] Sello no asignado:', stampErr.message);
-            }
-        }
-
-        // Asignar badge si el evento tiene uno (verificar duplicado primero)
-        if (ev && ev.badge_id) {
-            try {
-                const existingBadge = await _getPB().collection('user_badges').getList(1, 1, {
-                    filter: `user_pubkey = "${pubkey}" && badge_id = "${ev.badge_id}"`,
-                });
-                if (existingBadge.totalItems === 0) {
-                    await _getPB().collection('user_badges').create({
-                        user_pubkey: pubkey,
-                        badge_id:    ev.badge_id,
-                        obtained_at: new Date().toISOString(),
-                    });
-                }
-            } catch (badgeErr) {
-                console.warn('[C2P Eventos] Badge no asignado:', badgeErr.message);
-            }
-        }
-
-        // XP al referidor si este es el primer check-in del usuario
-        if (typeof C2P_Rachas !== 'undefined') {
-            C2P_Rachas.grantReferralXPOnFirstCheckin(pubkey).catch(() => {});
-        }
+        return data;
     }
 
     // ── Renderizado ────────────────────────────────────────────

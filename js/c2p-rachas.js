@@ -278,37 +278,8 @@ const C2P_Rachas = (function () {
         return `https://colombiap2p.com/?ref=${pubkey}`;
     }
 
-    // Otorgar XP al referidor cuando el referido asiste a su primer evento
-    async function grantReferralXPOnFirstCheckin(referredPubkey) {
-        const pb = _getPB();
-        if (!pb || !referredPubkey) return;
-        try {
-            // Solo actuar si es el primer check-in del referido
-            const checkins = await pb.collection('event_checkins').getList(1, 1, {
-                filter: `user_pubkey = "${referredPubkey}"`,
-            });
-            if (checkins.totalItems !== 1) return;
-
-            // Buscar referral pendiente
-            const referral = await pb.collection('referrals')
-                .getFirstListItem(`referred_pubkey = "${referredPubkey}" && xp_granted = false`)
-                .catch(() => null);
-            if (!referral) return;
-
-            const referrerPubkey = referral.referrer_pubkey_short;
-            if (!/^[0-9a-f]{64}$/.test(referrerPubkey)) return;
-
-            await pb.collection('xp_transactions').create({
-                user_pubkey: referrerPubkey,
-                amount:      XP_REFERRAL_REWARD,
-                reason:      `Referido asistió a su primer evento`,
-                source:      'referido',
-                ref_id:      referredPubkey,
-            });
-
-            await pb.collection('referrals').update(referral.id, { xp_granted: true });
-        } catch (_) {}
-    }
+    // [C2P Fase 2] El mérito al referidor lo emite el servidor en el primer
+    // check-in del referido (api/merits/checkin).
 
     // ── URL handler ───────────────────────────────────────────
     function handleRefFromURL() {
@@ -381,7 +352,6 @@ const C2P_Rachas = (function () {
         getReferralLink,
         getReferralCount,
         registerReferral,
-        grantReferralXPOnFirstCheckin,
         handleRefFromURL,
         updateStreakDisplay,
         captureReferrer,

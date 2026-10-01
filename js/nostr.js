@@ -1260,6 +1260,23 @@ const LBW_Nostr = (() => {
         return { event: signed, results };
     }
 
+    // [C2P] Cabecera Authorization NIP-98 para los endpoints /api/merits/*.
+    // bind: tags extra que atan la firma al contenido (p.ej. { event: id }).
+    async function nip98Auth(path, method = 'POST', bind = {}) {
+        const ev = await _signEvent({
+            kind: 27235,
+            created_at: Math.floor(Date.now() / 1000),
+            content: '',
+            tags: [
+                ['u', location.origin + path],
+                ['method', method],
+                ...Object.entries(bind).map(([k, v]) => [k, String(v)])
+            ]
+        });
+        if (!ev) throw new Error('No se pudo firmar la autorización.');
+        return 'Nostr ' + btoa(unescape(encodeURIComponent(JSON.stringify(ev))));
+    }
+
     async function _signEvent(eventTemplate) {
         const nt = _getNostrTools();
         // NIP-46: cada firma va al bunker remoto. Sin pubkey local, no
@@ -1999,6 +2016,7 @@ const LBW_Nostr = (() => {
         subscribe, unsubscribe, onEventKind,
         publishEvent,
         signEvent: _signEvent,
+        nip98Auth,
 
         // Chat
         subscribeCommunityChat, publishCommunityMessage,
