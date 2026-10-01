@@ -73,11 +73,8 @@ const LBW_Governance = (() => {
         // claves, fundadores adicionales) requieren un commit nuevo
         // y deploy — intencionado, esta lista es la raíz de confianza
         // de la paraguas y no debe ser editable desde la UI.
-        AUTHORIZED_CREATORS: [
-            // Admins ColombiaP2P (antes: fundador de LiberBit World)
-            '2479ef8e78d635cb40054f1e1a3895b13d67b36b2326b2a1d68df7b989b4cac0', // colbitcoin
-            '51cfd8f59cd6c8e7699e5b8e3cfed94967c780939877f78e16da995107f432b9'  // admin
-        ]
+        // Admins ColombiaP2P (lista única en js/c2p-admins.js)
+        AUTHORIZED_CREATORS: window.C2P_ADMIN_PUBKEYS || []
     };
 
     let _umbrellaCache = null;   // { eventId, creator, name, description, image, moderators[], created_at }
@@ -417,10 +414,7 @@ const LBW_Governance = (() => {
     // El autor borra su propuesta con un kind:5 (el relay lo respeta).
     // Los admins C2P también pueden: el relay no borra eventos ajenos, pero
     // este cliente oculta la propuesta al ver el kind:5 firmado por un admin.
-    const GOV_ADMIN_PUBKEYS = [
-        '2479ef8e78d635cb40054f1e1a3895b13d67b36b2326b2a1d68df7b989b4cac0', // colbitcoin
-        '51cfd8f59cd6c8e7699e5b8e3cfed94967c780939877f78e16da995107f432b9', // admin
-    ];
+    const GOV_ADMIN_PUBKEYS = window.C2P_ADMIN_PUBKEYS || [];   // js/c2p-admins.js
     const DELETED_STORAGE_KEY = 'c2p_governance_deleted';
     let _deleted = new Set();   // dTags eliminados
     let _deletionSub = null;

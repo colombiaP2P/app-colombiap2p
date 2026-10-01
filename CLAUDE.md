@@ -80,6 +80,7 @@ c2p-stats.js          → Estadísticas comunitarias (C2P_Stats)
 
 **C2P_\* modules** — módulos nuevos de ColombiaP2P, mismo patrón IIFE + `window`:
 
+- `C2P_ADMIN_PUBKEYS` / `isC2PAdmin(pk)` — **lista única de admins** en `js/c2p-admins.js` (cargado justo tras `escape-utils.js`). La comparten la app y los endpoints (`api/_lib/c2p-issuer.js` la importa). Para añadir/quitar un admin se edita solo ese archivo.
 - `C2P_PB` — cliente PocketBase; `C2P_PB.getClient()` devuelve la instancia.
 - `C2P_Eventos` — eventos comunitarios + check-in QR. `init()` al abrir la sección.
 - `C2P_Rachas` — rachas diarias de actividad + sistema de referidos. `init()` desde `loadUserProfile()`.

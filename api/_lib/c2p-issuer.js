@@ -14,6 +14,7 @@
 import { finalizeEvent, getPublicKey, nip19, Relay, verifyEvent } from 'nostr-tools';
 import WebSocket from 'ws';
 import { createHmac } from 'crypto';
+import '../../js/c2p-admins.js';   // define globalThis.C2P_ADMIN_PUBKEYS
 
 // AbstractRelay usa el WebSocket global si no se le inyecta uno (Node < 22 no lo tiene)
 if (typeof globalThis.WebSocket === 'undefined') globalThis.WebSocket = WebSocket;
@@ -25,11 +26,8 @@ export const TRUSTED_ISSUERS = [
     { pubkey: '3bc79e0e001e8f48a9df3b50169b9571740f0ff5aeb352582875e642cfb04126', from: 1790726400, until: null }
 ];
 
-// Debe coincidir con GOV_ADMIN_PUBKEYS de js/nostr-governance.js
-export const GOV_ADMIN_PUBKEYS = [
-    '2479ef8e78d635cb40054f1e1a3895b13d67b36b2326b2a1d68df7b989b4cac0',
-    '51cfd8f59cd6c8e7699e5b8e3cfed94967c780939877f78e16da995107f432b9',
-];
+// Lista única de admins, compartida con la app (js/c2p-admins.js)
+export const GOV_ADMIN_PUBKEYS = globalThis.C2P_ADMIN_PUBKEYS;
 
 const GENESIS_MIN = 3000;
 const CATEGORY_CAPS = { economica: 500 };   // maxMerits de js/nostr-merits.js

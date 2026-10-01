@@ -747,10 +747,7 @@ const LBW_Transparency = (() => {
         const pageRows = movs.slice(pageStart, pageEnd);
 
         // Admin: Génesis (≥3.000 méritos) o admin conocido puede emitir méritos desde aquí
-        const _C2P_ADMINS = [
-            '2479ef8e78d635cb40054f1e1a3895b13d67b36b2326b2a1d68df7b989b4cac0',
-            '51cfd8f59cd6c8e7699e5b8e3cfed94967c780939877f78e16da995107f432b9',
-        ];
+        const _C2P_ADMINS = window.C2P_ADMIN_PUBKEYS || [];   // js/c2p-admins.js
         const _myPubkeyForAdmin = typeof LBW_Nostr !== 'undefined' && LBW_Nostr.getPubkey ? LBW_Nostr.getPubkey() : null;
         const _isAdminWallet = (typeof getUnifiedMerits === 'function' && !!getUnifiedMerits().isGovernor)
             || (_myPubkeyForAdmin && _C2P_ADMINS.includes(_myPubkeyForAdmin));
