@@ -315,6 +315,10 @@ const LBW_NostrBridge = (() => {
     }
 
     async function handlePrivateKeyLogin(input) {
+        // [C2P] Acepta también las 12 palabras (NIP-06): se convierten a la clave
+        if (LBW_Nostr.looksLikeSeedWords && LBW_Nostr.looksLikeSeedWords(input)) {
+            input = await LBW_Nostr.seedWordsToHex(input);
+        }
         const result = LBW_Nostr.loginWithPrivateKey(input);
         const session = {
             pubkey: result.pubkeyHex, npub: result.npub,
@@ -505,7 +509,7 @@ const LBW_NostrBridge = (() => {
             }
             await LBW_Passlock.setupPasswordAndStore(result.nsec, {
                 title: '🔒 Protege tu nueva identidad',
-                desc: 'Cifraremos tu clave privada (nsec) en este navegador con una contraseña (NIP-49). Apunta también la nsec en un sitio seguro: es tu único respaldo si olvidas la contraseña.',
+                desc: 'Cifraremos tu clave privada en este navegador con una contraseña (NIP-49). En el siguiente paso verás tus 12 palabras de recuperación: anótalas en papel, son tu respaldo si olvidas la contraseña o cambias de dispositivo.',
                 npub: result.npub
             });
         } catch (e) {

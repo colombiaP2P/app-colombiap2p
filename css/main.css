@@ -4112,3 +4112,39 @@
 @keyframes c2pNudgeIn { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: none; } }
 @media (prefers-reduced-motion: reduce) { .c2p-nudge { animation: none; } }
 @media (max-width: 600px) { .c2p-nudge { left: 0.75rem; right: 0.75rem; bottom: 0.75rem; max-width: none; } }
+
+/* ── Registro: 12 palabras de recuperación (NIP-06) ─────────── */
+.c2p-seed-hint { font-size: 0.8rem; color: var(--color-text-secondary); line-height: 1.55; margin: 0.25rem 0 0.75rem; }
+.c2p-seed-grid {
+    display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0.45rem;
+    transition: filter 0.2s ease;
+}
+.c2p-seed-grid.c2p-seed-hidden { filter: blur(6px); user-select: none; pointer-events: none; }
+.c2p-seed-word {
+    display: flex; align-items: baseline; gap: 0.35rem;
+    padding: 0.45rem 0.6rem; border-radius: 8px;
+    background: var(--color-bg-dark); border: 1px solid var(--color-border);
+    font-family: var(--font-mono); font-size: 0.88rem; color: var(--color-text-primary);
+}
+.c2p-seed-num { color: var(--color-text-secondary); font-size: 0.72rem; min-width: 1.4rem; text-align: right; font-variant-numeric: tabular-nums; }
+.c2p-seed-text { font-weight: 700; overflow-wrap: anywhere; }
+.c2p-seed-confirm {
+    margin: 1rem 0; padding: 1rem; border-radius: 12px;
+    background: rgba(229, 185, 92, 0.06); border: 1px solid rgba(229, 185, 92, 0.3);
+}
+.c2p-seed-confirm h3 { color: var(--color-gold); font-size: 0.95rem; margin: 0; }
+.c2p-seed-confirm-inputs { display: flex; flex-direction: column; gap: 0.5rem; }
+.c2p-seed-confirm-row { display: grid; grid-template-columns: 7rem 1fr; align-items: center; gap: 0.6rem; font-size: 0.85rem; color: var(--color-text-secondary); }
+.c2p-seed-confirm-row input {
+    width: 100%; padding: 0.55rem 0.7rem; border-radius: 8px; box-sizing: border-box;
+    background: var(--color-bg-dark); border: 1px solid var(--color-border);
+    color: var(--color-text-primary); font-family: var(--font-mono); font-size: 0.9rem;
+}
+.c2p-seed-confirm-row input.c2p-seed-ok { border-color: #52c41a; }
+.c2p-seed-confirm-row input.c2p-seed-bad { border-color: #ff4d4f; }
+.c2p-seed-confirm-status { margin-top: 0.6rem; font-size: 0.82rem; color: #52c41a; font-weight: 600; min-height: 1.1em; }
+#continueBtn:disabled { opacity: 0.45; cursor: not-allowed; }
+@media (max-width: 600px) {
+    .c2p-seed-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .c2p-seed-confirm-row { grid-template-columns: 1fr; gap: 0.25rem; }
+}

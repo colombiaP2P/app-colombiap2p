@@ -26,7 +26,7 @@
     <!-- DaisyUI -->
     <link href="https://cdn.jsdelivr.net/npm/daisyui@4.12.10/dist/full.min.css" rel="stylesheet">
     <!-- LiberBit Custom Styles (loaded last to override) -->
-    <link rel="stylesheet" href="css/main.css?v=oct02-nudge">
+    <link rel="stylesheet" href="css/main.css?v=oct02-seed">
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
           integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
           crossorigin=""/>
@@ -229,13 +229,13 @@
                             <span style="font-size: 1.2rem;">🛰️</span> Firmador remoto (NIP-46)
                         </button>
 
-                        <div class="divider text-xs opacity-60">o con clave privada</div>
+                        <div class="divider text-xs opacity-60">o con tus 12 palabras / clave privada</div>
 
                         <form>
                             <div class="form-group">
-                                <label>🔑 Clave Privada</label>
-                                <input type="password" id="existingPrivKey" placeholder="nsec1... o clave hex (64 caracteres)">
-                                <small class="text-xs opacity-60 mt-1 block">Tu clave nunca sale de tu dispositivo</small>
+                                <label>🔑 Tus 12 palabras o tu clave privada</label>
+                                <input type="password" id="existingPrivKey" autocomplete="off" autocapitalize="none" spellcheck="false" placeholder="palabra1 palabra2 … palabra12  ·  o nsec1…">
+                                <small class="text-xs opacity-60 mt-1 block">Escribe las 12 palabras separadas por espacios, o pega tu nsec. Tu clave nunca sale de tu dispositivo.</small>
                             </div>
 
                             <button type="button" class="btn btn-primary btn-large" id="importAccountBtn">
@@ -263,6 +263,14 @@
                             </div>
                         </div>
 
+                        <!-- [C2P] 12 palabras de recuperación (NIP-06) -->
+                        <div class="key-display" id="seedWordsBlock" style="display:none;">
+                            <h3>🧩 Tus 12 palabras de recuperación</h3>
+                            <p class="c2p-seed-hint">Escríbelas en papel, <strong>en orden</strong>. Con ellas recuperas tu cuenta en cualquier dispositivo y en otras apps Nostr. No les tomes foto ni las compartas con nadie: quien las tenga controla tu cuenta.</p>
+                            <div class="c2p-seed-grid c2p-seed-hidden" id="seedWordsGrid"></div>
+                            <button type="button" class="copy-btn" id="seedRevealBtn" style="margin-top:0.6rem;">👁️ Mostrar palabras</button>
+                        </div>
+
                         <div class="key-display">
                             <h3>🔐 Clave Privada (nsec)</h3>
                             <div class="key-value" id="privkeyDisplay">
@@ -284,6 +292,14 @@
                                 ✅ Tu perfil se ha publicado en la red Nostr<br>
                                 🔒 Tus mensajes viajan cifrados punto a punto (NIP-44 preferido, NIP-04 compatible)
                             </div>
+                        </div>
+
+                        <!-- [C2P] Confirmación de respaldo: 3 palabras al azar -->
+                        <div class="c2p-seed-confirm" id="seedConfirmBlock" style="display:none;">
+                            <h3>✅ Confirma que guardaste tus palabras</h3>
+                            <p class="c2p-seed-hint">Escribe las palabras que te pedimos para poder continuar.</p>
+                            <div class="c2p-seed-confirm-inputs" id="seedConfirmInputs"></div>
+                            <div class="c2p-seed-confirm-status" id="seedConfirmStatus" aria-live="polite"></div>
                         </div>
 
                         <div class="action-buttons">
@@ -3256,7 +3272,7 @@
         }
     </script>
 
-    <script src="js/posts.js?v=c2p-1-g"></script>
+    <script src="js/posts.js?v=c2p-1-g-seed"></script>
     <script src="js/marketplace.js?v=profession-1"></script>
     <script src="js/p2p-exchange.js?v=hardening-1-g"></script>
     <script src="js/notifications.js?v=sec11"></script>
@@ -3279,7 +3295,7 @@
     <script src="js/nostr-store.js?v=phase1"></script>
     <script src="js/nostr-media.js?v=phase1"></script>
     <script src="js/chat-attachments.js?v=hardening-1"></script>
-    <script src="js/nostr.js?v=c2p-26-g2"></script>
+    <script src="js/nostr.js?v=c2p-26-g2-seed"></script>
     <script src="js/nostr-nip46.js?v=nip46qr-4-g"></script>
     <script src="js/nostr-dm.js?v=phase1"></script>
     <script src="js/nostr-sync.js?v=phase1-g"></script>
@@ -3298,7 +3314,7 @@
     <script src="js/nostr-stalls.js?v=hardening-1-g"></script>
     <!-- Mute personal cliente-side: usado por nostr-bridge para ocultar mensajes -->
     <script src="js/lbw-mute.js?v=mute-1"></script>
-    <script src="js/nostr-bridge.js?v=c2p-18-g-nudge"></script>
+    <script src="js/nostr-bridge.js?v=c2p-18-g-nudge-seed"></script>
     <script src="js/debate.js?v=nip72-1-g2"></script>
     <script src="js/avatar-fix.js?v=3"></script>
     <!-- Missions system (Merit Bounties) -->
@@ -3517,9 +3533,12 @@
         if (importBtn) {
             importBtn.addEventListener('click', async () => {
                 let input = document.getElementById('existingPrivKey')?.value?.trim() || '';
-                // Clean invisible chars (zero-width spaces, BOM, etc.) from copy-paste
-                input = input.replace(/[\s\u200B\u200C\u200D\uFEFF\u00A0]/g, '');
-                if (!input) { alert('Introduce tu clave privada (nsec1... o hex)'); return; }
+                // 12 palabras: se conservan los espacios. nsec/hex: se limpian los
+                // caracteres invisibles del copiar-pegar (espacios, BOM, etc.)
+                if (!(LBW_Nostr.looksLikeSeedWords && LBW_Nostr.looksLikeSeedWords(input))) {
+                    input = input.replace(/[\s\u200B\u200C\u200D\uFEFF\u00A0]/g, '');
+                }
+                if (!input) { alert('Introduce tus 12 palabras o tu clave privada (nsec1... o hex)'); return; }
                 try {
                     importBtn.disabled = true;
                     importBtn.textContent = '⏳ Conectando y resolviendo perfil...';
@@ -3537,6 +3556,84 @@
                 }
             });
         }
+
+        // ── [C2P] Respaldo con 12 palabras: mostrar y confirmar 3 al azar ──
+        window._c2pShowSeedBackup = function (seedWords) {
+            const words = String(seedWords).split(' ');
+            window._c2pBackupSeedWords = seedWords;   // para downloadKeys()
+            const block = document.getElementById('seedWordsBlock');
+            const grid = document.getElementById('seedWordsGrid');
+            const reveal = document.getElementById('seedRevealBtn');
+            const confirmBlock = document.getElementById('seedConfirmBlock');
+            const inputs = document.getElementById('seedConfirmInputs');
+            const status = document.getElementById('seedConfirmStatus');
+            const cont = document.getElementById('continueBtn');
+            if (!block || !grid || !confirmBlock || !inputs || !cont) return;
+
+            grid.innerHTML = '';
+            words.forEach((w, i) => {
+                const cell = document.createElement('div');
+                cell.className = 'c2p-seed-word';
+                cell.innerHTML = '<span class="c2p-seed-num"></span><span class="c2p-seed-text"></span>';
+                cell.querySelector('.c2p-seed-num').textContent = (i + 1) + '.';
+                cell.querySelector('.c2p-seed-text').textContent = w;
+                grid.appendChild(cell);
+            });
+            grid.classList.add('c2p-seed-hidden');
+            if (reveal) {
+                reveal.textContent = '👁️ Mostrar palabras';
+                reveal.onclick = () => {
+                    const hidden = grid.classList.toggle('c2p-seed-hidden');
+                    reveal.textContent = hidden ? '👁️ Mostrar palabras' : '🙈 Ocultar palabras';
+                };
+            }
+            block.style.display = '';
+
+            // 3 posiciones distintas al azar, en orden
+            const picks = [];
+            while (picks.length < 3) {
+                const n = crypto.getRandomValues(new Uint32Array(1))[0] % words.length;
+                if (!picks.includes(n)) picks.push(n);
+            }
+            picks.sort((a, b) => a - b);
+            inputs.innerHTML = '';
+            picks.forEach(n => {
+                const row = document.createElement('label');
+                row.className = 'c2p-seed-confirm-row';
+                row.innerHTML = '<span></span><input type="text" autocomplete="off" autocapitalize="none" spellcheck="false">';
+                row.querySelector('span').textContent = 'Palabra #' + (n + 1);
+                const inp = row.querySelector('input');
+                inp.dataset.index = String(n);
+                inp.addEventListener('input', check);
+                inputs.appendChild(row);
+            });
+            confirmBlock.style.display = '';
+
+            cont.disabled = true;
+            cont.title = 'Confirma tus palabras para continuar';
+            status.textContent = '';
+            function check() {
+                const all = [...inputs.querySelectorAll('input')];
+                const ok = all.every(i => i.value.trim().toLowerCase() === words[+i.dataset.index]);
+                all.forEach(i => {
+                    const v = i.value.trim().toLowerCase();
+                    i.classList.toggle('c2p-seed-ok', v === words[+i.dataset.index]);
+                    i.classList.toggle('c2p-seed-bad', v.length > 0 && v !== words[+i.dataset.index] && !words[+i.dataset.index].startsWith(v));
+                });
+                cont.disabled = !ok;
+                cont.title = ok ? '' : 'Confirma tus palabras para continuar';
+                status.textContent = ok ? '✅ Respaldo confirmado. Ya puedes continuar.' : '';
+            }
+
+            // Al continuar, borrar las palabras de la página y de la memoria
+            cont.addEventListener('click', () => {
+                grid.innerHTML = '';
+                inputs.innerHTML = '';
+                block.style.display = 'none';
+                confirmBlock.style.display = 'none';
+                window._c2pBackupSeedWords = null;
+            }, { once: true });
+        };
 
         const createBtn = document.getElementById('createAccountBtn');
         if (createBtn) {
@@ -3556,6 +3653,8 @@
                         const nsecEl = document.getElementById('privkeyText');
                         if (npubEl) npubEl.textContent = result.npub;
                         if (nsecEl) { nsecEl.textContent = result.nsec; nsecEl.style.filter = 'blur(4px)'; }
+                        document.getElementById('registerForm')?.classList.add('hidden');
+                        if (result.seedWords) window._c2pShowSeedBackup(result.seedWords);
                     }
                 } catch (e) {
                     console.error('[Auth] Create error:', e);

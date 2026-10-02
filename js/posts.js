@@ -186,15 +186,19 @@ ${currentUser.publicKey}
 
 Clave Privada (nsec):
 ${currentUser.privateKey}
-
-⚠️ NUNCA compartas tu clave privada (nsec)
+${window._c2pBackupSeedWords ? `
+12 palabras de recuperación (NIP-06, inglés):
+${window._c2pBackupSeedWords.split(' ').map((w, i) => `${String(i + 1).padStart(2, ' ')}. ${w}`).join('\n')}
+` : ''}
+⚠️ NUNCA compartas tu clave privada (nsec) ni tus 12 palabras:
+   quien las tenga controla tu cuenta.
 =============================`;
 
     const blob = new Blob([content], { type: 'text/plain' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `liberbit-${currentUser.name}-${Date.now()}.txt`;
+    a.download = `colombiap2p-${currentUser.name}-${Date.now()}.txt`;
     a.click();
     URL.revokeObjectURL(url);
     showNotification('Claves descargadas 📥');

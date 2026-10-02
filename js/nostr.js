@@ -934,6 +934,52 @@ const LBW_Nostr = (() => {
         };
     }
 
+    // ── [C2P] NIP-06: identidad desde 12 palabras (BIP-39, inglés) ──
+    // El módulo (js/vendor/nip06.min.js, servido desde nuestro dominio) se
+    // carga bajo demanda: solo hace falta al registrarse o iniciar sesión.
+    const NIP06_SRC = 'js/vendor/nip06.min.js?v=1';
+    let _nip06Promise = null;
+    function _loadNip06() {
+        if (window.C2P_NIP06) return Promise.resolve(window.C2P_NIP06);
+        if (_nip06Promise) return _nip06Promise;
+        _nip06Promise = new Promise((resolve, reject) => {
+            const s = document.createElement('script');
+            s.src = NIP06_SRC;
+            s.onload = () => window.C2P_NIP06 ? resolve(window.C2P_NIP06) : reject(new Error('Módulo de palabras no disponible'));
+            s.onerror = () => { _nip06Promise = null; reject(new Error('No se pudo cargar el módulo de palabras (NIP-06)')); };
+            document.head.appendChild(s);
+        });
+        return _nip06Promise;
+    }
+
+    // Normaliza: minúsculas y un solo espacio entre palabras
+    function normalizeSeedWords(input) {
+        return String(input || '').toLowerCase().replace(/[\u200B\u200C\u200D\uFEFF\u00A0]/g, ' ').trim().split(/\s+/).join(' ');
+    }
+
+    // ¿Parece una frase de palabras (12/15/18/21/24) en vez de una nsec/hex?
+    function looksLikeSeedWords(input) {
+        const words = normalizeSeedWords(input).split(' ');
+        return [12, 15, 18, 21, 24].includes(words.length) && words.every(w => /^[a-z]+$/.test(w));
+    }
+
+    // 12 palabras → clave privada hex (NIP-06, ruta m/44'/1237'/0'/0/0)
+    async function seedWordsToHex(input) {
+        const nip06 = await _loadNip06();
+        const words = normalizeSeedWords(input);
+        if (!nip06.validateWords(words)) {
+            throw new Error('Las palabras no son válidas. Revisa que estén completas, bien escritas y en orden.');
+        }
+        return nip06.privateKeyFromSeedWords(words);
+    }
+
+    async function generateSeedIdentity() {
+        const nip06 = await _loadNip06();
+        const words = nip06.generateSeedWords();
+        const keys = importPrivateKey(nip06.privateKeyFromSeedWords(words));
+        return { ...keys, seedWords: words };
+    }
+
     function importPrivateKey(input) {
         const nt = _getNostrTools();
         let skHex, skBytes;
@@ -1402,7 +1448,9 @@ const LBW_Nostr = (() => {
     }
 
     async function createIdentity(displayName) {
-        const keys = generateKeypair();
+        // [C2P] Identidad nueva desde 12 palabras (NIP-06): el usuario recibe
+        // las palabras, la nsec y la npub.
+        const keys = await generateSeedIdentity();
         _privkey = keys.privkeyHex;
         _pubkey = keys.pubkeyHex;
         _npub = keys.npub;
@@ -1446,7 +1494,8 @@ const LBW_Nostr = (() => {
 
         return {
             privkeyHex: keys.privkeyHex, pubkeyHex: keys.pubkeyHex,
-            npub: keys.npub, nsec: keys.nsec, profile: metadata, method: 'created'
+            npub: keys.npub, nsec: keys.nsec, seedWords: keys.seedWords,
+            profile: metadata, method: 'created'
         };
     }
 
@@ -2001,6 +2050,7 @@ const LBW_Nostr = (() => {
 
         // Key management
         generateKeypair, importPrivateKey, pubkeyToNpub, npubToHex,
+        looksLikeSeedWords, seedWordsToHex, normalizeSeedWords,
 
         // Relay management
         connectToRelays, disconnectAll, getConnectedRelays, getRelayStatus, onRelayStatusChange, waitForPrivateRelay,

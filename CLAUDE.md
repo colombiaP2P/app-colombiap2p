@@ -91,6 +91,7 @@ c2p-stats.js          → Estadísticas comunitarias (C2P_Stats)
 
 ### Identidad y Crypto
 
+- **12 palabras (NIP-06, BIP-39 en inglés)**: las identidades nuevas se crean desde 12 palabras (`LBW_Nostr.createIdentity` → `generateSeedIdentity`); el usuario recibe palabras + nsec + npub y debe confirmar 3 palabras al azar antes de continuar. El login acepta palabras o nsec (`looksLikeSeedWords` / `seedWordsToHex`). El módulo `js/vendor/nip06.min.js` se sirve desde nuestro dominio (no CDN, genera claves) y se carga bajo demanda; se reconstruye con `scripts/vendor/nip06-entry.js`. Las cuentas antiguas (nsec aleatoria) no tienen palabras.
 - **NIP-07 (extensión)**: más seguro — nsec en Alby/nos2x.
 - **NIP-49 (passlock)**: nsec cifrada en `localStorage.lbw_ncryptsec` con scrypt+XChaCha20-Poly1305. La nsec descifrada solo vive en memoria. `LBW_Passlock.unlockWithPasswordPrompt` la abre al cargar.
 - **NIP-46 (bunker remoto, opt-in)**: nsec en bunker externo (nsec.app, Amber). Session-only — al recargar el usuario reconecta con el `bunker://`. Ver `docs/security.md`.
