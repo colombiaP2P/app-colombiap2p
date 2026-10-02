@@ -156,29 +156,28 @@ const C2P_Rachas = (function () {
         } catch (_) {}
     }
 
-    // Registrar la referencia en PocketBase cuando el usuario inicia sesión por primera vez
+    // Registrar la referencia cuando el usuario inicia sesión por primera vez.
+    // [C2P] La escribe el servidor (api/merits/referral) con la firma NIP-98 del
+    // propio referido; la colección referrals ya no acepta escrituras de la app.
     async function registerReferral() {
-        const pb = _getPB();
         const pubkey = _myPubkey();
-        if (!pb || !pubkey) return;
+        if (!pubkey || typeof LBW_Nostr === 'undefined' || !LBW_Nostr.nip98Auth) return;
 
         let refBy = '';
-        try { refBy = localStorage.getItem(STORAGE_KEY_REF_BY) || ''; } catch (_) {}
+        try { refBy = (localStorage.getItem(STORAGE_KEY_REF_BY) || '').trim().toLowerCase(); } catch (_) {}
         if (!refBy) return;
+        const forget = () => { try { localStorage.removeItem(STORAGE_KEY_REF_BY); } catch (_) {} };
+        if (!/^[0-9a-f]{64}$/.test(refBy) || refBy === pubkey) { forget(); return; }
 
         try {
-            // Evitar duplicados
-            const exists = await pb.collection('referrals')
-                .getFirstListItem(`referred_pubkey = "${pubkey}"`).catch(() => null);
-            if (exists) { localStorage.removeItem(STORAGE_KEY_REF_BY); return; }
-
-            await pb.collection('referrals').create({
-                referrer_pubkey_short: refBy,
-                referred_pubkey:       pubkey,
-                xp_granted:            false,
-            });
-
-            localStorage.removeItem(STORAGE_KEY_REF_BY);
+            const path = '/api/merits/referral';
+            const auth = await LBW_Nostr.nip98Auth(path, 'POST', { action: 'referral', referrer: refBy });
+            const res = await fetch(path, { method: 'POST', headers: { 'Authorization': auth } });
+            const data = await res.json().catch(() => ({}));
+            // Respuesta definitiva (registrado o rechazado): no reintentar.
+            // Error de red / 5xx: se conserva para el próximo inicio.
+            if (res.ok || (res.status >= 400 && res.status < 500 && res.status !== 401)) forget();
+            if (!res.ok) throw new Error(data.error || ('HTTP ' + res.status));
         } catch (e) {
             console.warn('[C2P Referidos]', e.message);
         }

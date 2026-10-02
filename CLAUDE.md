@@ -113,7 +113,7 @@ Implementado en `nostr.js:_getRelaysForKind`:
 
 ### Colecciones PocketBase (`api.colombiap2p.com`)
 
-Versión **< 0.23** (usa `/api/admins`, sin campos Hidden; "solo admins" = candado de la regla + Save changes). `event_checkins`, `xp_transactions`, `missions`, `user_streaks`, `user_stamps` y `user_badges` tienen Create/Update/Delete solo admins: escriben únicamente los endpoints `api/merits/*`. Los méritos válidos viven en Nostr (kind 31002), fuente única del Pasaporte, nivel, Génesis y poder de voto.
+Versión **< 0.23** (usa `/api/admins`, sin campos Hidden; "solo admins" = candado de la regla + Save changes). `event_checkins`, `xp_transactions`, `missions`, `user_streaks`, `user_stamps`, `user_badges` y `referrals` tienen Create/Update/Delete solo admins: escriben únicamente los endpoints `api/merits/*`. Los méritos válidos viven en Nostr (kind 31002), fuente única del Pasaporte, nivel, Génesis y poder de voto.
 
 | Colección | Propósito |
 |-----------|-----------|
@@ -141,6 +141,7 @@ Versión **< 0.23** (usa `/api/admins`, sin campos Hidden; "solo admins" = canda
   - `checkin.js` — check-in con código derivado (`checkinCode` = HMAC de la clave del emisor; `events.checkin_token` se ignora) + sello/badge + referido en el primer check-in; acción `qr` para organizadores.
   - `mission.js` — ciclo completo de misiones (create/claim/deliver/approve/cancel).
   - `streak.js` — racha diaria (fecha Bogotá), mérito acumulado reemplazable.
+  - `referral.js` — registra el referidor (firma NIP-98 del referido, solo cuentas nuevas ≤7 días, un referidor para siempre). El mérito de 50 lo emite `checkin.js` en el primer check-in del referido.
 - **Imports en funciones**: siempre desde la entrada principal de `nostr-tools` (las subrutas como `nostr-tools/relay` no se empaquetan en Vercel).
 
 ### Variables de entorno Vercel
