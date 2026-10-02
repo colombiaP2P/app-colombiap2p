@@ -799,6 +799,8 @@ const LBW_NostrBridge = (() => {
         try {
             await startDelegations();
         } catch (e) { console.error('[Bridge] ❌ Delegations failed:', e); }
+        // Avisos de méritos (bienvenida, subida de nivel) — js/merits.js
+        try { if (typeof c2pInitMeritNudges === 'function') c2pInitMeritNudges(); } catch (e) {}
         console.log('[Bridge] ✅ All feeds started');
     }
 

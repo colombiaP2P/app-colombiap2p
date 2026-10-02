@@ -642,6 +642,111 @@ async function updateLbwmStats(userMerits) {
 // UI FUNCTIONS
 // ═══════════════════════════════════════════════════════════════
 
+// ── [C2P] Avisos de méritos: bienvenida y subida de nivel ─────────────────
+// Tarjeta con botón (showNotification es solo texto y dura 3 s).
+function _c2pMeritNudge({ icon, title, text, buttonLabel, onButton }) {
+    document.getElementById('c2pMeritNudge')?.remove();
+    const el = document.createElement('div');
+    el.id = 'c2pMeritNudge';
+    el.className = 'c2p-nudge';
+    el.setAttribute('role', 'status');
+    el.innerHTML = `
+        <button class="c2p-nudge-close" aria-label="Cerrar">×</button>
+        <div class="c2p-nudge-icon">${icon}</div>
+        <div class="c2p-nudge-body">
+            <div class="c2p-nudge-title"></div>
+            <div class="c2p-nudge-text"></div>
+            <button class="c2p-earn-btn c2p-earn-btn-primary c2p-nudge-btn"></button>
+        </div>`;
+    el.querySelector('.c2p-nudge-title').textContent = title;
+    el.querySelector('.c2p-nudge-text').textContent = text;
+    const btn = el.querySelector('.c2p-nudge-btn');
+    btn.textContent = buttonLabel;
+    const close = () => el.remove();
+    btn.addEventListener('click', () => { close(); try { onButton(); } catch (e) {} });
+    el.querySelector('.c2p-nudge-close').addEventListener('click', close);
+    document.body.appendChild(el);
+    setTimeout(close, 20000);
+}
+
+function _c2pMyMeritTotal() {
+    try { return (typeof LBW_Merits !== 'undefined' && LBW_Merits.getMyMerits()?.total) || 0; } catch (e) { return 0; }
+}
+
+function _c2pLevelIndex(total) {
+    const levels = (typeof LBW_Merits !== 'undefined' && LBW_Merits.CITIZENSHIP_LEVELS) || [];
+    let idx = 0;
+    levels.forEach((l, i) => { if (total >= l.minMerits) idx = i; });
+    return idx;
+}
+
+function _c2pCheckLevelUp(pk) {
+    const levels = (typeof LBW_Merits !== 'undefined' && LBW_Merits.CITIZENSHIP_LEVELS) || [];
+    if (!levels.length || !pk || (LBW_Nostr.isLoggedIn() && LBW_Nostr.getPubkey() !== pk)) return;
+    const key = 'c2p_level_seen_' + pk.substring(0, 16);
+    const total = _c2pMyMeritTotal();
+    const idx = _c2pLevelIndex(total);
+    let stored = null;
+    try { stored = localStorage.getItem(key); } catch (e) {}
+    try { localStorage.setItem(key, String(Math.max(idx, stored == null ? -1 : +stored))); } catch (e) {}
+    if (stored == null || idx <= +stored) return;   // primera vez: solo fija la referencia
+
+    const lvl = levels[idx];
+    const next = levels[idx + 1];
+    _c2pMeritNudge({
+        icon: '🎉',
+        title: `¡Ahora eres ${lvl.name} ${lvl.emoji}!`,
+        text: next
+            ? `Te faltan ${(next.minMerits - total).toLocaleString('es-CO')} méritos para ser ${next.name} ${next.emoji}.`
+            : 'Has alcanzado el nivel más alto de ciudadanía.',
+        buttonLabel: next ? '💡 Cómo seguir subiendo' : 'Ver mis méritos',
+        onButton: () => next ? showHowToEarnMerits() : (typeof openApp === 'function' && openApp('meritos'))
+    });
+}
+
+// Llamado tras el login (nostr-bridge, al arrancar los feeds). Espera a que
+// lleguen los méritos del relay antes de fijar la referencia de nivel, para no
+// avisar de "subidas" falsas mientras carga.
+let _c2pNudgeTimer = null;
+let _c2pNudgeListening = false;
+function c2pInitMeritNudges() {
+    if (typeof LBW_Nostr === 'undefined' || !LBW_Nostr.isLoggedIn()) return;
+    const pk = LBW_Nostr.getPubkey();
+    clearTimeout(_c2pNudgeTimer);
+    _c2pNudgeTimer = setTimeout(() => {
+        if (!LBW_Nostr.isLoggedIn() || LBW_Nostr.getPubkey() !== pk) return;
+        const short = pk.substring(0, 16);
+
+        // Bienvenida: una vez por cuenta, solo si aún no tiene sus primeros 100
+        let welcomed = null;
+        try { welcomed = localStorage.getItem('c2p_welcome_seen_' + short); } catch (e) {}
+        if (!welcomed && _c2pMyMeritTotal() < 100) {
+            try { localStorage.setItem('c2p_welcome_seen_' + short, '1'); } catch (e) {}
+            _c2pMeritNudge({
+                icon: '👋',
+                title: '¡Bienvenido a ColombiaP2P!',
+                text: 'Gana tus primeros méritos asistiendo a eventos, completando misiones, aportando a la tesorería y votando en gobernanza.',
+                buttonLabel: '💡 Ver cómo ganar',
+                onButton: () => showHowToEarnMerits()
+            });
+        }
+
+        _c2pCheckLevelUp(pk);
+
+        // Subidas de nivel durante la sesión (al llegar méritos nuevos)
+        if (!_c2pNudgeListening && typeof LBW_Merits !== 'undefined' && LBW_Merits.subscribeMerits) {
+            _c2pNudgeListening = true;
+            let deb = null;
+            LBW_Merits.subscribeMerits(() => {
+                clearTimeout(deb);
+                deb = setTimeout(() => {
+                    if (LBW_Nostr.isLoggedIn()) _c2pCheckLevelUp(LBW_Nostr.getPubkey());
+                }, 1500);
+            });
+        }
+    }, 8000);
+}
+
 // Abre la sección Méritos en la pestaña "💡 Cómo ganar" (desde el Pasaporte, etc.)
 function showHowToEarnMerits() {
     if (typeof openApp === 'function') openApp('meritos');

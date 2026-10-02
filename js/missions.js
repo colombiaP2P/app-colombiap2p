@@ -268,7 +268,7 @@ const LBW_Missions = (function () {
                     </div>
                     <p style="font-size:0.8rem;color:var(--color-text-secondary);margin:0 0 0.75rem;line-height:1.5;">${_esc(m.description)}</p>
                     <div style="display:flex;gap:0.5rem;flex-wrap:wrap;align-items:center;">
-                        <span style="font-size:0.72rem;background:rgba(229,185,92,0.12);color:var(--color-gold);padding:0.2rem 0.6rem;border-radius:12px;font-weight:700;border:1px solid rgba(229,185,92,0.25);">⭐ ${m.merit_amount} méritos ${cat.weight}</span>
+                        <span style="font-size:0.72rem;background:rgba(229,185,92,0.12);color:var(--color-gold);padding:0.2rem 0.6rem;border-radius:12px;font-weight:700;border:1px solid rgba(229,185,92,0.25);">⭐ ${m.merit_amount} méritos</span>
                         <span style="font-size:0.72rem;background:rgba(255,255,255,0.06);color:var(--color-text-secondary);padding:0.2rem 0.6rem;border-radius:12px;">${cat.label}</span>
                         ${m.min_citizenship && m.min_citizenship !== 'Fiatelo' ? `<span style="font-size:0.72rem;background:rgba(156,39,176,0.1);color:#CE93D8;padding:0.2rem 0.6rem;border-radius:12px;">min. ${m.min_citizenship}</span>` : ''}
                         ${deadlineHtml}
