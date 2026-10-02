@@ -1592,25 +1592,20 @@ function getUnifiedMerits() {
     const userProposals = govStats.myProposals || 0;
     const activityCount = userPosts + userOffers + userVotes + userProposals;
 
-    // Sum + cap (NOT max)
-    // [C2P] 2 méritos por acción, tope 210 (antes ×10, tope 300)
-    const ACTIVITY_MERIT_PER_ACTION = 2;
-    const ACTIVITY_MERIT_CAP = 210;
-    const activityMeritsRaw = activityCount * ACTIVITY_MERIT_PER_ACTION;
-    const activityMerits = Math.min(activityMeritsRaw, ACTIVITY_MERIT_CAP);
-    const totalMerits = nostrMerits + activityMerits;
+    // [C2P 2026-10-02] La actividad ya NO suma méritos (decisión del usuario):
+    // se calculaba en cada navegador, sin firma, era inestable y fácil de
+    // "farmear" con spam (hasta 210). Los méritos son solo los firmados
+    // (kind:31002 válidos); la actividad queda como dato informativo.
+    const totalMerits = nostrMerits;
 
     return {
         total: totalMerits,
         nostrMerits,
-        activityMerits,
-        activityMeritsRaw,
-        activityCap: ACTIVITY_MERIT_CAP,
-        activityPerAction: ACTIVITY_MERIT_PER_ACTION,
+        activityMerits: 0,          // compatibilidad: ya no suma
         byCategory: nostrBreakdown,
         activity: { posts: userPosts, offers: userOffers, votes: userVotes, proposals: userProposals },
         activityCount,
-        source: nostrMerits > 0 ? 'nostr+activity' : 'activity',
+        source: 'nostr',
         isGovernor: totalMerits >= 3000
     };
 }

@@ -1411,15 +1411,6 @@ function updateDashboardDisplay(merits) {
         progressBar.style.display = 'none';
     }
 
-    // Activity row
-    const actData = getUnifiedMerits();
-    const actRow = document.getElementById('activityLegacyRow');
-    const actVal = document.getElementById('activityMeritsValue');
-    if (actRow && actData.activityMerits > 0) {
-        actRow.style.display = 'block';
-        if (actVal) actVal.textContent = actData.activityMerits + ' pts';
-    }
-
     // Draw gauge
     drawMeritsGauge(merits);
 }

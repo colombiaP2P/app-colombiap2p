@@ -140,7 +140,7 @@ const LBW_Transparency = (() => {
         return `
             <div style="margin-bottom:1.25rem;">
                 <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.5rem;flex-wrap:wrap;gap:0.4rem;">
-                    <div style="font-size:0.78rem;color:var(--color-text-secondary);font-weight:600;">🏆 Méritos totales por usuario (Nostr + Actividad)</div>
+                    <div style="font-size:0.78rem;color:var(--color-text-secondary);font-weight:600;">🏆 Méritos totales por usuario</div>
                     <div style="font-size:0.7rem;color:var(--color-text-secondary);opacity:0.7;">${total} usuarios</div>
                 </div>
                 <div style="display:flex;flex-direction:column;gap:0.35rem;">
@@ -164,85 +164,6 @@ const LBW_Transparency = (() => {
         }).catch(() => {});
     }
 
-    let _activityEventsCache = null;
-    let _activityEventsCacheAt = 0;
-
-    // Fetcha los eventos Nostr que cuentan como "actividad" (kind:1
-    // community chat, kind:30402 marketplace, kind:31000 propuestas,
-    // kind:31001 votos) y los convierte en entradas tipo-mérito con
-    // amount=10 y categoría actividad_*. Estos no son emisiones
-    // formales kind:31002, pero se incluyen en el registro inmutable
-    // para reflejar TODO mérito generado en el ecosistema (formal +
-    // actividad). El cap de 300 por usuario solo afecta al total
-    // ponderado del Ledger Maestro, no al registro per-evento de aquí.
-    //
-    // IMPORTANTE: leemos de IndexedDB (LBW_Store), NO de relays vía
-    // LBW_Nostr.subscribe. Motivo: LBW_Nostr.subscribe tiene un dedup
-    // global _seenEvents (nostr.js:865) que bloquea cualquier evento ya
-    // visto por otra suscripción. Como chat/marketplace/gobernanza ya
-    // habrán cargado estos kinds antes de que el usuario abra
-    // Transparency, el callback no recibiría nada. LBW_Store sí tiene
-    // todos los eventos persistidos vía LBW_Sync.syncedSubscribe.
-    async function _fetchActivityEvents(force) {
-        if (!force && _activityEventsCache && (Date.now() - _activityEventsCacheAt < SUPABASE_CACHE_TTL_MS)) {
-            console.warn('[Transparency] activity cache hit:', _activityEventsCache.length);
-            return _activityEventsCache;
-        }
-        if (typeof LBW_Store === 'undefined' || !LBW_Store.getEventsByKind) {
-            console.warn('[Transparency] LBW_Store no disponible para fetch de actividad');
-            return [];
-        }
-        console.warn('[Transparency] leyendo actividad desde IndexedDB (4 kinds)…');
-        const all = [];
-        const seen = new Set();
-        const counts = { chat: 0, marketplace: 0, proposal: 0, vote: 0 };
-        function add(event, category, reasonContent, countKey) {
-            if (!event || !event.id || seen.has(event.id)) return;
-            seen.add(event.id);
-            counts[countKey]++;
-            all.push({
-                id: event.id,
-                dTag: '',
-                recipient: event.pubkey,
-                issuer: '',                                // sistema, sin issuer
-                amount: 10,
-                category,
-                reason: (reasonContent || '').toString().substring(0, 80),
-                created_at: event.created_at || 0,
-                source: 'actividad'
-            });
-        }
-        try {
-            const [chat, market, props, votes] = await Promise.all([
-                LBW_Store.getEventsByKind(1,     { limit: 1000, tags: { t: ['colombiap2p', 'c2p', 'bitcoin'] } }).catch(() => []),
-                LBW_Store.getEventsByKind(30402, { limit: 1000, tags: { t: ['colombiap2p-market', 'c2p-market'] } }).catch(() => []),
-                LBW_Store.getEventsByKind(31000, { limit: 1000, tags: { t: ['c2p-proposal'] } }).catch(() => []),
-                LBW_Store.getEventsByKind(31001, { limit: 1000, tags: { t: ['c2p-governance'] } }).catch(() => [])
-            ]);
-            (chat || []).forEach(e => {
-                const hasTag = e.tags && e.tags.some(t => t[0] === 't' && (t[1] === 'colombiap2p' || t[1] === 'c2p' || t[1] === 'bitcoin'));
-                if (hasTag) add(e, 'actividad_chat', e.content || '', 'chat');
-            });
-            (market || []).forEach(e => {
-                const title = (e.tags && (e.tags.find(t => t[0] === 'title') || [])[1]) || '';
-                add(e, 'actividad_marketplace', title, 'marketplace');
-            });
-            (props || []).forEach(e => {
-                const title = (e.tags && (e.tags.find(t => t[0] === 'title') || [])[1]) || '';
-                add(e, 'actividad_proposal', title, 'proposal');
-            });
-            (votes || []).forEach(e => {
-                add(e, 'actividad_vote', e.content || '', 'vote');
-            });
-            console.warn('[Transparency] ✅ actividad cargada: ' + all.length + ' eventos · ' + JSON.stringify(counts));
-        } catch (e) {
-            console.warn('[Transparency] error leyendo actividad:', e && e.message);
-        }
-        _activityEventsCache = all;
-        _activityEventsCacheAt = Date.now();
-        return all;
-    }
-
     async function renderMeritsPanel() {
         const panel = document.getElementById('transparencyMeritsPanel');
         if (!panel) return;
@@ -251,7 +172,9 @@ const LBW_Transparency = (() => {
             return;
         }
 
-        const activityEntries = await _fetchActivityEvents(false);
+        // [C2P 2026-10-02] La actividad ya no suma méritos: el registro muestra
+        // solo emisiones formales kind:31002 (firmadas y válidas).
+        const activityEntries = [];
 
         let stats, merits;
         const dataSource = 'memory';
@@ -327,13 +250,13 @@ const LBW_Transparency = (() => {
         try {
             if (typeof getUnifiedMerits === 'function' && typeof LBW_Nostr !== 'undefined' && LBW_Nostr.isLoggedIn()) {
                 const u = getUnifiedMerits();
-                if (u && u.activityMerits >= 0) {
+                if (u) {
                     const a = u.activity || {};
                     myActivityHtml = `
                         <div style="background:rgba(81,207,102,0.06);border:1px solid rgba(81,207,102,0.25);border-radius:10px;padding:0.85rem 1rem;margin-bottom:1.25rem;">
                             <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.5rem;flex-wrap:wrap;gap:0.5rem;">
                                 <div style="font-weight:700;color:#51cf66;font-size:0.92rem;">🏃 Tu actividad personal</div>
-                                <div style="font-size:0.78rem;color:var(--color-text-secondary);">Nostr <strong style="color:var(--color-gold);">${(u.nostrMerits||0).toLocaleString('es-ES')}</strong> + Actividad <strong style="color:#51cf66;">${(u.activityMerits||0).toLocaleString('es-ES')}</strong> = <strong>${(u.total||0).toLocaleString('es-ES')}</strong></div>
+                                <div style="font-size:0.78rem;color:var(--color-text-secondary);">Tus méritos: <strong style="color:var(--color-gold);">${(u.total||0).toLocaleString('es-ES')}</strong></div>
                             </div>
                             <div style="display:flex;flex-wrap:wrap;gap:0.4rem;font-size:0.78rem;color:var(--color-text-primary);">
                                 <span style="background:rgba(13,23,30,0.6);padding:0.25rem 0.6rem;border-radius:14px;">💬 ${a.posts||0} mensajes</span>
@@ -342,7 +265,7 @@ const LBW_Transparency = (() => {
                                 <span style="background:rgba(13,23,30,0.6);padding:0.25rem 0.6rem;border-radius:14px;">📋 ${a.proposals||0} propuestas</span>
                             </div>
                             <div style="font-size:0.7rem;color:var(--color-text-secondary);opacity:0.75;margin-top:0.5rem;line-height:1.4;">
-                                Cada acción cuenta ${u.activityPerAction||2} pts (cap ${u.activityCap||210} pts). Esta cifra se calcula en tu cliente — no se publica como evento Nostr y por eso solo se ve la tuya, no la de otros usuarios. Las emisiones formales kind:31002 de los Génesis sí son públicas y aparecen abajo.
+                                La actividad es informativa y no suma méritos. Los méritos se ganan asistiendo a eventos, completando misiones, aportando a la tesorería, participando en gobernanza y con la racha diaria (máx. 21). Todos se publican firmados y aparecen abajo.
                             </div>
                         </div>
                     `;
@@ -424,7 +347,7 @@ const LBW_Transparency = (() => {
                     </button>
                 </div>
                 <div style="font-size:0.7rem;color:var(--color-text-secondary);opacity:0.7;margin-bottom:0.6rem;line-height:1.4;">
-                    💡 Cada bloque es un evento Nostr firmado e inmutable. El hash de la izquierda es el <code style="font-family:var(--font-mono);font-size:0.68rem;background:rgba(44,95,111,0.18);padding:0.05rem 0.3rem;border-radius:3px;">event.id</code> (SHA-256 del payload canónico). El bloque #1 es el génesis del registro. Incluye emisiones formales kind:31002 + eventos de actividad. El total de Méritos aplica un cap de 300 pts de actividad por usuario, por eso la suma de filas puede superar el total agregado.
+                    💡 Cada bloque es un evento Nostr firmado e inmutable. El hash de la izquierda es el <code style="font-family:var(--font-mono);font-size:0.68rem;background:rgba(44,95,111,0.18);padding:0.05rem 0.3rem;border-radius:3px;">event.id</code> (SHA-256 del payload canónico). El bloque #1 es el génesis del registro. Solo incluye emisiones formales kind:31002 firmadas por el Emisor ColombiaP2P o un Génesis. Los topes (económica 500, racha 21 por persona) se aplican al total de cada usuario, por eso la suma de filas puede superarlo.
                 </div>
                 <div style="overflow-x:auto;border:1px solid var(--color-border);border-radius:10px;background:linear-gradient(180deg,rgba(13,23,30,0.6) 0%,rgba(13,23,30,0.35) 100%);box-shadow:inset 0 0 0 1px rgba(229,185,92,0.05);">
                     <table style="width:100%;border-collapse:collapse;font-size:0.78rem;color:var(--color-text-primary);min-width:880px;font-family:var(--font-mono);">
@@ -1085,7 +1008,7 @@ const LBW_Transparency = (() => {
     // (categoría + búsqueda) que están aplicados en la vista. Incluye
     // tanto emisiones formales como eventos de actividad.
     async function exportMeritsCSV() {
-        const activity = await _fetchActivityEvents(false);
+        const activity = [];   // la actividad ya no suma méritos (2026-10-02)
         const formal = LBW_Merits && LBW_Merits.getAllMerits ? LBW_Merits.getAllMerits({ limit: 9999 }) : [];
         const seen = new Set();
         let entries = [];

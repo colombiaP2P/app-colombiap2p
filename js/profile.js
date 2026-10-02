@@ -401,7 +401,7 @@ function updateProfileDisplay() {
     }
     
     // Calculate merits for citizenship level
-    // [v2.0] Unified merits: Nostr + min(activity, 300)
+    // Méritos firmados (Nostr): la actividad ya no suma (2026-10-02)
     const meritData = getUnifiedMerits();
     const merits = meritData.total;
     const totalContributions = meritData.activityCount;
@@ -410,7 +410,7 @@ function updateProfileDisplay() {
     const citizenship = getCitizenshipLevel(merits);
     
     console.log(`🏛️ Profile: ${totalContributions} contributions, ${merits} merits → ${citizenship.title}`);
-    console.log(`🏛️ Source: ${meritData.source} | Nostr: ${meritData.nostrMerits} | Activity: ${meritData.activityMerits}/${meritData.activityCap}`);
+    console.log(`🏛️ Méritos firmados (Nostr): ${meritData.nostrMerits}`);
     
     // Update citizenship gauge visualization
     updateCitizenshipGauge(merits);
@@ -498,13 +498,7 @@ function updateProfileDisplay() {
     // [v2.0] Merit source breakdown
     const meritSourceEl = document.getElementById('profileMeritSource');
     if (meritSourceEl) {
-        meritSourceEl.innerHTML = `
-            <span style="color:var(--color-gold);">⚡ Nostr: ${meritData.nostrMerits}</span>
-            <span style="opacity:0.5;"> + </span>
-            <span style="color:var(--color-teal);">📊 Actividad: ${meritData.activityMerits}${meritData.activityMeritsRaw > meritData.activityCap ? ' (cap ' + meritData.activityCap + ')' : ''}</span>
-            <span style="opacity:0.5;"> = </span>
-            <span style="color:var(--color-bitcoin);font-weight:700;">${merits} méritos</span>
-        `;
+        meritSourceEl.innerHTML = `<span style="color:var(--color-bitcoin);font-weight:700;">⚡ ${merits} méritos</span>`;
     }
 
     // [v2.0] Quick access: Génesis → verifications
