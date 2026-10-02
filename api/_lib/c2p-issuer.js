@@ -31,6 +31,17 @@ export const GOV_ADMIN_PUBKEYS = globalThis.C2P_ADMIN_PUBKEYS;
 
 const GENESIS_MIN = 3000;
 const CATEGORY_CAPS = { economica: 500 };   // maxMerits de js/nostr-merits.js
+// Topes por ORIGEN del mérito (tag 'origin' o prefijo del d). Deben coincidir
+// con ORIGIN_CAPS de js/nostr-merits.js. racha: 21 de por vida (incluye los
+// migrados de PocketBase) — la racha da los primeros méritos, no se "farmea".
+export const ORIGIN_CAPS = { racha: 21 };
+
+function originOf(ev) {
+    const o = (ev.tags.find(t => t[0] === 'origin') || [])[1];
+    if (o) return o;
+    const m = /^merit:([a-z-]+):/.exec((ev.tags.find(t => t[0] === 'd') || [])[1] || '');
+    return m ? m[1] : '';
+}
 
 export const isHex64 = s => typeof s === 'string' && /^[0-9a-f]{64}$/.test(s);
 
@@ -213,6 +224,7 @@ export async function loadLedger(relay) {
         recipient: tag(ev, 'p') || ev.pubkey,
         amount: parseFloat(tag(ev, 'amount')) || 0,
         category: tag(ev, 'category') || 'productiva',
+        origin: originOf(ev),
         d: tag(ev, 'd')
     })).filter(m => !revoked.has(`${m.ev.pubkey}:${m.d}`));
 
@@ -241,14 +253,20 @@ export async function loadLedger(relay) {
 
 function _totals(accepted) {
     const out = new Map();
-    for (const m of accepted.values()) {
-        if (!out.has(m.recipient)) out.set(m.recipient, { total: 0, byCategory: {} });
+    // Orden cronológico: los topes los consumen primero los méritos más antiguos
+    const list = [...accepted.values()].sort((a, b) => a.ev.created_at - b.ev.created_at);
+    for (const m of list) {
+        if (!out.has(m.recipient)) out.set(m.recipient, { total: 0, byCategory: {}, byOrigin: {} });
         const u = out.get(m.recipient);
-        const cap = CATEGORY_CAPS[m.category];
-        const current = u.byCategory[m.category] || 0;
-        const eff = cap != null ? Math.max(0, Math.min(m.amount, cap - current)) : m.amount;
+        let eff = m.amount;
+        const catCap = CATEGORY_CAPS[m.category];
+        if (catCap != null) eff = Math.min(eff, catCap - (u.byCategory[m.category] || 0));
+        const oriCap = ORIGIN_CAPS[m.origin];
+        if (oriCap != null) eff = Math.min(eff, oriCap - (u.byOrigin[m.origin] || 0));
+        eff = Math.max(0, eff);
         u.total += eff;
-        u.byCategory[m.category] = current + eff;
+        u.byCategory[m.category] = (u.byCategory[m.category] || 0) + eff;
+        if (m.origin) u.byOrigin[m.origin] = (u.byOrigin[m.origin] || 0) + eff;
     }
     return out;
 }

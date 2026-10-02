@@ -111,6 +111,12 @@ const LBW_Merits = (() => {
         Comunidad:   { maxPct: 0.20, type: 'proportional' }
     };
 
+    // [C2P] Topes por ORIGEN del mérito (tag 'origin' o prefijo del d). Deben
+    // coincidir con ORIGIN_CAPS de api/_lib/c2p-issuer.js.
+    // racha: 21 de por vida, incluidos los migrados de PocketBase — la racha da
+    // los primeros méritos; para avanzar hay que aportar a la comunidad.
+    const ORIGIN_CAPS = { racha: 21 };
+
     // Génesis voting cap: merit_voto = min(total, 3000)
     const GENESIS_MERIT_CAP = 3000;
 
@@ -803,7 +809,7 @@ const LBW_Merits = (() => {
                 reason: g('reason') || parsed.reason || '',
                 awardedBy: g('awarded-by') || parsed.awardedBy || event.pubkey,
                 signer: event.pubkey,   // firmante verificado (awarded-by es solo informativo)
-                origin: g('origin') || '',
+                origin: g('origin') || ((/^merit:([a-z-]+):/.exec(g('d')) || [])[1] || ''),
                 // Fecha real del hecho (méritos migrados de PocketBase la llevan aparte)
                 occurred_at: parseInt(g('occurred_at'), 10) || event.created_at,
                 created_at: event.created_at,
@@ -1089,6 +1095,14 @@ const LBW_Merits = (() => {
         if (_catDef?.maxMerits != null) {
             const currentCatMerits = userData.byCategory[category] || 0;
             effectiveAmount = Math.max(0, Math.min(amount, _catDef.maxMerits - currentCatMerits));
+        }
+        // [C2P] Cap por origen (ej. racha: 21 de por vida, incluidos los migrados)
+        const _origin = merit.origin || '';
+        if (ORIGIN_CAPS[_origin] != null) {
+            const currentOrigin = userData.records
+                .filter(r => (r.origin || '') === _origin)
+                .reduce((sum, r) => sum + (r.amount || 0), 0);
+            effectiveAmount = Math.max(0, Math.min(effectiveAmount, ORIGIN_CAPS[_origin] - currentOrigin));
         }
 
         userData.records.push({ id, dTag, amount: effectiveAmount, category, created_at, source,
@@ -1532,7 +1546,7 @@ const LBW_Merits = (() => {
         calculateVotingPower,
         getStats,
         hasFoundationalMerits,
-        TRUSTED_ISSUERS, isTrustedIssuer,
+        TRUSTED_ISSUERS, isTrustedIssuer, ORIGIN_CAPS,
         isGovernor,
 
         // Utilities (centralizadas, [M-14])

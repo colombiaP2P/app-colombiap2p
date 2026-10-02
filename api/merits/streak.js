@@ -8,6 +8,11 @@
 //   - registra la actividad del día en user_streaks (una vez por día)
 //   - racha +1 si la última actividad fue ayer; si no, vuelve a 1
 //   - mérito: 1 por día, 5 en cada múltiplo de 7 (mismas reglas de antes)
+//   - TOPE de por vida: 21 méritos por rachas por persona, contando los
+//     migrados de PocketBase (merit:racha:historico). La racha la idea es que
+//     dé los primeros méritos sin esfuerzo; para avanzar en ciudadanía hay que
+//     aportar (asistencia, trabajo, económico). Superado el tope, el contador
+//     de días sigue pero ya no se emiten méritos.
 //
 // Para no crear un evento Nostr por usuario y día, el Emisor mantiene UN
 // mérito acumulado por usuario (d merit:racha:total:<pk16>) y lo reemplaza
@@ -20,6 +25,7 @@ import { withRelay, verifyNip98, pbFetch, getIssuerMerit, publishMerit, meritDTa
 const ENDPOINT_PATH = '/api/merits/streak';
 const PER_DAY = 1;        // XP_PER_STREAK_DAY de js/c2p-rachas.js
 const WEEKLY_BONUS = 5;   // cada 7 días de racha
+export const STREAK_MERIT_CAP = 21;   // tope de por vida (debe coincidir con ORIGIN_CAPS.racha)
 const TZ = 'America/Bogota';
 
 const q = s => encodeURIComponent(s);
@@ -61,25 +67,30 @@ export default async function handler(req, res) {
             ? await pbFetch(`/api/collections/user_streaks/records/${rec.id}`, { method: 'PATCH', body: JSON.stringify(payload) })
             : await pbFetch('/api/collections/user_streaks/records', { method: 'POST', body: JSON.stringify(payload) });
 
-        // Mérito del día, salvo que la app antigua ya haya escrito el XP de hoy
-        const earned = current % 7 === 0 ? WEEKLY_BONUS : PER_DAY;
+        // Mérito del día (con tope), salvo que la app antigua ya escribiera el XP de hoy
+        const dayReward = current % 7 === 0 ? WEEKLY_BONUS : PER_DAY;
         const legacyToday = await pbFetch(`/api/collections/xp_transactions/records?perPage=1&filter=${q(`user_pubkey = "${pubkey}" && source = "racha" && ref_id = "${today}"`)}`);
-        let total = null;
+        let earned = 0, streakMerits = null, capReached = false;
         if ((legacyToday.totalItems || 0) === 0) {
-            total = await withRelay(async relay => {
-                const d = meritDTag(pubkey, 'racha:total');
-                const prev = await getIssuerMerit(relay, d);
-                const prevAmount = prev ? (parseFloat((prev.tags.find(t => t[0] === 'amount') || [])[1]) || 0) : 0;
-                const amount = prevAmount + earned;
+            ({ earned, streakMerits, capReached } = await withRelay(async relay => {
+                const amountOf = ev => ev ? (parseFloat((ev.tags.find(t => t[0] === 'amount') || [])[1]) || 0) : 0;
+                const prevTotal = amountOf(await getIssuerMerit(relay, meritDTag(pubkey, 'racha:total')));
+                const historic = amountOf(await getIssuerMerit(relay, meritDTag(pubkey, 'racha:historico')));
+                const room = Math.max(0, STREAK_MERIT_CAP - historic - prevTotal);
+                const add = Math.min(dayReward, room);
+                if (add <= 0) return { earned: 0, streakMerits: historic + prevTotal, capReached: true };
                 await publishMerit(relay, {
-                    recipient: pubkey, amount, category: 'productiva', ref: 'racha:total',
+                    recipient: pubkey, amount: prevTotal + add, category: 'productiva', ref: 'racha:total',
                     reason: `🔥 Rachas diarias (acumulado, última: día ${current})`
                 });
-                return amount;
-            });
+                const now = historic + prevTotal + add;
+                return { earned: add, streakMerits: now, capReached: now >= STREAK_MERIT_CAP };
+            }));
         }
 
-        return res.status(200).json({ ...state(saved), today, earned: total == null ? 0 : earned, streakMeritsTotal: total });
+        return res.status(200).json({
+            ...state(saved), today, earned, streakMerits, capReached, streakMeritCap: STREAK_MERIT_CAP
+        });
     } catch (err) {
         console.error('[merits/streak]', err);
         return res.status(500).json({ error: 'Error registrando la racha: ' + err.message });

@@ -236,7 +236,21 @@ const C2P_Rachas = (function () {
         const refLinkEl= document.getElementById('c2pReferralLink');
 
         if (streakEl) streakEl.textContent = streak.current + ' día' + (streak.current !== 1 ? 's' : '');
-        if (maxEl)    maxEl.textContent    = 'Máx: ' + streak.max;
+        if (maxEl) {
+            // Méritos por racha (tope de por vida, incluidos los migrados)
+            let streakInfo = '';
+            try {
+                const cap = (typeof LBW_Merits !== 'undefined' && LBW_Merits.ORIGIN_CAPS) ? LBW_Merits.ORIGIN_CAPS.racha : null;
+                const data = (typeof LBW_Merits !== 'undefined' && LBW_Merits.getUserMerits) ? LBW_Merits.getUserMerits(_myPubkey()) : null;
+                if (cap && data) {
+                    const got = (data.records || []).filter(r => r.origin === 'racha').reduce((sum, r) => sum + (r.amount || 0), 0);
+                    streakInfo = got >= cap
+                        ? ` · Méritos por racha: ${cap}/${cap} ✔️ (sigue sumando con asistencia, misiones o aportes)`
+                        : ` · Méritos por racha: ${got}/${cap}`;
+                }
+            } catch (_) {}
+            maxEl.textContent = 'Máx: ' + streak.max + streakInfo;
+        }
         if (flameEl) {
             if (streak.current >= 30)     flameEl.textContent = '🌋';
             else if (streak.current >= 14) flameEl.textContent = '🔥';
