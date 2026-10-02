@@ -70,9 +70,17 @@ async function updateIdentitiesCounter() {
         const pb = (typeof C2P_PB !== 'undefined') ? C2P_PB.getClient() : null;
         if (!pb) throw new Error('PocketBase no disponible');
 
-        // Pubkeys únicas con algún mérito recibido (xp_transactions)
-        const all = await pb.collection('xp_transactions').getFullList({ fields: 'user_pubkey' });
-        const realCount = new Set(all.map(r => r.user_pubkey).filter(Boolean)).size;
+        // Identidades únicas con actividad registrada. Desde la Fase 3 los
+        // méritos viven en Nostr y xp_transactions ya no crece, así que se une
+        // con user_streaks (el servidor crea una fila al primer día de uso de
+        // cada cuenta) y event_checkins.
+        const sources = ['xp_transactions', 'user_streaks', 'event_checkins'];
+        const lists = await Promise.all(sources.map(c =>
+            pb.collection(c).getFullList({ fields: 'user_pubkey' }).catch(() => [])
+        ));
+        const pubkeys = new Set();
+        lists.flat().forEach(r => { if (r.user_pubkey) pubkeys.add(r.user_pubkey.toLowerCase()); });
+        const realCount = pubkeys.size;
         const displayCount = realCount + IDENTITIES_BASE_OFFSET;
         const currentValue = parseInt(counter.textContent) || 0;
         animateCounter(counter, currentValue, displayCount, 1500);
