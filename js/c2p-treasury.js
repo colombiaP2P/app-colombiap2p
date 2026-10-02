@@ -130,7 +130,8 @@ const C2P_Treasury = (function () {
             const totalItems = items.length;
 
             if (totalItems === 0) {
-                container.innerHTML = `<div class="c2p-empty-state" style="padding:2rem;">Aún no tienes méritos · Asiste a eventos, completa misiones, vota en gobernanza y mantén tu racha diaria</div>`;
+                container.innerHTML = `<div class="c2p-empty-state" style="padding:2rem;">Aún no tienes méritos · Asiste a eventos, completa misiones, vota en gobernanza y mantén tu racha diaria
+                    <div style="margin-top:0.9rem;"><button class="c2p-earn-btn" onclick="showHowToEarnMerits()">💡 Cómo ganar méritos</button></div></div>`;
                 return;
             }
 
@@ -159,7 +160,10 @@ const C2P_Treasury = (function () {
             container.innerHTML = `
                 <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.75rem;flex-wrap:wrap;gap:0.5rem;">
                     <div style="font-size:0.8rem;color:var(--color-text-secondary);">${totalItems.toLocaleString('es-CO')} movimientos · <strong style="color:var(--color-bitcoin);">${totalMerits.toLocaleString('es-CO')} méritos</strong></div>
-                    <div style="font-size:0.8rem;color:var(--color-text-secondary);">Página ${currentPage} de ${totalPages}</div>
+                    <div style="display:flex;align-items:center;gap:0.6rem;">
+                        <button class="c2p-earn-btn" onclick="showHowToEarnMerits()">💡 Cómo ganar</button>
+                        <div style="font-size:0.8rem;color:var(--color-text-secondary);">Página ${currentPage} de ${totalPages}</div>
+                    </div>
                 </div>
                 <div style="display:flex;flex-direction:column;gap:0.45rem;margin-bottom:0.75rem;">
                     ${pageItems.map(_renderRow).join('')}

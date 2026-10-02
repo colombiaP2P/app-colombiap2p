@@ -666,6 +666,12 @@ async function updateLbwmStats(userMerits) {
 // UI FUNCTIONS
 // ═══════════════════════════════════════════════════════════════
 
+// Abre la sección Méritos en la pestaña "💡 Cómo ganar" (desde el Pasaporte, etc.)
+function showHowToEarnMerits() {
+    if (typeof openApp === 'function') openApp('meritos');
+    setTimeout(() => switchC2PMTab('como-ganar'), 150);
+}
+
 function switchC2PMTab(tabName) {
     document.querySelectorAll('.c2p-merit-tab').forEach(tab => tab.classList.remove('active'));
     document.querySelectorAll('.c2p-merit-tab-content').forEach(content => content.classList.remove('active'));

@@ -26,7 +26,7 @@
     <!-- DaisyUI -->
     <link href="https://cdn.jsdelivr.net/npm/daisyui@4.12.10/dist/full.min.css" rel="stylesheet">
     <!-- LiberBit Custom Styles (loaded last to override) -->
-    <link rel="stylesheet" href="css/main.css?v=sep28a">
+    <link rel="stylesheet" href="css/main.css?v=oct02-earn">
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
           integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
           crossorigin=""/>
@@ -1857,6 +1857,9 @@
                     <div class="c2p-merit-tab active" onclick="switchC2PMTab('dashboard')" data-c2p-merit-tab="dashboard">
                         📊 Dashboard
                     </div>
+                    <div class="c2p-merit-tab" onclick="switchC2PMTab('como-ganar')" data-c2p-merit-tab="como-ganar">
+                        💡 Cómo ganar
+                    </div>
                     <div class="c2p-merit-tab" onclick="switchC2PMTab('propuestas')" data-c2p-merit-tab="propuestas">
                         🏛️ Propuestas <span id="tabBadgeProposals" style="display:none;background:var(--color-error);color:#fff;font-size:0.6rem;font-weight:700;width:16px;height:16px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;margin-left:0.2rem;"></span>
                     </div>
@@ -1898,6 +1901,9 @@
                                 <div id="meritsGaugeMeritCount" style="font-family: var(--font-mono); font-size: 2rem; font-weight: 800; color: var(--color-gold); margin-top: 0.5rem;">0</div>
                                 <div id="meritsGaugeBadge" style="display: inline-flex; align-items: center; gap: 0.3rem; padding: 0.3rem 0.7rem; border-radius: 20px; font-size: 0.85rem; font-weight: 600; border: 1px solid var(--color-gold); color: var(--color-gold); background: rgba(229,185,92,0.1); margin-top: 0.5rem;">
                                     😴 Fiatelo
+                                </div>
+                                <div style="margin-top: 0.75rem;">
+                                    <button class="c2p-earn-btn c2p-earn-btn-primary" onclick="switchC2PMTab('como-ganar')">💡 ¿Cómo gano méritos?</button>
                                 </div>
                                 <!-- Progress to next level -->
                                 <div id="meritsProgressBar" style="margin-top: 1rem; display: none;">
@@ -2193,6 +2199,105 @@
                 <!-- ═══════════════════════════════════════════════ -->
                 <!-- Tab 8: INFO (condensed educational) -->
                 <!-- ═══════════════════════════════════════════════ -->
+                <!-- ═══════════════════════════════════════════════ -->
+                <!-- Tab: CÓMO GANAR MÉRITOS -->
+                <!-- ═══════════════════════════════════════════════ -->
+                <div class="c2p-merit-tab-content" id="c2p-merit-tab-como-ganar">
+                    <div class="c2p-merit-card">
+                        <h3 style="color: var(--color-gold); font-size: 1.2rem; margin-bottom: 0.4rem;">💡 Cómo ganar méritos</h3>
+                        <p style="font-size: 0.88rem; color: var(--color-text-secondary); line-height: 1.6; margin-bottom: 1.1rem;">
+                            Los méritos reconocen lo que <strong style="color: var(--color-text-primary);">aportas a la comunidad</strong>: asistir, trabajar, aportar y decidir. Con ellos subes de nivel de ciudadanía y ganas peso en la gobernanza.
+                        </p>
+                        <div class="c2p-earn-list">
+                            <div class="c2p-earn-row">
+                                <div class="c2p-earn-icon">📅</div>
+                                <div class="c2p-earn-body">
+                                    <div class="c2p-earn-title">Asiste a eventos</div>
+                                    <div class="c2p-earn-how">Escanea el QR que muestra el organizador al llegar al evento (o escribe su código). Algunos eventos dan además un sello o un badge.</div>
+                                </div>
+                                <div class="c2p-earn-side">
+                                    <div class="c2p-earn-amount">Lo que defina el evento</div>
+                                    <button class="c2p-earn-btn" onclick="openApp('eventos')">Ver eventos</button>
+                                </div>
+                            </div>
+                            <div class="c2p-earn-row">
+                                <div class="c2p-earn-icon">🎯</div>
+                                <div class="c2p-earn-body">
+                                    <div class="c2p-earn-title">Completa misiones</div>
+                                    <div class="c2p-earn-how">Reclama una misión abierta, entrega tu trabajo con la evidencia y un Génesis la revisa y aprueba.</div>
+                                </div>
+                                <div class="c2p-earn-side">
+                                    <div class="c2p-earn-amount">Lo que defina la misión</div>
+                                    <button class="c2p-earn-btn" onclick="openApp('misiones')">Ver misiones</button>
+                                </div>
+                            </div>
+                            <div class="c2p-earn-row">
+                                <div class="c2p-earn-icon">⚡</div>
+                                <div class="c2p-earn-body">
+                                    <div class="c2p-earn-title">Aporta a la tesorería</div>
+                                    <div class="c2p-earn-how">Haz un zap desde la app a la tesorería comunitaria: se verifica solo y se acredita en segundos.</div>
+                                </div>
+                                <div class="c2p-earn-side">
+                                    <div class="c2p-earn-amount">1 mérito por cada 100 sats<br><span>máx. 500 por persona</span></div>
+                                    <button class="c2p-earn-btn" onclick="openApp('aportacionEconomica')">Aportar</button>
+                                </div>
+                            </div>
+                            <div class="c2p-earn-row">
+                                <div class="c2p-earn-icon">🗳️</div>
+                                <div class="c2p-earn-body">
+                                    <div class="c2p-earn-title">Participa en gobernanza</div>
+                                    <div class="c2p-earn-how">Vota las propuestas activas, propón mejoras para la comunidad y ejecuta las que se aprueben.</div>
+                                </div>
+                                <div class="c2p-earn-side">
+                                    <div class="c2p-earn-amount">Votar: 3 (o 5)<br><span>Propuesta aprobada: 50 · rechazada: 10<br>Ejecución verificada: 50</span></div>
+                                    <button class="c2p-earn-btn" onclick="openApp('gobernanza')">Ir a gobernanza</button>
+                                </div>
+                            </div>
+                            <div class="c2p-earn-row">
+                                <div class="c2p-earn-icon">👥</div>
+                                <div class="c2p-earn-body">
+                                    <div class="c2p-earn-title">Invita personas</div>
+                                    <div class="c2p-earn-how">Comparte tu enlace de referido (está en tu Pasaporte). Recibes los méritos cuando la persona asiste a su primer evento.</div>
+                                </div>
+                                <div class="c2p-earn-side">
+                                    <div class="c2p-earn-amount">50 por persona</div>
+                                    <button class="c2p-earn-btn" onclick="openApp('perfil')">Mi enlace</button>
+                                </div>
+                            </div>
+                            <div class="c2p-earn-row">
+                                <div class="c2p-earn-icon">🔥</div>
+                                <div class="c2p-earn-body">
+                                    <div class="c2p-earn-title">Mantén tu racha diaria</div>
+                                    <div class="c2p-earn-how">Abre la app cada día. Es la forma de conseguir tus primeros méritos; para seguir avanzando hay que aportar a la comunidad.</div>
+                                </div>
+                                <div class="c2p-earn-side">
+                                    <div class="c2p-earn-amount">1 por día · 5 cada 7 días<br><span>máx. 21 en total</span></div>
+                                    
+                                </div>
+                            </div>
+                        </div>
+
+                        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.75rem; margin-top: 1.1rem;" class="mobile-grid-1col">
+                            <div style="background: var(--color-bg-dark); padding: 0.9rem 1rem; border-radius: 10px; border-left: 3px solid var(--color-error);">
+                                <div style="font-weight: 700; font-size: 0.88rem; color: var(--color-text-primary); margin-bottom: 0.35rem;">❌ No dan méritos</div>
+                                <div style="font-size: 0.8rem; color: var(--color-text-secondary); line-height: 1.6;">Escribir en el chat, publicar anuncios en el marketplace o reaccionar. Son bienvenidos, pero los méritos premian el aporte, no la cantidad de mensajes.</div>
+                            </div>
+                            <div style="background: var(--color-bg-dark); padding: 0.9rem 1rem; border-radius: 10px; border-left: 3px solid var(--color-gold);">
+                                <div style="font-weight: 700; font-size: 0.88rem; color: var(--color-text-primary); margin-bottom: 0.35rem;">🔏 Méritos verificables</div>
+                                <div style="font-size: 0.8rem; color: var(--color-text-secondary); line-height: 1.6;">Cada mérito lo firma el Emisor ColombiaP2P después de comprobar el hecho. Los ves uno a uno en el <strong>⚡ Historial</strong> de tu Pasaporte.</div>
+                            </div>
+                        </div>
+
+                        <div style="margin-top: 1.1rem; padding: 0.9rem 1rem; background: rgba(229, 185, 92, 0.08); border: 1px solid rgba(229, 185, 92, 0.25); border-radius: 10px;">
+                            <div style="font-weight: 700; font-size: 0.88rem; color: var(--color-gold); margin-bottom: 0.4rem;">🏛️ Niveles de ciudadanía</div>
+                            <div style="font-size: 0.8rem; color: var(--color-text-secondary); line-height: 1.7;">
+                                Plebeyo <strong>100</strong> · Hodler <strong>200</strong> · Noder <strong>400</strong> · Bitcoiner <strong>800</strong> · Maximalista <strong>1.600</strong> · Satoshi <strong>2.100</strong> · Génesis <strong>3.000</strong>
+                            </div>
+                            <button class="c2p-earn-btn" style="margin-top: 0.6rem;" onclick="switchC2PMTab('niveles')">Ver niveles y beneficios</button>
+                        </div>
+                    </div>
+                </div>
+
                 <div class="c2p-merit-tab-content" id="c2p-merit-tab-info">
                     <div class="c2p-merit-card">
                         <h3 style="color: var(--color-gold); font-size: 1.2rem; margin-bottom: 1rem;">ℹ️ ¿Qué son los Méritos?</h3>
@@ -2222,8 +2327,8 @@
                         <h4 style="color: var(--color-gold); font-size: 1rem; margin-bottom: 0.75rem;">📊 Tipos de Aportación</h4>
                         <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem; margin-bottom: 1.5rem;" class="mobile-grid-1col">
                             <div style="padding: 0.75rem; background: var(--color-bg-dark); border-radius: 8px; border-left: 3px solid var(--color-gold);">
-                                <div style="font-weight: 600; color: var(--color-text-primary); font-size: 0.9rem;">💰 Económica <span style="color: var(--color-gold);">×1.0</span></div>
-                                <div style="font-size: 0.8rem; color: var(--color-text-secondary);">BTC, liquidez · Verificación directa</div>
+                                <div style="font-weight: 600; color: var(--color-text-primary); font-size: 0.9rem;">💰 Económica <span style="color: var(--color-gold);">×0.01</span></div>
+                                <div style="font-size: 0.8rem; color: var(--color-text-secondary);">1 mérito por cada 100 sats · máx. 500 por persona</div>
                             </div>
                             <div style="padding: 0.75rem; background: var(--color-bg-dark); border-radius: 8px; border-left: 3px solid var(--color-teal-light);">
                                 <div style="font-weight: 600; color: var(--color-text-primary); font-size: 0.9rem;">🛠️ Productiva <span style="color: var(--color-teal-light);">×1.0</span></div>
@@ -3185,10 +3290,10 @@
     <script src="js/nostr-merits.js?v=c2p-mer-4-adm-cap-noact"></script>
     <!-- Sección Transparencia: méritos + treasury -->
     <script src="js/transparency.js?v=c2p-31-adm-noact2"></script>
-    <script src="js/c2p-treasury.js?v=9"></script>
+    <script src="js/c2p-treasury.js?v=9-earn"></script>
     <script src="js/c2p-stats.js?v=2"></script>
     <!-- merits.js cargado DESPUÉS de nostr-merits.js ya que depende de LBW_Merits -->
-    <script src="js/merits.js?v=c2p-12-noact"></script>
+    <script src="js/merits.js?v=c2p-12-noact-earn"></script>
     <script src="js/nostr-reviews.js?v=c2p-rev-1-g"></script>
     <script src="js/nostr-marketplace-pay.js?v=m9-2-g"></script>
     <script src="js/nostr-stalls.js?v=hardening-1-g"></script>
