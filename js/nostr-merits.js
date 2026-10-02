@@ -1164,6 +1164,20 @@ const LBW_Merits = (() => {
         return _leaderboard.slice(0, limit);
     }
 
+    // [C2P 2026-10-02] Ranking por MÉRITOS GANADOS: total menos los
+    // fundacionales (asignados al arrancar el sistema, no ganados). Así los
+    // fundadores compiten con lo que han aportado, como cualquiera, y el
+    // ranking motiva a todos. El nivel y el poder de voto siguen usando el total.
+    // Cada entry: { pubkey, npub, total, earned, founder, level, byCategory }
+    function getRankingLeaderboard(limit = 50) {
+        const list = getLeaderboard(9999).map(e => {
+            const fundacional = (e.byCategory && e.byCategory.fundacional) || 0;
+            return { ...e, earned: Math.max(0, (e.total || 0) - fundacional), founder: fundacional > 0 };
+        }).filter(e => e.earned > 0 || e.founder)
+          .sort((a, b) => (b.earned - a.earned) || (b.total - a.total));
+        return limit >= list.length ? list : list.slice(0, limit);
+    }
+
     // [transparency-1] Devuelve TODOS los méritos aceptados como lista
     // plana, ordenada por created_at desc (más recientes primero) por
     // defecto. Cada entry: {id, dTag, recipient, issuer, amount, category,
@@ -1546,7 +1560,7 @@ const LBW_Merits = (() => {
         calculateVotingPower,
         getStats,
         hasFoundationalMerits,
-        TRUSTED_ISSUERS, isTrustedIssuer, ORIGIN_CAPS,
+        TRUSTED_ISSUERS, isTrustedIssuer, ORIGIN_CAPS, getRankingLeaderboard,
         isGovernor,
 
         // Utilities (centralizadas, [M-14])

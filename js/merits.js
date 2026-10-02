@@ -318,38 +318,11 @@ function updateVotingBlocksDisplay() {
 // Leaderboard (updated with level & bloc display)
 // ═══════════════════════════════════════════════════════════════
 async function loadLeaderboard() {
-    // FIX (apr13-c): use Supabase ledger as primary source so the leaderboard
-    // shows TOTAL merits (nostr + activity), matching dashboard, ledger maestro
-    // and ranking pioneros. Was using LBW_Merits.getLeaderboard() which only
-    // has formal nostr merits (no activity), causing inconsistent numbers.
-    let leaderboard = [];
-
-    if (typeof LBW_MeritsSync !== 'undefined' && LBW_MeritsSync.loadSupabaseLedger) {
-        try {
-            const ledger = await LBW_MeritsSync.loadSupabaseLedger({ limit: 20, orderBy: 'total' });
-            if (ledger && ledger.users && ledger.users.length > 0) {
-                // Derive bloc from level name (Supabase doesn't store bloc directly)
-                const blocFor = (lvl) => {
-                    if (lvl === 'Génesis' || lvl === 'Satoshi') return 'Gobernanza';
-                    if (lvl === 'Bitcoiner' || lvl === 'Maximalista') return 'Ciudadanía';
-                    return 'Comunidad';
-                };
-                leaderboard = ledger.users.map(u => ({
-                    pubkey: u.pubkey,
-                    npub: u.npub || '',
-                    total: u.total || 0,
-                    level: { name: u.nivel || 'Fiatelo', emoji: u.nivel_emoji || '💸', bloc: blocFor(u.nivel) }
-                }));
-            }
-        } catch (e) {
-            console.warn('[Merits] Supabase leaderboard failed, falling back to Nostr local:', e);
-        }
-    }
-
-    // Fallback: local Nostr leaderboard if Supabase unavailable
-    if (leaderboard.length === 0 && typeof LBW_Merits !== 'undefined') {
-        leaderboard = LBW_Merits.getLeaderboard(20) || [];
-    }
+    // [C2P 2026-10-02] Clasificación por MÉRITOS GANADOS (sin fundacionales),
+    // la misma que el Ranking Pioneros. El nivel se sigue calculando con el total.
+    const fullRanking = (typeof LBW_Merits !== 'undefined' && LBW_Merits.getRankingLeaderboard)
+        ? (LBW_Merits.getRankingLeaderboard(9999) || []) : [];
+    const leaderboard = fullRanking.slice(0, 20);
 
     const myPubkey = LBW_Nostr.isLoggedIn() ? LBW_Nostr.getPubkey() : '';
 
@@ -393,11 +366,11 @@ async function loadLeaderboard() {
                     <div style="font-size: 1.2rem; font-weight: 700; color: var(--color-gold); min-width: 36px;">${medal}</div>
                     <div style="flex: 1;">
                         <div id="${nameId}" style="color: var(--color-text-primary); font-weight: 600;">${isMe && currentUser?.name ? currentUser.name : npubShort}</div>
-                        <div style="color: var(--color-text-secondary); font-size: 0.75rem;">${lvl?.emoji || '💸'} ${lvl?.name || 'Fiatelo'} <span style="opacity:0.6">· ${lvl?.bloc || 'Comunidad'}</span></div>
+                        <div style="color: var(--color-text-secondary); font-size: 0.75rem;">${lvl?.emoji || '💸'} ${lvl?.name || 'Fiatelo'} <span style="opacity:0.6">· ${lvl?.bloc || 'Comunidad'}</span>${entry.founder ? ' <span title="Fundador: sus méritos fundacionales no cuentan para la clasificación">· 👑 Fundador</span>' : ''}</div>
                     </div>
                     <div style="text-align: right;">
-                        <div style="font-size: 1.1rem; font-weight: 700; color: var(--color-gold);">${entry.total}</div>
-                        <div style="font-size: 0.7rem; color: var(--color-text-secondary);">Méritos</div>
+                        <div style="font-size: 1.1rem; font-weight: 700; color: var(--color-gold);">${(entry.earned || 0).toLocaleString()}</div>
+                        <div style="font-size: 0.7rem; color: var(--color-text-secondary);">méritos ganados</div>
                     </div>
                 </div>
             `;
@@ -427,9 +400,12 @@ async function loadLeaderboard() {
     const lbMeritsEl = document.getElementById('leaderboardUserMerits');
     if (lbMeritsEl) lbMeritsEl.textContent = totalMerits;
 
-    const myData = (typeof LBW_Merits !== 'undefined') ? LBW_Merits.getMyMerits() : null;
+    // Posición en la clasificación por méritos ganados
     const rankingEl = document.getElementById('userRanking');
-    if (rankingEl) rankingEl.textContent = myData?.rank || '1';
+    if (rankingEl) {
+        const idx = myPubkey ? fullRanking.findIndex(e => e.pubkey === myPubkey) : -1;
+        rankingEl.textContent = idx >= 0 ? '#' + (idx + 1) : '—';
+    }
 }
 
 // ═══════════════════════════════════════════════════════════════

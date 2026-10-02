@@ -169,32 +169,19 @@ async function updatePioneerDashboard() {
     if (elMyMerits) elMyMerits.textContent = myTotal.toLocaleString();
     if (elMyLevel)  elMyLevel.textContent  = myLevel;
 
-    // ── 2. Leaderboard from Supabase (includes activity merits) ──
+    // ── 2. Ranking por MÉRITOS GANADOS (sin fundacionales) ───
+    // Los fundadores compiten con lo que han aportado, como cualquiera.
     let lbWithActivity = [];
     let totalMeritsEco = 0;
-
-    if (typeof LBW_MeritsSync !== 'undefined' && LBW_MeritsSync.loadSupabaseLedger) {
-        const ledger = await LBW_MeritsSync.loadSupabaseLedger({ limit: 200, orderBy: 'total' });
-        if (ledger && ledger.users) {
-            lbWithActivity = ledger.users.map(u => ({
-                pubkey: u.pubkey,
-                npub: u.npub || '',
-                displayTotal: u.total || 0,
-                nivel: u.nivel || '',
-                nivel_emoji: u.nivel_emoji || '👋'
-            }));
-            totalMeritsEco = ledger.stats.totalMerits;
-        }
-    }
-
-    // Fallback to local Nostr leaderboard if Supabase returned nothing
-    if (lbWithActivity.length === 0 && typeof LBW_Merits !== 'undefined') {
-        const lb = LBW_Merits.getLeaderboard(200) || [];
-        totalMeritsEco = lb.reduce((s, e) => s + e.total, 0);
+    if (typeof LBW_Merits !== 'undefined' && LBW_Merits.getRankingLeaderboard) {
+        const lb = LBW_Merits.getRankingLeaderboard(200) || [];
+        totalMeritsEco = lb.reduce((s, e) => s + (e.earned || 0), 0);
         lbWithActivity = lb.map(e => ({
             pubkey: e.pubkey,
             npub: e.npub || '',
-            displayTotal: e.total,
+            displayTotal: e.earned,
+            total: e.total,
+            founder: e.founder,
             nivel: e.level?.name || '',
             nivel_emoji: e.level?.emoji || '👋'
         }));
@@ -204,6 +191,8 @@ async function updatePioneerDashboard() {
     const myPubkey = (typeof LBW_Nostr !== 'undefined' && LBW_Nostr.isLoggedIn()) ? LBW_Nostr.getPubkey() : null;
     const myRankIdx = myPubkey ? lbWithActivity.findIndex(e => e.pubkey === myPubkey) : -1;
     myRank = myRankIdx >= 0 ? myRankIdx + 1 : lbWithActivity.length + 1;
+    // Méritos que cuentan para el ranking (ganados, sin fundacionales)
+    const myEarned = myRankIdx >= 0 ? lbWithActivity[myRankIdx].displayTotal : 0;
 
     const elMyRank = document.getElementById('pdMyRank');
     const elRankStatus = document.getElementById('pdRankStatus');
@@ -214,7 +203,7 @@ async function updatePioneerDashboard() {
 
     if (elRankStatus) {
         if (inTop20) {
-            elRankStatus.textContent = '🏠 En top 20';
+            elRankStatus.textContent = '🏆 En el top 20';
             elRankStatus.style.color = '#52c41a';
         } else if (myRank > 0 && myRank <= 50) {
             elRankStatus.textContent = `A ${myRank - 20} posiciones`;
@@ -228,7 +217,7 @@ async function updatePioneerDashboard() {
     // Pioneer banner status
     if (pioneerStatus) {
         if (inTop20) {
-            pioneerStatus.textContent = '🏠 Eres Pionero #' + myRank;
+            pioneerStatus.textContent = '🏆 Eres Pionero #' + myRank;
             pioneerStatus.style.background = 'rgba(82,196,26,0.15)';
             pioneerStatus.style.color = '#52c41a';
             pioneerStatus.style.borderColor = 'rgba(82,196,26,0.4)';
@@ -247,13 +236,13 @@ async function updatePioneerDashboard() {
         const cutoffMerits = cutoffEntry ? cutoffEntry.displayTotal : 0;
         if (!inTop20 && cutoffMerits > 0) {
             progressWrap.style.display = 'block';
-            const pct = Math.min(100, Math.round((myTotal / cutoffMerits) * 100));
+            const pct = Math.min(100, Math.round((myEarned / cutoffMerits) * 100));
             const fill = document.getElementById('pdProgressFill');
             const pctEl = document.getElementById('pdProgressPct');
             const labelEl = document.getElementById('pdProgressLabel');
             if (fill) fill.style.width = pct + '%';
             if (pctEl) pctEl.textContent = pct + '%';
-            if (labelEl) labelEl.textContent = `Faltan ${(cutoffMerits - myTotal).toLocaleString()} mérits para top 20`;
+            if (labelEl) labelEl.textContent = `Te faltan ${(cutoffMerits - myEarned).toLocaleString()} méritos para el top 20`;
         } else {
             progressWrap.style.display = 'none';
         }
@@ -302,7 +291,8 @@ async function updatePioneerDashboard() {
     const rows = top.map((entry, i) => {
         const pos = i + 1;
         const isMe = myPubkey && entry.pubkey === myPubkey;
-        const lvl = (typeof LBW_Merits !== 'undefined') ? LBW_Merits.getCitizenshipLevel(entry.displayTotal) : { emoji: entry.nivel_emoji || '👋', name: entry.nivel || '' };
+        // El nivel se calcula con el total; el ranking ordena por méritos ganados
+        const lvl = (typeof LBW_Merits !== 'undefined') ? LBW_Merits.getCitizenshipLevel(entry.total || entry.displayTotal) : { emoji: entry.nivel_emoji || '👋', name: entry.nivel || '' };
         const npubShort = entry.npub ? entry.npub.substring(0, 10) + '…' : entry.pubkey.substring(0, 10) + '…';
         const displayName = names[i] || npubShort;
         const medalEmoji = pos === 1 ? '🥇' : pos === 2 ? '🥈' : pos === 3 ? '🥉' : `<span style="font-family:var(--font-mono);font-size:0.75rem;color:var(--color-text-secondary);">#${pos}</span>`;
@@ -316,10 +306,10 @@ async function updatePioneerDashboard() {
                 <div style="font-size:0.75rem;color:${isMe ? 'var(--color-gold)' : 'var(--color-text-primary)'};font-weight:${isMe ? '700' : '400'};overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">
                     ${isMe ? 'Tú · ' : ''}${displayName}
                 </div>
-                <div style="font-size:0.65rem;color:var(--color-text-secondary);">${lvl.name || ''}</div>
+                <div style="font-size:0.65rem;color:var(--color-text-secondary);">${lvl.name || ''}${entry.founder ? ' · 👑 Fundador' : ''}</div>
             </div>
             <div style="font-family:var(--font-mono);font-size:0.85rem;font-weight:700;color:var(--color-gold);flex-shrink:0;">${entry.displayTotal.toLocaleString()}</div>
-            <div style="font-size:0.65rem;color:var(--color-text-secondary);flex-shrink:0;">LBWM</div>
+            <div style="font-size:0.65rem;color:var(--color-text-secondary);flex-shrink:0;">méritos</div>
         </div>`;
     }).join('');
 
@@ -339,8 +329,8 @@ async function updatePioneerDashboard() {
                     <div style="font-size:0.75rem;color:var(--color-gold);font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">Tú · ${myDisplay}</div>
                     <div style="font-size:0.65rem;color:var(--color-text-secondary);">${myLvl.name || ''}</div>
                 </div>
-                <div style="font-family:var(--font-mono);font-size:0.85rem;font-weight:700;color:var(--color-gold);flex-shrink:0;">${myTotal.toLocaleString()}</div>
-                <div style="font-size:0.65rem;color:var(--color-text-secondary);flex-shrink:0;">LBWM</div>
+                <div style="font-family:var(--font-mono);font-size:0.85rem;font-weight:700;color:var(--color-gold);flex-shrink:0;">${myEarned.toLocaleString()}</div>
+                <div style="font-size:0.65rem;color:var(--color-text-secondary);flex-shrink:0;">méritos</div>
             </div>`;
     }
 
