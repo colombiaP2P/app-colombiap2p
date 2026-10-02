@@ -994,8 +994,6 @@ const LBW_Transparency = (() => {
     }
 
     async function refreshMerits() {
-        _activityEventsCache = null;
-        _activityEventsCacheAt = 0;
         await renderMeritsPanel();
     }
 
