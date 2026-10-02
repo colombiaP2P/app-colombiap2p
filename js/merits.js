@@ -643,8 +643,29 @@ async function updateLbwmStats(userMerits) {
 // ═══════════════════════════════════════════════════════════════
 
 // ── [C2P] Avisos de méritos: bienvenida y subida de nivel ─────────────────
+// Solo se muestran en el menú principal y con la ventana de registro/login
+// cerrada: durante el registro el usuario está copiando sus 12 palabras.
+function _c2pOnMainMenu() {
+    const menu = document.getElementById('mainMenuSection');
+    const auth = document.getElementById('authModal');
+    return !!(menu && menu.classList.contains('active') && (!auth || auth.classList.contains('hidden')));
+}
+
+function _c2pWhenOnMainMenu(cb) {
+    if (_c2pOnMainMenu()) { cb(); return; }
+    let tries = 0;
+    const iv = setInterval(() => {
+        if (_c2pOnMainMenu()) { clearInterval(iv); setTimeout(cb, 1200); }
+        else if (++tries > 1200) clearInterval(iv);   // máx. ~30 min esperando
+    }, 1500);
+}
+
 // Tarjeta con botón (showNotification es solo texto y dura 3 s).
-function _c2pMeritNudge({ icon, title, text, buttonLabel, onButton }) {
+function _c2pMeritNudge(opts) {
+    _c2pWhenOnMainMenu(() => _c2pShowMeritNudge(opts));
+}
+
+function _c2pShowMeritNudge({ icon, title, text, buttonLabel, onButton }) {
     document.getElementById('c2pMeritNudge')?.remove();
     const el = document.createElement('div');
     el.id = 'c2pMeritNudge';

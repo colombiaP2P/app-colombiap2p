@@ -4121,13 +4121,21 @@
 }
 .c2p-seed-grid.c2p-seed-hidden { filter: blur(6px); user-select: none; pointer-events: none; }
 .c2p-seed-word {
-    display: flex; align-items: baseline; gap: 0.35rem;
-    padding: 0.45rem 0.6rem; border-radius: 8px;
+    display: flex; align-items: baseline; gap: 0.3rem; min-width: 0;
+    padding: 0.4rem 0.45rem; border-radius: 8px;
     background: var(--color-bg-dark); border: 1px solid var(--color-border);
-    font-family: var(--font-mono); font-size: 0.88rem; color: var(--color-text-primary);
+    font-family: var(--font-mono); font-size: 0.78rem; color: var(--color-text-primary);
 }
-.c2p-seed-num { color: var(--color-text-secondary); font-size: 0.72rem; min-width: 1.4rem; text-align: right; font-variant-numeric: tabular-nums; }
-.c2p-seed-text { font-weight: 700; overflow-wrap: anywhere; }
+.c2p-seed-num { color: var(--color-text-secondary); font-size: 0.66rem; min-width: 1.15rem; text-align: right; font-variant-numeric: tabular-nums; flex-shrink: 0; }
+/* Las palabras BIP-39 tienen como máximo 8 letras: caben en una línea */
+.c2p-seed-text { font-weight: 700; white-space: nowrap; }
+.c2p-seed-reveal {
+    display: inline-flex; align-items: center; gap: 0.35rem;
+    margin-bottom: 0.75rem; padding: 0.5rem 0.9rem; border-radius: 8px; cursor: pointer;
+    background: var(--color-gold); color: #0e0e0d; border: none; font-weight: 700; font-size: 0.85rem;
+}
+.c2p-seed-reveal:hover, .c2p-seed-reveal:focus-visible { background: #d4a84e; outline: none; }
+.c2p-seed-reveal:focus-visible { box-shadow: 0 0 0 2px var(--color-text-primary); }
 .c2p-seed-confirm {
     margin: 1rem 0; padding: 1rem; border-radius: 12px;
     background: rgba(229, 185, 92, 0.06); border: 1px solid rgba(229, 185, 92, 0.3);
@@ -4146,5 +4154,6 @@
 #continueBtn:disabled { opacity: 0.45; cursor: not-allowed; }
 @media (max-width: 600px) {
     .c2p-seed-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .c2p-seed-word { font-size: 0.8rem; }
     .c2p-seed-confirm-row { grid-template-columns: 1fr; gap: 0.25rem; }
 }
