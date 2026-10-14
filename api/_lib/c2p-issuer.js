@@ -197,7 +197,11 @@ export async function pbFetch(path, opts = {}) {
         signal: AbortSignal.timeout(8000)
     });
     const body = await res.json().catch(() => ({}));
-    if (!res.ok) throw Object.assign(new Error(body.message || 'PocketBase error'), { status: res.status });
+    if (!res.ok) {
+        // Incluir el detalle de validación por campo (ej. {"campo":{"code":"validation_length_out_of_range"}})
+        const detail = body.data && Object.keys(body.data).length ? ' ' + JSON.stringify(body.data) : '';
+        throw Object.assign(new Error((body.message || 'PocketBase error') + detail), { status: res.status });
+    }
     return body;
 }
 

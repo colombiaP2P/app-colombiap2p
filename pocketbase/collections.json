@@ -1220,7 +1220,7 @@
         "presentable": false,
         "unique": false,
         "options": {
-          "max": 16
+          "max": 64
         }
       },
       {
