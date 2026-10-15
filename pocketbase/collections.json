@@ -11,7 +11,7 @@
         "type": "text",
         "system": false,
         "required": true,
-        "presentable": false,
+        "presentable": true,
         "unique": false,
         "options": {
           "max": 100
@@ -215,7 +215,7 @@
         "type": "text",
         "system": false,
         "required": true,
-        "presentable": false,
+        "presentable": true,
         "unique": false,
         "options": {
           "max": 100
@@ -882,13 +882,29 @@
       {
         "id": "m7qen5z3jfpy3av",
         "name": "stamp_id",
-        "type": "text",
+        "type": "relation",
         "system": false,
         "required": false,
         "presentable": false,
         "unique": false,
         "options": {
-          "max": 50
+          "collectionId": "c2pstamps000001",
+          "cascadeDelete": false,
+          "maxSelect": 1
+        }
+      },
+      {
+        "id": "c2pevbadgerel01",
+        "name": "badge_id",
+        "type": "relation",
+        "system": false,
+        "required": false,
+        "presentable": false,
+        "unique": false,
+        "options": {
+          "collectionId": "c2pbadges000001",
+          "cascadeDelete": false,
+          "maxSelect": 1
         }
       }
     ],

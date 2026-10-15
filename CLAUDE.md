@@ -121,7 +121,7 @@ Versión **< 0.23** (usa `/api/admins`, sin campos Hidden; "solo admins" = canda
 | `badges` / `user_badges` | Badges/logros de habilidad |
 | `missions` | Misiones educativas |
 | `merit_contributions` | Contribuciones de méritos C2PM |
-| `events` | Eventos comunitarios (se crean en el panel de PocketBase; el código de check-in lo deriva el servidor; el antiguo campo `checkin_token` se eliminó) |
+| `events` | Eventos comunitarios (se crean en el panel de PocketBase; `stamp_id`/`badge_id` son relaciones a `stamps`/`badges` con selector por nombre; el código de check-in lo deriva el servidor; el antiguo campo `checkin_token` se eliminó) |
 | `event_checkins` | Check-ins presenciales |
 | `xp_transactions` | XP histórico (migrado a méritos Nostr en la Fase 3; solo lectura, ya no se suma) |
 | `nip05_identities` | Identidades `usuario@colombiap2p.com` activas |
