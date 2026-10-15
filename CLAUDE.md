@@ -121,7 +121,7 @@ Versión **< 0.23** (usa `/api/admins`, sin campos Hidden; "solo admins" = canda
 | `badges` / `user_badges` | Badges/logros de habilidad |
 | `missions` | Misiones educativas |
 | `merit_contributions` | Contribuciones de méritos C2PM |
-| `events` | Eventos comunitarios (se crean en el panel de PocketBase; el código de check-in lo deriva el servidor, `checkin_token` ya no se usa) |
+| `events` | Eventos comunitarios (se crean en el panel de PocketBase; el código de check-in lo deriva el servidor; el antiguo campo `checkin_token` se eliminó) |
 | `event_checkins` | Check-ins presenciales |
 | `xp_transactions` | XP histórico (migrado a méritos Nostr en la Fase 3; solo lectura, ya no se suma) |
 | `nip05_identities` | Identidades `usuario@colombiap2p.com` activas |
@@ -138,7 +138,7 @@ Versión **< 0.23** (usa `/api/admins`, sin campos Hidden; "solo admins" = canda
 - `api/merits/*` — el **Emisor ColombiaP2P** firma los méritos (kind 31002) tras validar el hecho; autenticación de usuario con **NIP-98** (`LBW_Nostr.nip98Auth(path, method, bind)`, tags atados a la acción). Lógica común en `api/_lib/c2p-issuer.js` (libro de méritos con la regla de confianza, emisión idempotente por `d`, `C2P_DRY_RUN=1`):
   - `governance.js` — votar / autor / ejecución verificada.
   - `economic.js` — zaps a la tesorería (recibo 9735 verificable) o atribución por admin; `round(sats × 0.01)`.
-  - `checkin.js` — check-in con código derivado (`checkinCode` = HMAC de la clave del emisor; `events.checkin_token` se ignora) + sello/badge + referido en el primer check-in; acción `qr` para organizadores.
+  - `checkin.js` — check-in con código derivado (`checkinCode` = HMAC de la clave del emisor; sin campo en PocketBase) + sello/badge + referido en el primer check-in; acción `qr` para organizadores.
   - `mission.js` — ciclo completo de misiones (create/claim/deliver/approve/cancel).
   - `streak.js` — racha diaria (fecha Bogotá), mérito acumulado reemplazable.
   - `referral.js` — registra el referidor (firma NIP-98 del referido, solo cuentas nuevas ≤7 días, un referidor para siempre). El mérito de 50 lo emite `checkin.js` en el primer check-in del referido.

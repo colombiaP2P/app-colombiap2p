@@ -829,18 +829,6 @@
         }
       },
       {
-        "id": "6c57qaeu24i1yhp",
-        "name": "checkin_token",
-        "type": "text",
-        "system": false,
-        "required": true,
-        "presentable": false,
-        "unique": false,
-        "options": {
-          "max": 64
-        }
-      },
-      {
         "id": "26628xl4zvbdiv9",
         "name": "checkin_open_from",
         "type": "date",
@@ -952,18 +940,6 @@
         "unique": false,
         "options": {
           "max": 100
-        }
-      },
-      {
-        "id": "03v6v2byhgltvdq",
-        "name": "checkin_token",
-        "type": "text",
-        "system": false,
-        "required": false,
-        "presentable": false,
-        "unique": false,
-        "options": {
-          "max": 64
         }
       },
       {

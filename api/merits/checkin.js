@@ -20,8 +20,8 @@
 // el enlace del QR de check-in.
 //
 // El código de check-in NO se guarda: es un HMAC de la clave del emisor y el id
-// del evento (checkinCode). El campo events.checkin_token se ignora porque la
-// API pública de PocketBase lo exponía (y esta versión no admite campos Hidden).
+// del evento (checkinCode). Antes era el campo events.checkin_token, eliminado
+// porque la API pública de PocketBase lo exponía (esta versión no admite Hidden).
 //
 // Env: C2P_ISSUER_NSEC, PB_ADMIN_EMAIL, PB_ADMIN_PASSWORD.
 
@@ -104,7 +104,7 @@ export default async function handler(req, res) {
     }
 
     try {
-        // 1. Evento + código derivado (no se usa events.checkin_token: era público)
+        // 1. Evento + código derivado (checkinCode)
         let ev;
         try { ev = await pbFetch(`/api/collections/events/records/${eventId}`); }
         catch (e) { return res.status(404).json({ error: 'Evento no encontrado' }); }

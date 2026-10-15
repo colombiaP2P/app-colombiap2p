@@ -1,5 +1,5 @@
 // ColombiaP2P — Módulo Eventos (FASE 6)
-// Eventos presenciales con check-in via QR firmado por token PocketBase.
+// Eventos presenciales con check-in via QR (código derivado por el servidor).
 
 const C2P_Eventos = (function () {
 
@@ -255,8 +255,8 @@ const C2P_Eventos = (function () {
     }
 
     // ── QR para organizadores ─────────────────────────────────
-    // [C2P] QR de check-in para organizadores. El checkin_token es un campo
-    // oculto en PocketBase: el enlace lo entrega el servidor solo a admins o
+    // [C2P] QR de check-in para organizadores. El código lo deriva el
+    // servidor (HMAC de la clave del Emisor): el enlace lo entrega el servidor solo a admins o
     // Génesis (api/merits/checkin, acción 'qr', firmada con NIP-98).
     async function showQRModal(eventId) {
         const ev = _events.find(e => e.id === eventId);
