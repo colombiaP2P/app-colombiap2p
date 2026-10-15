@@ -48,7 +48,7 @@ const C2P_Eventos = (function () {
     async function loadEvents() {
         try {
             _events = await _getPB().collection('events')
-                .getFullList({ sort: 'event_date', filter: 'status != "draft"' });
+                .getFullList({ sort: 'event_date', filter: 'status != "draft"', expand: 'stamp_id,badge_id' });
             _isLoaded = true;
         } catch (e) {
             console.warn('[C2P Eventos] No se pudo conectar a PocketBase:', e.message);
@@ -147,6 +147,32 @@ const C2P_Eventos = (function () {
     }
 
     // ── Detail modal ──────────────────────────────────────────
+    // Sello y badge que se entregan al hacer check-in (relaciones expandidas).
+    // Reutiliza las tarjetas del Pasaporte (_renderStampCard / _renderBadgeCard
+    // de profile.js); si no están o la relación no se expandió, texto simple.
+    function _rewardsBlock(ev) {
+        const stamp = ev.expand?.stamp_id;
+        const badge = ev.expand?.badge_id;
+        if (!ev.stamp_id && !ev.badge_id) return '';
+        const chip = t => `<span style="font-size:0.78rem;background:rgba(255,255,255,0.06);color:var(--color-text-secondary);padding:0.3rem 0.75rem;border-radius:12px;">${t}</span>`;
+        const items = [];
+        if (ev.stamp_id) {
+            items.push(stamp && typeof _renderStampCard === 'function'
+                ? _renderStampCard(stamp, null)
+                : chip('🏅 Sello' + (stamp?.name ? ': ' + _esc(stamp.name) : ' especial')));
+        }
+        if (ev.badge_id) {
+            items.push(badge && typeof _renderBadgeCard === 'function'
+                ? _renderBadgeCard(badge, null)
+                : chip('🎖️ Badge' + (badge?.name ? ': ' + _esc(badge.name) : '')));
+        }
+        return `
+                <div style="margin-bottom:1.25rem;">
+                    <div style="font-size:0.78rem;color:var(--color-text-secondary);margin-bottom:0.5rem;">🎁 Al hacer check-in recibes:</div>
+                    <div class="c2p-stamps-grid" style="grid-template-columns:repeat(auto-fill, 96px);">${items.join('')}</div>
+                </div>`;
+    }
+
     async function showEventDetail(eventId) {
         const ev = _events.find(e => e.id === eventId);
         if (!ev) return;
@@ -186,9 +212,9 @@ const C2P_Eventos = (function () {
                 ${ev.description ? `<p style="font-size:0.88rem;color:var(--color-text-primary);line-height:1.7;margin-bottom:1.25rem;">${_esc(ev.description)}</p>` : ''}
                 <div style="display:flex;gap:0.6rem;flex-wrap:wrap;margin-bottom:1.25rem;">
                     ${ev.xp_reward ? `<span style="font-size:0.78rem;background:rgba(247,147,26,0.12);color:var(--color-bitcoin);padding:0.3rem 0.75rem;border-radius:12px;font-weight:700;">+${ev.xp_reward} Méritos por asistir</span>` : ''}
-                    ${ev.stamp_id ? `<span style="font-size:0.78rem;background:rgba(255,255,255,0.06);color:var(--color-text-secondary);padding:0.3rem 0.75rem;border-radius:12px;">🏅 Sello especial</span>` : ''}
                     ${ev.max_attendees ? `<span style="font-size:0.78rem;background:rgba(255,255,255,0.06);color:var(--color-text-secondary);padding:0.3rem 0.75rem;border-radius:12px;">👥 máx. ${ev.max_attendees}</span>` : ''}
                 </div>
+                ${_rewardsBlock(ev)}
                 <div style="display:flex;gap:0.75rem;flex-wrap:wrap;">
                     ${alreadyCheckedIn
                         ? `<div style="flex:1;padding:0.65rem;background:rgba(76,175,80,0.15);color:#4CAF50;border:1px solid #4CAF50;border-radius:10px;text-align:center;font-weight:700;font-size:0.9rem;">✅ Ya estás registrado</div>`
