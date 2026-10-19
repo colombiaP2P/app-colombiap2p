@@ -1212,6 +1212,10 @@ async function claimNip05() {
     }
 }
 
+// Sellos y badges: los usan los onclick inline y el detalle de eventos (c2p-eventos.js)
+window.c2pShowStamp = c2pShowStamp;
+window._renderStampCard = _renderStampCard;
+window._renderBadgeCard = _renderBadgeCard;
 window.claimNip05 = claimNip05;
 window.loadNip05Status = loadNip05Status;
 
