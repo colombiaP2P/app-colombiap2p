@@ -4,7 +4,7 @@
 // Los JS llevan ?v=... en index.html, así que cualquier cambio de versión
 // se traduce en una URL nueva que el SW no tiene cacheada y va a la red.
 
-const CACHE_NAME = 'c2p-v12';
+const CACHE_NAME = 'c2p-v13';
 const STATIC_ASSETS = [
   '/',
   '/index.html',
@@ -48,6 +48,12 @@ self.addEventListener('fetch', event => {
 
   // Solo interceptar same-origin + https
   if (url.origin !== location.origin) return;
+
+  // Datos dinámicos: nunca desde caché. /api/* (tesorería, facturas LNURL,
+  // NIP-05, méritos) y cualquier petición que no sea GET van siempre a la red.
+  // Antes caían en el cache-first de assets: la tesorería quedaba congelada en
+  // la primera respuesta y una factura LNURL podía repetirse.
+  if (request.method !== 'GET' || url.pathname.startsWith('/api/') || url.pathname.startsWith('/.well-known/')) return;
 
   if (request.destination === 'document') {
     // HTML: network-first (siempre intentar la versión fresca)

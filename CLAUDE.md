@@ -15,7 +15,7 @@ ColombiaP2P es la plataforma digital de la comunidad Bitcoin colombiana, constru
 
 ### Cache busting
 
-El service worker (`/sw.js`) usa cache-first para JS. **Cada cambio en un archivo `.js` debe subir su parámetro `?v=` en `index.html`** para que el SW descargue la versión nueva. En refactorizaciones grandes, subir también `CACHE_NAME` en `/sw.js`.
+El service worker (`/sw.js`) usa cache-first para JS (nunca para `/api/*`, `/.well-known/*` ni peticiones que no sean GET: van siempre a la red). **Cada cambio en un archivo `.js` debe subir su parámetro `?v=` en `index.html`** para que el SW descargue la versión nueva. En refactorizaciones grandes, subir también `CACHE_NAME` en `/sw.js`.
 
 ## Architecture
 
