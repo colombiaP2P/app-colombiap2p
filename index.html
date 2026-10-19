@@ -3285,9 +3285,9 @@
     <!-- PocketBase SDK + cliente C2P (Sellos, Badges) -->
     <script src="https://cdn.jsdelivr.net/npm/pocketbase@0.21.0/dist/pocketbase.umd.js"></script>
     <script src="js/c2p-pocketbase.js?v=1"></script>
-    <script src="js/c2p-eventos.js?v=13-rw"></script>
+    <script src="js/c2p-eventos.js?v=14-bigstamps"></script>
     <script src="js/c2p-rachas.js?v=15-ref"></script>
-    <script src="js/profile.js?v=c2p-30-noact"></script>
+    <script src="js/profile.js?v=c2p-31-bigstamps"></script>
     <script src="js/nwc.js?v=secA1-1"></script>
     <script src="js/wallet.js?v=secA1-5-g"></script>
 
@@ -4078,14 +4078,14 @@
 }
 .c2p-stamps-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(76px, 1fr));
-    gap: 0.6rem;
+    grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+    gap: 0.75rem;
 }
 .c2p-stamp-card {
     background: var(--color-bg-card);
     border-radius: 12px;
     border: 2px solid var(--color-border);
-    padding: 0.7rem 0.4rem 0.5rem;
+    padding: 0.85rem 0.5rem 0.7rem;
     text-align: center;
     cursor: default;
     transition: transform 0.2s, box-shadow 0.2s;
@@ -4094,15 +4094,15 @@
 .c2p-stamp-card[data-rarity="rare"]      { border-color: #2196F3; }
 .c2p-stamp-card[data-rarity="epic"]      { border-color: #9C27B0; }
 .c2p-stamp-card[data-rarity="legendary"] { border-color: var(--color-bitcoin); box-shadow: 0 0 10px rgba(247,147,26,0.2); }
-.c2p-stamp-card .stamp-icon { font-size: 2rem; line-height: 1; margin-bottom: 0.3rem; }
-.c2p-stamp-card .stamp-name { font-size: 0.63rem; color: var(--color-text-primary); font-weight: 600; line-height: 1.2; }
-.c2p-stamp-card .stamp-date { font-size: 0.56rem; color: var(--color-text-secondary); margin-top: 0.2rem; font-family: var(--font-mono); }
+.c2p-stamp-card .stamp-icon { font-size: 3.2rem; line-height: 1; margin-bottom: 0.45rem; }
+.c2p-stamp-card .stamp-name { font-size: 0.78rem; color: var(--color-text-primary); font-weight: 600; line-height: 1.2; }
+.c2p-stamp-card .stamp-date { font-size: 0.68rem; color: var(--color-text-secondary); margin-top: 0.2rem; font-family: var(--font-mono); }
 /* Badge cards — habilidades verificadas */
 .c2p-badge-card {
     background: var(--color-bg-card);
     border-radius: 10px;
     border: 2px solid var(--badge-color, var(--color-border));
-    padding: 0.7rem 0.4rem 0.5rem;
+    padding: 0.85rem 0.5rem 0.7rem;
     text-align: center;
     cursor: default;
     transition: transform 0.2s, box-shadow 0.2s;
@@ -4112,9 +4112,9 @@
     transform: translateY(-2px);
     box-shadow: 0 4px 14px color-mix(in srgb, var(--badge-color, #F7931A) 30%, transparent);
 }
-.c2p-badge-card .badge-icon  { font-size: 1.8rem; line-height: 1; margin-bottom: 0.3rem; }
-.c2p-badge-card .badge-name  { font-size: 0.63rem; color: var(--color-text-primary); font-weight: 600; line-height: 1.2; }
-.c2p-badge-card .badge-level { font-size: 0.65rem; margin-top: 0.25rem; font-family: var(--font-mono); letter-spacing: 1px; }
+.c2p-badge-card .badge-icon  { font-size: 3rem; line-height: 1; margin-bottom: 0.45rem; }
+.c2p-badge-card .badge-name  { font-size: 0.78rem; color: var(--color-text-primary); font-weight: 600; line-height: 1.2; }
+.c2p-badge-card .badge-level { font-size: 0.8rem; margin-top: 0.25rem; font-family: var(--font-mono); letter-spacing: 1px; }
 /* Tarjetas "próximamente" — ligeramente atenuadas */
 .app-card.c2p-coming-soon {
     opacity: 0.55;

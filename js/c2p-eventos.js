@@ -169,7 +169,7 @@ const C2P_Eventos = (function () {
         return `
                 <div style="margin-bottom:1.25rem;">
                     <div style="font-size:0.78rem;color:var(--color-text-secondary);margin-bottom:0.5rem;">🎁 Al hacer check-in recibes:</div>
-                    <div class="c2p-stamps-grid" style="grid-template-columns:repeat(auto-fill, 96px);">${items.join('')}</div>
+                    <div class="c2p-stamps-grid" style="grid-template-columns:repeat(auto-fill, 130px);">${items.join('')}</div>
                 </div>`;
     }
 
