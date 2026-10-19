@@ -580,7 +580,7 @@ function _renderStampCard(stamp, obtained_at) {
         : '';
 
     const inner = imgUrl
-        ? `<img src="${imgUrl}" alt="${LBW.escapeHtml(stamp.name)}" style="width:120px;height:120px;object-fit:cover;border-radius:12px;display:block;margin:0 auto 0.45rem;">`
+        ? `<img src="${imgUrl}" alt="${LBW.escapeHtml(stamp.name)}" class="stamp-img">`
         : `<div class="stamp-icon">${stamp.icon || '🏅'}</div>`;
 
     return `<div class="c2p-stamp-card" data-rarity="${rarity}" title="${title}">
