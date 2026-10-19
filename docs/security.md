@@ -209,7 +209,7 @@ En cualquier paso el usuario puede elegir *"Cerrar sesión y usar NIP-07"* en su
 | nsec en claro (legacy, ya retirado) | `localStorage` en plano | Sin fricción | nsec es el respaldo |
 | **NIP-49 (actual)** | `localStorage` cifrado con contraseña | Una contraseña por sesión | nsec es el respaldo (no la contraseña) |
 | NIP-07 (Alby/nos2x) | Extensión del navegador | Pulsas "firmar" | nsec es el respaldo (la gestiona la extensión) |
-| **NIP-46 (bunker remoto, opt-in session-only)** | Otro dispositivo / servicio | Aprueba cada firma en el bunker | nsec vive solo en el bunker |
+| **NIP-46 (bunker remoto, opt-in, sesión recordada)** | Otro dispositivo / servicio | Aprueba cada firma en el bunker | nsec vive solo en el bunker |
 
 El **respaldo soberano siempre es la nsec original**. La contraseña de NIP-49 protege el almacenamiento en disco, no es otro factor recuperable.
 
@@ -242,15 +242,14 @@ Añadido en `nip46qr-1`. Útil para *"estoy en el portátil, quiero firmar con l
 
 Implementación: cliente RPC propio (no `BunkerSigner`, que no soporta el handshake invertido). Mantiene una suscripción abierta sobre kind 24133 `#p=clientPub`, correlaciona requests/responses por `id`, gestiona `auth_url` y expone el mismo shape de API que `BunkerSigner`, así que `LBW_NIP46` puede usar el mismo `_signer` para ambos modos transparentemente. Relay por defecto: `wss://relay.nsec.app`. Timeout del handshake: 5 min (cancelable).
 
-**Session-only por diseño (ambos modos):**
+**Sesión recordada (ambos modos) — cambio 2026-10-19:**
 
-La clave efímera del cliente **no se persiste** en ninguno de los dos modos. Al recargar la página el usuario debe reconectar. Pros:
+Antes la clave efímera del cliente vivía solo en memoria y al recargar había que reconectar; en la práctica el usuario quedaba "a medias" (nombre visible, sin méritos ni firmas). Ahora `LBW_NIP46` guarda en `localStorage.c2p_nip46_session` la clave efímera del cliente, la pubkey del signer, la del usuario y los relays, y `restoreSession()` reabre la conexión al recargar sin handshake (el signer ya autorizó esa clave de cliente), como hacen Coracle o nostr-login.
 
-- Cero secretos del NIP-46 en disco — ni cifrados.
-- Si alguien roba el `localStorage`, no recupera la sesión NIP-46.
-- Coherente con el modelo "tu clave vive en otro sitio": la app es un cliente desechable.
-
-Contra: peor UX que extension/passlock. Aceptable porque NIP-46 ya implica más fricción (aprobar firmas en el bunker).
+- La nsec del usuario sigue solo en el bunker: nunca llega al navegador.
+- Riesgo aceptado: quien copie el `localStorage` puede **pedir** firmas al bunker en nombre de esta app. El bunker sigue decidiendo qué aprueba y el usuario puede revocar la sesión desde su signer (Amber, nsec.app…).
+- "Cerrar sesión" borra la clave guardada (`LBW_NIP46.disconnect()` / `forget()`).
+- Una sesión `bunker` sin conexión recordada (anterior al cambio o con el storage borrado) se cierra del todo y se pide reconectar, en lugar de dejar la UI a medias.
 
 **NIP-42 + bunker:** los relays privados de LiberBit usan NIP-42 (AUTH challenge). En modo bunker, cada reconexión a un relay con AUTH dispara una firma de kind 22242 hacia el signer remoto. El usuario debería marcar *"siempre permitir kind 22242"* en su bunker (si su signer lo soporta) para evitar prompts continuos.
 

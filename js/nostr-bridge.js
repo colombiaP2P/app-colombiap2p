@@ -230,10 +230,8 @@ const LBW_NostrBridge = (() => {
     // encarga del flujo completo y, si conecta, deja LBW_NIP46 en estado
     // conectado. Aquí solo sincronizamos con LBW_Nostr y la UI.
     //
-    // Session-only en ambos modos: nada se persiste; la sesión guardada
-    // es solo el método para que la UI sepa qué badge mostrar mientras
-    // la pestaña vive, pero restoreSession() limpia y exige reconectar
-    // al recargar.
+    // La conexión queda recordada (LBW_NIP46 guarda la clave efímera del
+    // cliente): restoreSession() la reabre al recargar sin pedir nada.
     async function handleBunkerLogin() {
         if (!window.LBW_NIP46) {
             alert('❌ Módulo NIP-46 no cargado. Recarga la página.');
@@ -563,6 +561,7 @@ const LBW_NostrBridge = (() => {
         // El usuario que quiera reset completo puede ir a Perfil → "Olvidar
         // identidad en este dispositivo" (o limpiar datos del navegador).
         localStorage.removeItem('lbw_nostr_session');
+        if (window.LBW_NIP46 && LBW_NIP46.forget) LBW_NIP46.forget();
         localStorage.removeItem('lbw_nsec_persist');
         localStorage.removeItem('liberbit_keys');
         try { sessionStorage.removeItem('lbw_nsec_session'); } catch (e) {}
@@ -580,6 +579,17 @@ const LBW_NostrBridge = (() => {
     }
 
     async function restoreSession() {
+        // Aviso tras cerrar una sesión NIP-46 que no se pudo reabrir
+        try {
+            if (sessionStorage.getItem('c2p_nip46_reconnect')) {
+                sessionStorage.removeItem('c2p_nip46_reconnect');
+                setTimeout(() => {
+                    if (typeof showNotification === 'function') {
+                        showNotification('🛰️ Vuelve a conectar tu firmador remoto (NIP-46). Desde ahora quedará recordado.');
+                    }
+                }, 800);
+            }
+        } catch (_) {}
         const saved = localStorage.getItem('lbw_nostr_session');
         if (!saved) return false;
         try {
@@ -596,13 +606,29 @@ const LBW_NostrBridge = (() => {
                     sessionRestored = true;
                 }
             } else if (s.method === 'bunker') {
-                // NIP-46 session-only: la clave efímera del cliente vivía
-                // solo en memoria, así que no podemos reusar la conexión.
-                // Limpiamos la sesión guardada y pedimos al usuario que
-                // reconecte manualmente desde el modal de login.
-                console.log('[Bridge] Sesión NIP-46 detectada (session-only) — reconectar manualmente');
-                localStorage.removeItem('lbw_nostr_session');
-                return false;
+                // NIP-46: reabrir la conexión recordada con el firmador remoto
+                const restoredPk = window.LBW_NIP46 && LBW_NIP46.restore ? LBW_NIP46.restore() : null;
+                if (restoredPk && restoredPk === s.pubkey) {
+                    await LBW_Nostr.loginWithConnectedSigner();
+                    if (typeof currentUser !== 'undefined') {
+                        currentUser = { pubkey: s.npub, publicKey: s.npub, name: s.name || '', id: null };
+                        window.LBW_persistKeys && window.LBW_persistKeys(currentUser);
+                    }
+                    _applyLoginToUI(s);
+                    _applyAvatarFromCache(s);
+                    _updateLoginModeUI('bunker');
+                    await _startAllFeeds();
+                    console.log('[Bridge] ✅ Sesión NIP-46 restaurada');
+                    sessionRestored = true;
+                } else {
+                    // Sesión de antes de recordar la conexión (o storage borrado):
+                    // cerrar del todo en vez de dejar el nombre sin méritos.
+                    console.log('[Bridge] Sesión NIP-46 sin conexión recordada — reconectar');
+                    handleLogout();
+                    try { sessionStorage.setItem('c2p_nip46_reconnect', '1'); } catch (_) {}
+                    location.reload();
+                    return false;
+                }
             } else if (s.method === 'nsec' || s.method === 'created') {
                 // ── NIP-49: pedir contraseña y descifrar la nsec ──
                 // Tres situaciones posibles, en este orden:

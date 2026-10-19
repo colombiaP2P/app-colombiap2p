@@ -20,9 +20,13 @@
 //      `ack` y a partir de ahí usa un cliente RPC propio (porque la API
 //      BunkerSigner no soporta el handshake invertido).
 //
-// SESSION-ONLY (ambos modos):
-//   La clave efímera del cliente se genera al conectar y vive solo
-//   en memoria. Al recargar la página el usuario debe reconectar.
+// SESIÓN RECORDADA (ambos modos):
+//   La clave efímera del cliente se genera al conectar y se guarda en
+//   localStorage (c2p_nip46_session) junto con la pubkey del signer y sus
+//   relays, para reconectar sin pasos al recargar (como Coracle/nostr-login).
+//   La nsec del usuario sigue solo en el bunker; quien copiara el storage
+//   podría pedir firmas, pero el bunker decide y el usuario puede revocar la
+//   sesión desde su signer. Cerrar sesión borra la clave guardada.
 //
 // El módulo nip46 de nostr-tools 2.7.2 NO está en el bundle UMD,
 // así que lo cargamos como ESM bajo demanda (mismo patrón que
@@ -56,6 +60,48 @@ const LBW_NIP46 = (() => {
     let _connecting = false;
     let _modPromise = null;
     let _disconnectCbs = [];
+
+    // ── Sesión recordada ─────────────────────────────────────
+    const STORAGE_KEY = 'c2p_nip46_session';
+
+    function _persist(clientSk, signerPub, userPubkey, relays, mode) {
+        try {
+            localStorage.setItem(STORAGE_KEY, JSON.stringify({
+                v: 1, clientSk: _bytesToHex(clientSk), signerPub, userPubkey,
+                relays: relays.slice(), mode, savedAt: Date.now()
+            }));
+        } catch (e) { console.warn('[NIP-46] No se pudo recordar la sesión:', e.message); }
+    }
+
+    function forget() {
+        try { localStorage.removeItem(STORAGE_KEY); } catch (_) {}
+    }
+
+    // Reabre la sesión guardada sin handshake: el signer ya autorizó esta
+    // clave de cliente. Devuelve la pubkey del usuario o null.
+    function restore() {
+        if (_signer) return _userPubkey;
+        let saved;
+        try { saved = JSON.parse(localStorage.getItem(STORAGE_KEY) || 'null'); } catch (_) { saved = null; }
+        const hex64 = /^[0-9a-f]{64}$/;
+        if (!saved || saved.v !== 1 || !hex64.test(saved.clientSk || '') || !hex64.test(saved.signerPub || '')
+            || !hex64.test(saved.userPubkey || '') || !Array.isArray(saved.relays) || saved.relays.length === 0) {
+            if (saved) forget();
+            return null;
+        }
+        const clientSk = new Uint8Array(saved.clientSk.match(/../g).map(h => parseInt(h, 16)));
+        let rpcSigner;
+        try { rpcSigner = _createCustomSigner(clientSk, saved.signerPub, saved.relays); }
+        catch (e) { console.warn('[NIP-46] No se pudo restaurar la sesión:', e.message); return null; }
+        const userPubkey = saved.userPubkey;
+        _signer = Object.assign({}, rpcSigner, { getPublicKey: async () => userPubkey });
+        _userPubkey = userPubkey;
+        _bunkerPubkey = saved.signerPub;
+        _relays = saved.relays.slice();
+        _mode = saved.mode === 'nostrconnect' ? 'nostrconnect' : 'bunker';
+        console.log('[NIP-46] ♻️ Sesión restaurada (' + _mode + ')');
+        return userPubkey;
+    }
 
     // ── Lazy-load del ESM ────────────────────────────────────
     async function _loadModules() {
@@ -188,6 +234,7 @@ const LBW_NIP46 = (() => {
             _bunkerPubkey = bp.pubkey;
             _relays = bp.relays.slice();
             _mode = 'bunker';
+            _persist(clientSk, bp.pubkey, userPubkey, _relays, 'bunker');
 
             return { userPubkeyHex: userPubkey, bunkerPubkey: bp.pubkey, relays: _relays, mode: 'bunker' };
         } finally {
@@ -475,6 +522,7 @@ const LBW_NIP46 = (() => {
             _bunkerPubkey = signerPub;
             _relays = relays.slice();
             _mode = 'nostrconnect';
+            _persist(clientSk, signerPub, signerPub, _relays, 'nostrconnect');
 
             return { userPubkeyHex: signerPub, bunkerPubkey: signerPub, relays: _relays, mode: 'nostrconnect' };
         } finally {
@@ -529,7 +577,9 @@ const LBW_NIP46 = (() => {
         return await _signer.ping();
     }
 
+    // Cerrar sesión: también olvida la sesión recordada
     async function disconnect() {
+        forget();
         const s = _signer;
         _signer = null;
         _userPubkey = null;
@@ -779,7 +829,7 @@ const LBW_NIP46 = (() => {
     }
 
     return {
-        connect, connectViaQR, disconnect, isConnected,
+        connect, connectViaQR, disconnect, isConnected, restore, forget,
         connectInteractive,
         getUserPubkey, getBunkerPubkey, getBunkerRelays, getMode,
         signEvent,
