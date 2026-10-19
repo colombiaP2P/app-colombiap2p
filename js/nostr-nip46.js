@@ -307,14 +307,38 @@ const LBW_NIP46 = (() => {
             }
         }
 
+        // La suscripción a las respuestas del signer se cae cuando el móvil
+        // pasa a segundo plano (el navegador cierra el WebSocket) y nostr-tools
+        // no la reabre: las peticiones llegaban al signer pero la respuesta no
+        // se recibía ("sign_event timeout"). Se marca como muerta en onclose y
+        // se reabre antes de la siguiente petición.
         function _subscribe() {
             if (sub || closed) return;
             const filter = { kinds: [24133], '#p': [clientPub], since: Math.floor(Date.now() / 1000) - 30 };
             try {
-                sub = pool.subscribeMany(relays, [filter], { onevent: _onEvent });
+                const s = pool.subscribeMany(relays, [filter], {
+                    onevent: _onEvent,
+                    onclose: () => { if (sub === s) sub = null; }
+                });
+                sub = s;
             } catch (e) {
                 console.error('[NIP-46 RPC] subscribeMany falló:', e.message);
             }
+        }
+
+        function _resubscribe() {
+            if (closed) return;
+            const old = sub;
+            sub = null;
+            if (old) { try { old.close(); } catch (_) {} }
+            _subscribe();
+        }
+
+        // Al volver a primer plano, reabrir el canal de respuestas
+        if (typeof document !== 'undefined' && document.addEventListener) {
+            document.addEventListener('visibilitychange', () => {
+                if (document.visibilityState === 'visible' && !closed) _resubscribe();
+            });
         }
 
         async function _request(method, params, opts = {}) {
@@ -335,7 +359,9 @@ const LBW_NIP46 = (() => {
             return new Promise((resolve, reject) => {
                 const timer = setTimeout(() => {
                     pending.delete(id);
-                    reject(new Error('NIP-46 ' + method + ' timeout'));
+                    // El canal pudo quedar mudo sin onclose: reabrirlo para el próximo intento
+                    _resubscribe();
+                    reject(new Error('NIP-46 ' + method + ' timeout: el firmador no respondió. Revisa que tenga la app abierta y vuelve a intentarlo.'));
                 }, timeoutMs);
                 pending.set(id, { resolve, reject, timer, onauth: opts.onauth });
                 try {
