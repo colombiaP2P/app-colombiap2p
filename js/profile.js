@@ -583,11 +583,59 @@ function _renderStampCard(stamp, obtained_at) {
         ? `<img src="${imgUrl}" alt="${LBW.escapeHtml(stamp.name)}" class="stamp-img">`
         : `<div class="stamp-icon">${stamp.icon || '🏅'}</div>`;
 
-    return `<div class="c2p-stamp-card" data-rarity="${rarity}" title="${title}">
+    if (stamp.id) _stampViewCache.set(stamp.id, { stamp, obtained_at });
+    const open = stamp.id ? ` role="button" tabindex="0" style="cursor:pointer;" onclick="c2pShowStamp('${LBW.escapeHtml(stamp.id)}')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();c2pShowStamp('${LBW.escapeHtml(stamp.id)}')}"` : '';
+
+    return `<div class="c2p-stamp-card" data-rarity="${rarity}" title="${LBW.escapeHtml(title)}"${open}>
         ${inner}
         <div class="stamp-name">${LBW.escapeHtml(stamp.name)}</div>
         ${date ? `<div class="stamp-date">${date}</div>` : ''}
     </div>`;
+}
+
+// Visor ampliado del sello: clic en la tarjeta → imagen original grande + detalles
+const _stampViewCache = new Map();
+const _RARITY_COLOR = { common: 'var(--color-border)', rare: '#2196F3', epic: '#9C27B0', legendary: 'var(--color-bitcoin)' };
+
+function c2pShowStamp(stampId) {
+    const entry = _stampViewCache.get(stampId);
+    if (!entry) return;
+    const { stamp, obtained_at } = entry;
+    const esc = LBW.escapeHtml;
+    const rarity = stamp.rarity || 'common';
+    const pb = (typeof C2P_PB !== 'undefined') ? C2P_PB.getClient() : null;
+    const imgUrl = stamp.image_url && pb ? pb.files.getUrl(stamp, stamp.image_url) : '';
+    const fmt = d => new Date(d).toLocaleDateString('es-CO', { day: 'numeric', month: 'long', year: 'numeric' });
+
+    document.getElementById('c2pStampViewer')?.remove();
+    const overlay = document.createElement('div');
+    overlay.id = 'c2pStampViewer';
+    overlay.setAttribute('role', 'dialog');
+    overlay.setAttribute('aria-modal', 'true');
+    overlay.setAttribute('aria-label', 'Sello ' + (stamp.name || ''));
+    overlay.style.cssText = 'position:fixed;inset:0;z-index:100000;background:rgba(0,0,0,0.88);display:flex;align-items:center;justify-content:center;padding:16px;overflow-y:auto;';
+    overlay.innerHTML = `
+        <div style="position:relative;width:100%;max-width:520px;text-align:center;margin:auto;">
+            <button type="button" aria-label="Cerrar" data-close
+                style="position:absolute;top:-6px;right:-6px;width:38px;height:38px;border-radius:50%;border:none;background:rgba(255,255,255,0.15);color:#fff;font-size:1.1rem;cursor:pointer;z-index:1;">✕</button>
+            ${imgUrl
+                ? `<img src="${imgUrl}" alt="${esc(stamp.name || 'Sello')}" style="width:100%;max-height:68vh;object-fit:contain;border-radius:16px;border:3px solid ${_RARITY_COLOR[rarity] || _RARITY_COLOR.common};background:#000;display:block;">`
+                : `<div style="font-size:7rem;line-height:1.2;">${stamp.icon || '🏅'}</div>`}
+            <div style="margin-top:0.9rem;color:#fff;font-weight:700;font-size:1.15rem;">${esc(stamp.name || '')}</div>
+            <div style="margin-top:0.35rem;display:flex;gap:0.5rem;justify-content:center;flex-wrap:wrap;font-size:0.78rem;">
+                <span style="padding:0.2rem 0.65rem;border-radius:10px;border:1px solid ${_RARITY_COLOR[rarity] || _RARITY_COLOR.common};color:#fff;">${_RARITY_LABEL[rarity] || rarity}</span>
+                ${stamp.event_name ? `<span style="color:rgba(255,255,255,0.75);">📅 ${esc(stamp.event_name)}${stamp.event_date ? ' · ' + fmt(stamp.event_date) : ''}</span>` : ''}
+            </div>
+            ${stamp.description ? `<p style="margin:0.75rem auto 0;max-width:46ch;color:rgba(255,255,255,0.85);font-size:0.88rem;line-height:1.5;">${esc(stamp.description)}</p>` : ''}
+            ${obtained_at ? `<div style="margin-top:0.6rem;color:rgba(255,255,255,0.6);font-size:0.75rem;">Obtenido el ${fmt(obtained_at)}</div>` : ''}
+        </div>`;
+
+    const close = () => { overlay.remove(); document.removeEventListener('keydown', onKey); };
+    const onKey = e => { if (e.key === 'Escape') close(); };
+    overlay.addEventListener('click', e => { if (e.target === overlay || e.target.closest('[data-close]')) close(); });
+    document.addEventListener('keydown', onKey);
+    document.body.appendChild(overlay);
+    overlay.querySelector('[data-close]')?.focus();
 }
 
 // [C2P FASE 4] Badge rendering
