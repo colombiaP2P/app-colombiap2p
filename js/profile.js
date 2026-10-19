@@ -615,11 +615,13 @@ function c2pShowStamp(stampId) {
     overlay.setAttribute('aria-label', 'Sello ' + (stamp.name || ''));
     overlay.style.cssText = 'position:fixed;inset:0;z-index:100000;background:rgba(0,0,0,0.88);display:flex;align-items:center;justify-content:center;padding:16px;overflow-y:auto;';
     overlay.innerHTML = `
-        <div style="position:relative;width:100%;max-width:520px;text-align:center;margin:auto;">
-            <button type="button" aria-label="Cerrar" data-close
-                style="position:absolute;top:-6px;right:-6px;width:38px;height:38px;border-radius:50%;border:none;background:rgba(255,255,255,0.15);color:#fff;font-size:1.1rem;cursor:pointer;z-index:1;">✕</button>
+        <div style="width:100%;max-width:520px;text-align:center;margin:auto;">
+            <div style="display:flex;justify-content:flex-end;margin-bottom:0.6rem;">
+                <button type="button" aria-label="Cerrar" data-close
+                    style="width:42px;height:42px;border-radius:50%;border:2px solid rgba(255,255,255,0.85);background:#111;color:#fff;font-size:1.15rem;line-height:1;cursor:pointer;">✕</button>
+            </div>
             ${imgUrl
-                ? `<img src="${imgUrl}" alt="${esc(stamp.name || 'Sello')}" style="width:100%;max-height:68vh;object-fit:contain;border-radius:16px;border:3px solid ${_RARITY_COLOR[rarity] || _RARITY_COLOR.common};background:#000;display:block;">`
+                ? `<img src="${imgUrl}" alt="${esc(stamp.name || 'Sello')}" style="width:100%;max-height:62vh;object-fit:contain;border-radius:16px;border:3px solid ${_RARITY_COLOR[rarity] || _RARITY_COLOR.common};background:#000;display:block;">`
                 : `<div style="font-size:7rem;line-height:1.2;">${stamp.icon || '🏅'}</div>`}
             <div style="margin-top:0.9rem;color:#fff;font-weight:700;font-size:1.15rem;">${esc(stamp.name || '')}</div>
             <div style="margin-top:0.35rem;display:flex;gap:0.5rem;justify-content:center;flex-wrap:wrap;font-size:0.78rem;">
