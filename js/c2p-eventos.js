@@ -34,6 +34,25 @@ const C2P_Eventos = (function () {
         return iso && new Date(iso) < new Date();
     }
 
+    // Un evento sigue en "Próximos" mientras está en curso: pasa a "Pasados"
+    // al terminar. Sin event_end se asume que dura DEFAULT_DURATION_MS.
+    const DEFAULT_DURATION_MS = 3 * 60 * 60 * 1000;
+
+    function _endTime(ev) {
+        if (ev.event_end) return new Date(ev.event_end);
+        if (!ev.event_date) return null;
+        return new Date(new Date(ev.event_date).getTime() + DEFAULT_DURATION_MS);
+    }
+
+    function _hasEnded(ev) {
+        const end = _endTime(ev);
+        return !!end && end < new Date();
+    }
+
+    function _isLive(ev) {
+        return !_hasEnded(ev) && _isPast(ev.event_date);
+    }
+
     function _isCheckinOpen(ev) {
         const now  = new Date();
         const from  = ev.checkin_open_from  ? new Date(ev.checkin_open_from)  : null;
@@ -97,8 +116,8 @@ const C2P_Eventos = (function () {
 
         const now = new Date();
         let visible = _events;
-        if (_filter === 'proximos') visible = _events.filter(e => !_isPast(e.event_date));
-        if (_filter === 'pasados')  visible = _events.filter(e =>  _isPast(e.event_date));
+        if (_filter === 'proximos') visible = _events.filter(e => !_hasEnded(e));
+        if (_filter === 'pasados')  visible = _events.filter(e =>  _hasEnded(e)).reverse();
 
         if (visible.length === 0) {
             container.innerHTML = `<div style="text-align:center;padding:3rem 1rem;">
@@ -114,11 +133,17 @@ const C2P_Eventos = (function () {
     }
 
     function _eventCard(ev) {
-        const past   = _isPast(ev.event_end || ev.event_date);
+        const past   = _hasEnded(ev);
+        const live   = _isLive(ev);
         const open   = _isCheckinOpen(ev);
         const xpBadge = ev.xp_reward ? `<span style="font-size:0.7rem;background:rgba(247,147,26,0.15);color:var(--color-bitcoin);padding:0.2rem 0.6rem;border-radius:10px;font-weight:700;border:1px solid rgba(247,147,26,0.3);">+${ev.xp_reward} Méritos</span>` : '';
+        const liveBadge = `<span style="font-size:0.7rem;color:#ef4444;font-weight:700;">🔴 En vivo</span>`;
         const statusBadge = past
             ? `<span style="font-size:0.7rem;color:var(--color-text-secondary);">✔ Finalizado</span>`
+            : live && open
+            ? `${liveBadge}<span style="font-size:0.7rem;color:#4CAF50;font-weight:700;">🟢 Check-in abierto</span>`
+            : live
+            ? liveBadge
             : open
             ? `<span style="font-size:0.7rem;color:#4CAF50;font-weight:700;">🟢 Check-in abierto</span>`
             : `<span style="font-size:0.7rem;color:#F7931A;font-weight:700;">📅 Próximamente</span>`;
