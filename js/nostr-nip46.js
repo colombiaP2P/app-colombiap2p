@@ -252,7 +252,9 @@ const LBW_NIP46 = (() => {
     function _createCustomSigner(clientSk, signerPub, relays) {
         const nt = window.NostrTools || window.nostrTools;
         if (!nt) throw new Error('nostr-tools no cargado');
-        const pool = _getPool() || new nt.SimplePool();
+        // Pool propio: así se pueden cerrar y reabrir sus conexiones (ver
+        // _reconnect) sin cortar las suscripciones del resto de la app.
+        const pool = new nt.SimplePool();
         const clientPub = nt.getPublicKey(clientSk);
         const useNip44 = !!nt.nip44;
 
@@ -334,10 +336,44 @@ const LBW_NIP46 = (() => {
             _subscribe();
         }
 
-        // Al volver a primer plano, reabrir el canal de respuestas
+        // En móvil el WebSocket puede quedar medio abierto tras un rato en
+        // segundo plano: parece conectado, pero ni publica ni recibe. Cerrar
+        // las conexiones del pool obliga a abrir sockets nuevos.
+        function _reconnect() {
+            if (closed) return;
+            const old = sub;
+            sub = null;
+            if (old) { try { old.close(); } catch (_) {} }
+            try { pool.close(relays); } catch (_) {}
+            _subscribe();
+        }
+
+        // Los kind 24133 son efímeros: el relay solo los entrega a quien está
+        // conectado en ese momento. Si Amber estaba dormido cuando se envió la
+        // petición, se pierde aunque luego abra la app; por eso se reenvía el
+        // mismo evento mientras siga pendiente (mismo id: el signer lo deduplica).
+        async function _send(signed) {
+            const results = await Promise.allSettled(pool.publish(relays, signed));
+            if (results.some(r => r.status === 'fulfilled')) return true;
+            _reconnect();
+            const retry = await Promise.allSettled(pool.publish(relays, signed));
+            return retry.some(r => r.status === 'fulfilled');
+        }
+
+        function _resendPending() {
+            for (const [, slot] of pending) {
+                if (slot.signed) _send(slot.signed).catch(() => {});
+            }
+        }
+
+        // Al volver a primer plano (p. ej. tras aprobar en Amber), reabrir el
+        // canal con sockets nuevos y reenviar lo pendiente
         if (typeof document !== 'undefined' && document.addEventListener) {
             document.addEventListener('visibilitychange', () => {
-                if (document.visibilityState === 'visible' && !closed) _resubscribe();
+                if (document.visibilityState === 'visible' && !closed) {
+                    _reconnect();
+                    _resendPending();
+                }
             });
         }
 
@@ -357,20 +393,26 @@ const LBW_NIP46 = (() => {
             const signed = nt.finalizeEvent(template, clientSk);
             const timeoutMs = opts.timeoutMs || 60000;
             return new Promise((resolve, reject) => {
+                let resend = null;
+                const done = fn => v => { clearInterval(resend); fn(v); };
                 const timer = setTimeout(() => {
                     pending.delete(id);
-                    // El canal pudo quedar mudo sin onclose: reabrirlo para el próximo intento
-                    _resubscribe();
-                    reject(new Error('NIP-46 ' + method + ' timeout: el firmador no respondió. Revisa que tenga la app abierta y vuelve a intentarlo.'));
+                    clearInterval(resend);
+                    // El canal pudo quedar mudo sin onclose: sockets nuevos para el próximo intento
+                    _reconnect();
+                    reject(new Error('NIP-46 ' + method + ' timeout: el firmador no respondió. Abre Amber (o tu firmador), revisa que tenga conexión y vuelve a intentarlo.'));
                 }, timeoutMs);
-                pending.set(id, { resolve, reject, timer, onauth: opts.onauth });
-                try {
-                    pool.publish(relays, signed);
-                } catch (e) {
-                    pending.delete(id);
-                    clearTimeout(timer);
-                    reject(new Error('NIP-46 publish falló: ' + e.message));
-                }
+                pending.set(id, { resolve: done(resolve), reject: done(reject), timer, onauth: opts.onauth, signed });
+                _send(signed).then(ok => {
+                    if (!ok && pending.has(id)) {
+                        pending.delete(id);
+                        clearTimeout(timer);
+                        reject(new Error('NIP-46: no se pudo conectar con los relays del firmador (' + relays.join(', ') + ').'));
+                    }
+                }).catch(() => {});
+                resend = setInterval(() => {
+                    if (pending.has(id)) _send(signed).catch(() => {});
+                }, 10000);
             });
         }
 
@@ -410,6 +452,7 @@ const LBW_NIP46 = (() => {
                     try { slot.reject(new Error('Signer cerrado')); } catch (_) {}
                 }
                 pending.clear();
+                try { pool.close(relays); } catch (_) {}
             }
         };
     }
